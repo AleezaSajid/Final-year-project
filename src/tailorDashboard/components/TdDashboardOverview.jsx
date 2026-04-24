@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { motion } from "framer-motion";
 import {
   Calendar,
@@ -32,6 +32,66 @@ const TASK_MAP = {
   needs_alteration: "Final Inspection",
 };
 
+/** Match Measurement Wizard ids → labels (design-brief step only). */
+const WIZARD_OCCASION_LABELS = {
+  wedding: "Wedding",
+  casual: "Casual",
+  formal: "Formal",
+  party: "Party",
+};
+const WIZARD_URGENCY_LABELS = {
+  normal: "Normal",
+  urgent: "Urgent",
+  express: "Express",
+};
+const WIZARD_INSTRUCTION_LABELS = {
+  "extra-loose": "Extra loose",
+  "slim-fitting": "Slim fitting",
+  "soft-feel": "Soft feel",
+  "heavy-look": "Heavy look",
+};
+
+function wizardSummaryFromOrder(order) {
+  const fromApiNotes = (raw) => {
+    if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
+    const designNote = typeof raw.designNote === "string" ? raw.designNote.trim() : "";
+    const occasion = typeof raw.occasion === "string" ? raw.occasion.trim() : "";
+    const urgency = typeof raw.urgency === "string" ? raw.urgency.trim() : "";
+    const specialInstructions =
+      typeof raw.specialInstructions === "string" ? raw.specialInstructions.trim() : "";
+    if (!designNote && !occasion && !urgency && !specialInstructions) return null;
+    return { designNote, occasion, urgency, specialInstructions };
+  };
+
+  const fromBrief = (db) => {
+    if (!db || typeof db !== "object") return null;
+    const designNote = typeof db.designNotes === "string" ? db.designNotes.trim() : "";
+    const occasion = Array.isArray(db.occasion)
+      ? db.occasion
+          .map((id) => (typeof id === "string" ? WIZARD_OCCASION_LABELS[id] || id : ""))
+          .filter(Boolean)
+          .join(", ")
+      : "";
+    const urgencyRaw = typeof db.urgency === "string" ? db.urgency : "";
+    const urgency = urgencyRaw ? WIZARD_URGENCY_LABELS[urgencyRaw] || urgencyRaw : "";
+    const specialInstructions = Array.isArray(db.instructions)
+      ? db.instructions
+          .map((id) => (typeof id === "string" ? WIZARD_INSTRUCTION_LABELS[id] || id : ""))
+          .filter(Boolean)
+          .join(", ")
+      : "";
+    if (!designNote && !occasion && !urgency && !specialInstructions) return null;
+    return { designNote, occasion, urgency, specialInstructions };
+  };
+
+  return (
+    fromApiNotes(order.notes) ||
+    fromApiNotes(order.orderPayload?.notes) ||
+    fromBrief(order.wizardData?.designBrief) ||
+    fromBrief(order.orderPayload?.designBrief)
+  );
+}
+
 export default function TdDashboardOverview({
   notifications,
   notificationText,
@@ -39,6 +99,7 @@ export default function TdDashboardOverview({
   displayStats,
   upcomingOrders,
   orders,
+  tailorOrders,
   calendarPreview,
   measurementsCandidates,
   setActiveOrderId,
@@ -49,29 +110,43 @@ export default function TdDashboardOverview({
   activeOrderId,
   updateOrderStatus,
   openMeasurementsReview,
+  fetchOrders,
 }) {
   const [expandedTaskId, setExpandedTaskId] = useState(null);
 
-  const tasks = useMemo(
-    () =>
-      upcomingOrders
-        .filter((order) => normalizeStatus(order.status) !== "completed")
-        .slice(0, 5)
-        .map((order) => ({
-          id: order.id,
-          title: TASK_MAP[normalizeStatus(order.status)] || "Continue Work",
-          customer: order.customerName,
-          garment: order.garmentType,
-          due: order.dueDate || order.date,
-          status: order.status,
-        })),
-    [upcomingOrders]
-  );
+  useEffect(() => {
+    const onOrdersInvalidate = () => {
+      void fetchOrders?.();
+    };
+    window.addEventListener("sewserve:orders-refresh", onOrdersInvalidate);
+    return () => window.removeEventListener("sewserve:orders-refresh", onOrdersInvalidate);
+  }, [fetchOrders]);
+
+  const tasks = useMemo(() => {
+    const currentTasks = [...tailorOrders]
+      .filter((order) => normalizeStatus(order.status) !== "completed")
+      .sort(
+        (a, b) =>
+          new Date(b.createdAt || b.date || 0).getTime() -
+          new Date(a.createdAt || a.date || 0).getTime()
+      )
+      .map((order) => ({
+        id: order.id ?? order._id,
+        title: TASK_MAP[normalizeStatus(order.status)] || "Continue Work",
+        customer: order.customerName,
+        garment: order.garmentType,
+        due: order.dueDate || order.date,
+        status: order.status,
+        wizardSummary: wizardSummaryFromOrder(order),
+      }));
+    return currentTasks;
+  }, [tailorOrders]);
 
   const handleMarkDone = async (taskId) => {
-    console.log("[MarkDone] clicked:", taskId);
     try {
-      const order = orders.find((o) => String(o.id) === String(taskId));
+      const order =
+        orders.find((o) => String(o.id) === String(taskId)) ||
+        tailorOrders.find((o) => String(o.id) === String(taskId));
       if (!order) return;
       const currentIndex = getStatusIndex(order.status);
       const nextIndex = Math.min(currentIndex + 1, workflowStages.length - 1);
@@ -218,6 +293,46 @@ export default function TdDashboardOverview({
                             {task.garment ? <span className="text-slate-400"> · {task.garment}</span> : null}
                           </p>
                           <p className="mt-1 text-xs text-slate-500">Due: {task.due || "—"}</p>
+                          {task.wizardSummary ? (
+                            <div className="mt-2 space-y-2 border-t border-slate-200/40 pt-2">
+                              {task.wizardSummary.designNote ? (
+                                <div>
+                                  <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">
+                                    Notes
+                                  </p>
+                                  <p className="mt-0.5 text-xs leading-snug text-slate-700">
+                                    {task.wizardSummary.designNote}
+                                  </p>
+                                </div>
+                              ) : null}
+                              {task.wizardSummary.occasion ? (
+                                <div>
+                                  <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">
+                                    Occasion
+                                  </p>
+                                  <p className="mt-0.5 text-xs text-slate-700">{task.wizardSummary.occasion}</p>
+                                </div>
+                              ) : null}
+                              {task.wizardSummary.urgency ? (
+                                <div>
+                                  <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">
+                                    Urgency
+                                  </p>
+                                  <p className="mt-0.5 text-xs text-slate-700">{task.wizardSummary.urgency}</p>
+                                </div>
+                              ) : null}
+                              {task.wizardSummary.specialInstructions ? (
+                                <div>
+                                  <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">
+                                    Special instructions
+                                  </p>
+                                  <p className="mt-0.5 text-xs text-slate-700">
+                                    {task.wizardSummary.specialInstructions}
+                                  </p>
+                                </div>
+                              ) : null}
+                            </div>
+                          ) : null}
                         </div>
                         <button
                           type="button"

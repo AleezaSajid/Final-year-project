@@ -76,6 +76,12 @@ const orderSchema = new mongoose.Schema(
       type: Number,
       default: 0,
     },
+    /** Tailor “focused” order for customer Track Order mirror (one active per tailor). */
+    isActive: {
+      type: Boolean,
+      default: false,
+      index: true,
+    },
     dueDate: {
       type: Date,
       default: null,

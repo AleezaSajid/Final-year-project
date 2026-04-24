@@ -8,15 +8,16 @@ import { SewServeBrandImg } from "./components/SewServeBrandImg.jsx";
 import { LandingStylePageBackground } from "./components/LandingStylePageBackground.jsx";
 import LandingNavbar from "./components/LandingNavbar.jsx";
 import { useSewServeLogoProcessedSrc } from "./hooks/useSewServeLogoProcessedSrc";
-import { getOrderById, listOrdersForCustomer } from "./api/ordersApi.js";
+import {
+  getActiveOrderForCustomer,
+  getOrderById,
+  listOrdersForCustomer,
+  normalizeApiOrderDoc,
+} from "./api/ordersApi.js";
 import { ensureSocketThen, socket } from "./socket";
 import { resolveCustomerIdForChat } from "./utils/chatIdentity.js";
-import {
-  internalStatusToTrackingEnum,
-  resolveInternalStatusFromTracking,
-  trackingEnumToProgress,
-  trackingEnumToWorkflowStepIndex,
-} from "./utils/orderLiveStatus.js";
+import { getOrderActivityMessage } from "./utils/orderActivityMessage.js";
+import { internalStatusToTrackingEnum, trackingEnumToProgress } from "./utils/orderLiveStatus.js";
 import {
   getNextWorkflowLabel,
   getWorkflowIndexFromOrder,
@@ -130,6 +131,11 @@ function resolvedWorkflowIndex(order) {
   return getWorkflowIndexFromOrder(order);
 }
 
+function orderIdsMatch(a, b) {
+  if (a == null || b == null) return false;
+  return String(a).trim() === String(b).trim();
+}
+
 function stepRowState(index, activeIndex, allComplete) {
   if (allComplete) return "completed";
   if (index < activeIndex) return "completed";
@@ -146,6 +152,7 @@ export default function OrderTrackingPage() {
   const [order, setOrder] = useState(null);
   const [loading, setLoading] = useState(true);
   const [orderStatus, setOrderStatus] = useState(null);
+  const [activityMessage, setActivityMessage] = useState("");
   const [, setLiveProgress] = useState(null);
   const [, setCurrentStep] = useState(null);
   const [, setOrderDetails] = useState(null);
@@ -173,17 +180,22 @@ export default function OrderTrackingPage() {
     try {
       if (explicitId) {
         const doc = await getOrderById(String(explicitId).trim());
-        setOrder(doc);
+        setOrder(normalizeApiOrderDoc(doc));
       } else {
         const cid = resolveCustomerIdForChat(null);
-        const list = await listOrdersForCustomer(cid);
-        const sorted = [...list].sort((a, b) => {
-          const ta = new Date(a.createdAt || a.date || 0).getTime();
-          const tb = new Date(b.createdAt || b.date || 0).getTime();
-          return tb - ta;
-        });
-        const active = sorted.find((o) => !isOrderWorkflowCompleted(o));
-        setOrder(active ?? null);
+        try {
+          const activeDoc = await getActiveOrderForCustomer(cid);
+          setOrder(normalizeApiOrderDoc(activeDoc));
+        } catch {
+          const list = await listOrdersForCustomer(cid);
+          const sorted = [...list].sort((a, b) => {
+            const ta = new Date(a.createdAt || a.date || 0).getTime();
+            const tb = new Date(b.createdAt || b.date || 0).getTime();
+            return tb - ta;
+          });
+          const active = sorted.find((o) => !isOrderWorkflowCompleted(o));
+          setOrder(active ? normalizeApiOrderDoc(active) : null);
+        }
       }
     } catch (err) {
       console.error(err);
@@ -274,6 +286,14 @@ export default function OrderTrackingPage() {
   }, [orderStatus]);
 
   useEffect(() => {
+    if (orderStatus) {
+      setActivityMessage(getOrderActivityMessage(orderStatus));
+    } else {
+      setActivityMessage("");
+    }
+  }, [orderStatus]);
+
+  useEffect(() => {
     if (!order) return;
     const currentOrderId = String(order.id ?? order._id ?? "").trim();
     if (!currentOrderId) return;
@@ -284,54 +304,44 @@ export default function OrderTrackingPage() {
     ensureSocketThen(joinOrderRoom);
     socket.on("connect", joinOrderRoom);
 
-    const onLiveUpdate = (data) => {
-      if (!data) return;
-      if (String(data.orderId) !== String(currentOrderId)) return;
-      setOrderStatus(data.status);
-      setLiveProgress(trackingEnumToProgress(data.status));
-      if (data.currentStep != null && Number.isFinite(Number(data.currentStep))) {
-        setCurrentStep(Number(data.currentStep));
+    const pullLatestOrder = async (eventPayload) => {
+      if (!eventPayload || !orderIdsMatch(eventPayload.orderId, currentOrderId)) return;
+      try {
+        const doc = await getOrderById(currentOrderId);
+        setOrder(normalizeApiOrderDoc(doc));
+      } catch {
+        void loadOrder();
       }
-      setOrder((prev) => {
-        if (!prev) return prev;
-        if (String(prev.id ?? prev._id ?? "").trim() !== String(currentOrderId)) return prev;
-        const curIdx =
-          data.currentStep != null && Number.isFinite(Number(data.currentStep))
-            ? Math.max(0, Math.min(ORDER_WORKFLOW_STEPS.length - 1, Number(data.currentStep)))
-            : getWorkflowIndexFromOrder(prev);
-        const internal = resolveInternalStatusFromTracking(data.status, curIdx);
-        const stepIdx =
-          data.currentStep != null && Number.isFinite(Number(data.currentStep))
-            ? Math.max(0, Math.min(ORDER_WORKFLOW_STEPS.length - 1, Number(data.currentStep)))
-            : trackingEnumToWorkflowStepIndex(data.status, curIdx);
-        return {
-          ...prev,
-          status: internal,
-          currentStepIndex: stepIdx,
-          orderPayload: data.wizardData != null ? data.wizardData : prev.orderPayload,
-          wizardData: data.wizardData != null ? data.wizardData : prev.wizardData,
-        };
-      });
-      setOrderDetails((prev) => ({
-        ...(prev && typeof prev === "object" ? prev : {}),
-        orderId: data.orderId,
-        status: data.status,
-        currentStep: data.currentStep,
-        wizardData: data.wizardData ?? (prev && prev.wizardData),
-        updatedAt: data.updatedAt,
-      }));
+    };
+
+    const onLiveUpdate = (data) => {
+      if (data && orderIdsMatch(data.orderId, currentOrderId)) {
+        setOrderStatus(data.status);
+        setActivityMessage(getOrderActivityMessage(data.status));
+      }
+      void pullLatestOrder(data);
+    };
+
+    const onStatusUpdatedRelay = (data) => {
+      if (data && orderIdsMatch(data.orderId, currentOrderId)) {
+        setOrderStatus(data.status);
+        setActivityMessage(getOrderActivityMessage(data.status));
+      }
+      void pullLatestOrder(data);
     };
 
     const onSync = (data) => {
-      if (!data || String(data.orderId) !== String(currentOrderId)) return;
+      if (!data || !orderIdsMatch(data.orderId, currentOrderId)) return;
       void loadOrder();
     };
 
     socket.on("order:liveUpdate", onLiveUpdate);
+    socket.on("order:statusUpdated", onStatusUpdatedRelay);
     socket.on("order:sync", onSync);
     return () => {
       socket.off("connect", joinOrderRoom);
       socket.off("order:liveUpdate", onLiveUpdate);
+      socket.off("order:statusUpdated", onStatusUpdatedRelay);
       socket.off("order:sync", onSync);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps -- room + handlers keyed to order id
@@ -510,12 +520,16 @@ export default function OrderTrackingPage() {
                             <dd className="font-semibold text-ink">{expectedDeliveryDisplay}</dd>
                           </div>
                           {normStatus === "completed" ? (
-                            <div className="flex flex-wrap gap-x-2">
-                              <dt className="font-medium text-ink-muted">Status</dt>
-                              <dd className="font-semibold text-ink">Completed ✔</dd>
-                            </div>
+                            <>
+                              <p className="text-sm leading-[1.5] text-ink">{activityMessage}</p>
+                              <div className="flex flex-wrap gap-x-2">
+                                <dt className="font-medium text-ink-muted">Status</dt>
+                                <dd className="font-semibold text-ink">Completed ✔</dd>
+                              </div>
+                            </>
                           ) : (
                             <>
+                              <p className="text-sm leading-[1.5] text-ink">{activityMessage}</p>
                               <div className="flex flex-wrap gap-x-2">
                                 <dt className="font-medium text-ink-muted">Current Stage</dt>
                                 <dd className="font-semibold text-ink">{currentStageLabel}</dd>

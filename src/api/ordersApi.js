@@ -111,6 +111,13 @@ async function legacyCreateOrder(body) {
  * Fetch a single order by Mongo id (matches backend GET /orders/:orderId).
  * @param {string} orderId
  */
+/** Ensure REST order documents have `id` for client state (matches `_id`). */
+export function normalizeApiOrderDoc(doc) {
+  if (!doc || typeof doc !== "object") return null;
+  const id = doc._id != null ? String(doc._id) : doc.id != null ? String(doc.id) : "";
+  return id ? { ...doc, id } : { ...doc };
+}
+
 export async function getOrderById(orderId) {
   const id = String(orderId || "").trim();
   if (!id) {
@@ -135,6 +142,40 @@ export async function getOrderById(orderId) {
   }
   if (!res.ok) {
     const msg = data.message || data.error || res.statusText || "Could not load order.";
+    const e = new Error(msg);
+    e.status = res.status;
+    throw e;
+  }
+  return data;
+}
+
+/**
+ * Order flagged by tailor as active for this customer (GET /orders/customer/:id/active).
+ */
+export async function getActiveOrderForCustomer(customerId) {
+  const cid = String(customerId || "").trim();
+  if (!cid) {
+    throw new Error("customerId is required.");
+  }
+  const base = getApiBaseUrl();
+  if (!base) {
+    throw new Error("API base URL is not configured.");
+  }
+  const res = await fetch(`${base}/orders/customer/${encodeURIComponent(cid)}/active`, {
+    method: "GET",
+    credentials: "include",
+  });
+  const raw = await res.text();
+  let data = {};
+  if (raw) {
+    try {
+      data = JSON.parse(raw);
+    } catch {
+      data = { message: raw.slice(0, 200) };
+    }
+  }
+  if (!res.ok) {
+    const msg = data.message || data.error || res.statusText || "No active order.";
     const e = new Error(msg);
     e.status = res.status;
     throw e;

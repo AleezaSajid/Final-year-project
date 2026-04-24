@@ -263,6 +263,9 @@ app.post('/orders', async (req, res) => {
   }
 
   try {
+    const initialStatus = normalizeOrderStatus(
+      status != null && String(status).trim() !== '' ? status : 'measurements_verified'
+    );
     const savedOrder = await Order.create({
       clientOrderId: b.clientOrderId != null ? String(b.clientOrderId) : b.orderId != null ? String(b.orderId) : '',
       source: b.source != null ? String(b.source) : '',
@@ -277,11 +280,18 @@ app.post('/orders', async (req, res) => {
       notes: b.notes && typeof b.notes === 'object' ? b.notes : null,
       orderPayload: b.orderPayload != null ? b.orderPayload : null,
       price: Number(price || 0),
-      status: normalizeOrderStatus(status),
+      status: initialStatus,
+      currentStepIndex: stepIndexFromOrderDoc({ status: initialStatus }),
       dueDate: dueDate ? new Date(dueDate) : null,
     });
     console.log('ORDER CREATED', savedOrder._id.toString());
     emitMeasurementOrderToTailor(savedOrder);
+    try {
+      const order = serializeOrderForSocket(savedOrder);
+      io.emit('order:new', { order });
+    } catch (e) {
+      console.error('EMIT order:new', e);
+    }
     return res.status(201).json(savedOrder);
   } catch (error) {
     console.error('ORDER CREATE ERROR', error);
@@ -301,6 +311,23 @@ app.get('/orders/customer/:customerId', async (req, res) => {
   }
 });
 
+/** Customer Track Order: order the tailor marked active (isActive), if any */
+app.get('/orders/customer/:customerId/active', async (req, res) => {
+  const { customerId } = req.params;
+  try {
+    const order = await Order.findOne({ customerId: String(customerId), isActive: true })
+      .sort({ updatedAt: -1 })
+      .exec();
+    if (!order) {
+      return res.status(404).json({ message: 'No active order.' });
+    }
+    return res.status(200).json(order);
+  } catch (error) {
+    console.error('FETCH ACTIVE CUSTOMER ORDER ERROR', error);
+    return res.status(500).json({ message: 'Unable to fetch active order.' });
+  }
+});
+
 app.get('/orders/tailor/:tailorId', async (req, res) => {
   const { tailorId } = req.params;
   try {
@@ -315,8 +342,15 @@ app.get('/orders/tailor/:tailorId', async (req, res) => {
 
 app.get('/orders/:orderId', async (req, res) => {
   const { orderId } = req.params;
+  const raw = orderId != null ? String(orderId).trim() : '';
   try {
-    const order = await Order.findById(orderId);
+    let order = null;
+    if (raw && mongoose.Types.ObjectId.isValid(raw)) {
+      order = await Order.findById(raw);
+    }
+    if (!order && raw) {
+      order = await Order.findOne({ clientOrderId: raw });
+    }
     if (!order) {
       return res.status(404).json({ message: 'Order not found.' });
     }
@@ -329,7 +363,7 @@ app.get('/orders/:orderId', async (req, res) => {
 
 /** Partial wizard / measurement updates — does not replace PUT workflow fields contract */
 app.patch('/orders/:orderId', async (req, res) => {
-  const { orderId } = req.params;
+  const paramId = req.params.orderId != null ? String(req.params.orderId).trim() : '';
   const b = req.body && typeof req.body === 'object' ? req.body : {};
   const updatePayload = {};
   if (b.customerName != null) updatePayload.customerName = String(b.customerName);
@@ -358,14 +392,44 @@ app.patch('/orders/:orderId', async (req, res) => {
   else if (b.orderId != null) updatePayload.clientOrderId = String(b.orderId);
   if (b.price != null) updatePayload.price = Number(b.price) || 0;
   if (b.tailorId != null) updatePayload.tailorId = String(b.tailorId);
+  if (b.isActive === true || b.isActive === false) {
+    updatePayload.isActive = Boolean(b.isActive);
+  }
+  if (b.status != null && String(b.status).trim() !== '') {
+    updatePayload.status = normalizeOrderStatus(String(b.status));
+  }
+  if (b.currentStepIndex != null && Number.isFinite(Number(b.currentStepIndex))) {
+    updatePayload.currentStepIndex = Math.max(0, Math.min(6, Number(b.currentStepIndex)));
+  }
+  if (b.currentStep != null && Number.isFinite(Number(b.currentStep))) {
+    updatePayload.currentStepIndex = Math.max(0, Math.min(6, Number(b.currentStep)));
+  }
 
   if (Object.keys(updatePayload).length === 0) {
     return res.status(400).json({ message: 'No updatable fields in body.' });
   }
 
   try {
+    const existing = await findOrderDocByParam(paramId);
+    if (!existing) {
+      return res.status(404).json({ message: 'Order not found.' });
+    }
+    const resolvedId = String(existing._id);
+
+    if (updatePayload.isActive === true) {
+      await Order.updateMany(
+        { tailorId: String(existing.tailorId), _id: { $ne: existing._id } },
+        { $set: { isActive: false } }
+      );
+    }
+
+    if (updatePayload.status != null && updatePayload.currentStepIndex == null) {
+      const merged = { ...existing.toObject(), status: updatePayload.status };
+      updatePayload.currentStepIndex = stepIndexFromOrderDoc(merged);
+    }
+
     const updatedOrder = await Order.findByIdAndUpdate(
-      orderId,
+      resolvedId,
       { $set: updatePayload },
       { new: true, strict: false, runValidators: false }
     );
@@ -456,6 +520,37 @@ io.on('connection', (socket) => {
     const room = orderId != null ? String(orderId).trim() : '';
     if (!room) return;
     socket.join(room);
+  });
+
+  socket.on('order:selected', (data = {}) => {
+    const orderId = data.orderId != null ? String(data.orderId).trim() : '';
+    if (!orderId) return;
+    socket.join(orderId);
+    io.to(orderId).emit('order:sync', { orderId });
+  });
+
+  socket.on('order:statusUpdated', async (data = {}) => {
+    const rawOrderId = data.orderId != null ? String(data.orderId).trim() : '';
+    if (!rawOrderId) return;
+    socket.join(rawOrderId);
+    let canonicalId = rawOrderId;
+    try {
+      const doc = await findOrderDocByParam(rawOrderId);
+      if (doc) canonicalId = String(doc._id);
+    } catch (err) {
+      console.error('[RELAY] order:statusUpdated', err);
+    }
+    if (canonicalId !== rawOrderId) {
+      socket.join(canonicalId);
+    }
+    const out = {
+      orderId: canonicalId,
+      status: data.status != null ? String(data.status) : '',
+    };
+    const rooms = new Set([canonicalId, rawOrderId]);
+    for (const r of rooms) {
+      if (r) io.to(r).emit('order:statusUpdated', out);
+    }
   });
 
   socket.on('order:active', (data = {}) => {

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "../../context/AuthContext.jsx";
-import { buildOrderStatusSocketPayload } from "../../utils/orderLiveStatus.js";
+import { patchOrderWizardFields } from "../../api/ordersApi.js";
 import { getUserRole } from "../../utils/userRole.js";
 import { canUpdateWorkflowStatus, resolveWorkflowControlRole } from "../../utils/workflowRole.js";
 import { buildViewModelFromFullWizardData } from "../../utils/wizardDataToReviewViewModel.js";
@@ -57,10 +57,17 @@ export function useTailorDashboard() {
     _setActiveOrderId(next);
     const raw = next.trim();
     if (!raw) return;
-    ensureSocketThen(() => {
-      socket.emit("join_order_room", raw);
-      socket.emit("order:active", { orderId: raw });
-    });
+    void (async () => {
+      try {
+        await patchOrderWizardFields(raw, { isActive: true });
+      } catch {
+        /* UI selection still applies; server may be offline */
+      }
+      ensureSocketThen(() => {
+        socket.emit("join_order_room", raw);
+        socket.emit("order:selected", { orderId: raw });
+      });
+    })();
   }, []);
   const [newOrder, setNewOrder] = useState({
     customerName: "",
@@ -93,7 +100,7 @@ export function useTailorDashboard() {
     if (isChatOpen) setUnreadChatCount(0);
   }, [isChatOpen]);
 
-  const fetchOrders = async () => {
+  const fetchOrders = useCallback(async () => {
     try {
       const res = await fetch(`${API_BASE_URL}/orders/tailor/${tailorId}`);
       const data = await res.json();
@@ -112,18 +119,20 @@ export function useTailorDashboard() {
       console.error("Error fetching orders", err);
       return null;
     }
-  };
+  }, [tailorId]);
 
   useEffect(() => {
     localStorage.setItem(SHARED_ORDER_STORAGE_KEY, JSON.stringify(orders));
   }, [orders]);
 
   useEffect(() => {
-    fetchOrders();
-    const interval = setInterval(fetchOrders, 3000);
+    void fetchOrders();
+    const interval = setInterval(() => {
+      void fetchOrders();
+    }, 3000);
 
     return () => clearInterval(interval);
-  }, [tailorId]);
+  }, [fetchOrders]);
 
   useEffect(() => {
     localStorage.setItem(TAILOR_PROFILE_STORAGE_KEY, JSON.stringify(profiles));
@@ -163,6 +172,40 @@ export function useTailorDashboard() {
         next[i] = { ...next[i], ...n };
         return next;
       });
+    };
+
+    const onOrderNew = (payload) => {
+      console.log("[TailorDashboard] new order received:", payload);
+      const raw = payload && payload.order;
+      if (!raw || typeof raw !== "object") return;
+      const n = normalizeOrder(raw);
+      if (n.tailorId && String(n.tailorId) !== String(tailorId)) {
+        return;
+      }
+      setOrders((prev) => {
+        const i = prev.findIndex((o) => String(o.id) === String(n.id));
+        if (i === -1) {
+          return [n, ...prev];
+        }
+        const next = [...prev];
+        next[i] = { ...next[i], ...n };
+        return next;
+      });
+      void fetchOrders();
+    };
+
+    const onOrderStatusUpdatedRelay = (data) => {
+      if (!data || data.orderId == null) return;
+      const oid = String(data.orderId);
+      const st = data.status != null ? String(data.status) : "";
+      if (!st) return;
+      setOrders((prev) =>
+        prev.map((order) => {
+          const id = String(order.id ?? order._id ?? "");
+          if (id !== oid) return order;
+          return { ...order, status: normalizeStatus(st) };
+        })
+      );
     };
 
     const onMeasurementReviewed = (data) => {
@@ -255,14 +298,18 @@ export function useTailorDashboard() {
     socket.on("new_notification", handleNewNotification);
     socket.on("measurement:updated", onMeasurementUpdated);
     socket.on("measurement:reviewed", onMeasurementReviewed);
+    socket.on("order:new", onOrderNew);
+    socket.on("order:statusUpdated", onOrderStatusUpdatedRelay);
 
     return () => {
       socket.off("connect", joinRoom);
       socket.off("new_notification", handleNewNotification);
       socket.off("measurement:updated", onMeasurementUpdated);
       socket.off("measurement:reviewed", onMeasurementReviewed);
+      socket.off("order:new", onOrderNew);
+      socket.off("order:statusUpdated", onOrderStatusUpdatedRelay);
     };
-  }, []);
+  }, [fetchOrders]);
 
   useEffect(() => {
     console.log("[TailorDashboard] isChatOpen:", isChatOpen);
@@ -286,7 +333,7 @@ export function useTailorDashboard() {
   }, []);
 
   const tailorOrders = useMemo(
-    () => orders.filter((order) => order.tailorId === tailorId),
+    () => orders.filter((order) => String(order.tailorId ?? "").trim() === String(tailorId).trim()),
     [orders]
   );
 
@@ -360,7 +407,12 @@ export function useTailorDashboard() {
   }, [monthlyRevenue]);
 
   const upcomingOrders = useMemo(
-    () => orders.filter((order) => normalizeStatus(order.status) !== "completed"),
+    () =>
+      orders.filter(
+        (order) =>
+          String(order.tailorId ?? "").trim() === String(tailorId).trim() &&
+          normalizeStatus(order.status) !== "completed"
+      ),
     [orders]
   );
 
@@ -399,22 +451,19 @@ export function useTailorDashboard() {
     );
 
     try {
-      const res = await fetch(`${API_BASE_URL}/orders/${orderId}`, {
-        method: "PUT",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({ status: newStatus }),
+      const stepIdx = getStatusIndex(normalizedStatus);
+      const updated = await patchOrderWizardFields(String(orderId), {
+        status: normalizedStatus,
+        currentStep: stepIdx,
+        currentStepIndex: stepIdx,
       });
-      if (!res.ok) {
-        await fetchOrders();
-        setNotifications((prev) => ["Could not sync status with server.", ...prev]);
-        return;
-      }
-      const statusPayload = buildOrderStatusSocketPayload(orderId, normalizedStatus);
+      const oid = String(updated._id ?? updated.id ?? orderId);
       ensureSocketThen(() => {
-        socket.emit("join_order_room", String(orderId));
-        socket.emit("order:statusUpdate", statusPayload);
+        socket.emit("join_order_room", oid);
+        socket.emit("order:statusUpdated", {
+          orderId: oid,
+          status: normalizedStatus,
+        });
       });
       await fetchOrders();
     } catch {
@@ -584,19 +633,20 @@ export function useTailorDashboard() {
   const calendarPreview = useMemo(
     () =>
       [...tailorOrders]
+        .filter((o) => normalizeStatus(o.status) !== "completed")
         .filter((o) => o.dueDate || o.date)
         .sort((a, b) => String(a.dueDate || a.date).localeCompare(String(b.dueDate || b.date)))
         .slice(0, 2),
     [tailorOrders]
   );
 
-  const measurementsCandidates = useMemo(
-    () =>
-      newOrders.length
-        ? newOrders.slice(0, 3)
-        : tailorOrders.filter((o) => normalizeStatus(o.status) === "pending").slice(0, 3),
-    [newOrders, tailorOrders]
-  );
+  const measurementsCandidates = useMemo(() => {
+    const activeTask = (st) =>
+      ["measurements_verified", "stitching", "quality_check"].includes(normalizeStatus(st));
+    return newOrders.length
+      ? newOrders.slice(0, 3)
+      : tailorOrders.filter((o) => activeTask(o.status)).slice(0, 3);
+  }, [newOrders, tailorOrders]);
 
   const donutGradient = useMemo(() => {
     const sum = Math.max(1, displayStats.inProgress + displayStats.pending + displayStats.completed);
