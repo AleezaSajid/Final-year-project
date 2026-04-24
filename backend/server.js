@@ -11,8 +11,12 @@ const app = express();
 const PORT = 5000;
 const server = http.createServer(app);
 const ALLOWED_ORIGINS = ['http://localhost:3000', 'http://127.0.0.1:3000'];
+const IS_PRODUCTION = process.env.NODE_ENV === 'production';
 
 function corsOrigin(origin, callback) {
+  if (!IS_PRODUCTION) {
+    return callback(null, true);
+  }
   if (!origin) {
     return callback(null, true);
   }
@@ -155,6 +159,7 @@ const normalizeOrderStatus = (status = '') => {
   const value = String(status).trim().toLowerCase();
   if (value === 'in progress' || value === 'in_progress') return 'in_progress';
   if (
+    value === 'order_placed' ||
     value === 'pending' ||
     value === 'measurements_verified' ||
     value === 'stitching' ||
@@ -169,24 +174,114 @@ const normalizeOrderStatus = (status = '') => {
   return 'pending';
 };
 
+/** Uppercase tracking enum — must match customer/tailor `orderLiveStatus.js`. */
+function internalStatusToTrackingStatus(s) {
+  const v = normalizeOrderStatus(s);
+  if (v === 'pending' || v === 'order_placed') return 'ORDER_PLACED';
+  if (v === 'measurements_verified') return 'MEASUREMENTS_VERIFIED';
+  if (v === 'stitching' || v === 'in_progress' || v === 'needs_alteration') return 'STITCHING';
+  if (v === 'quality_check') return 'QUALITY_CHECK';
+  if (v === 'ready_for_delivery' || v === 'last_review') return 'READY';
+  if (v === 'completed') return 'COMPLETED';
+  return 'ORDER_PLACED';
+}
+
+function stepIndexFromOrderDoc(doc) {
+  if (!doc) return 0;
+  const raw = doc.currentStepIndex;
+  if (raw != null && Number.isFinite(Number(raw))) {
+    return Math.max(0, Math.min(6, Number(raw)));
+  }
+  const v = normalizeOrderStatus(doc.status);
+  const map = {
+    pending: 0,
+    order_placed: 0,
+    measurements_verified: 1,
+    stitching: 2,
+    in_progress: 2,
+    quality_check: 3,
+    ready_for_delivery: 4,
+    last_review: 5,
+    completed: 6,
+    needs_alteration: 2,
+  };
+  return map[v] ?? 0;
+}
+
+async function findOrderDocByParam(orderIdParam) {
+  const raw = orderIdParam != null ? String(orderIdParam).trim() : '';
+  if (!raw) return null;
+  try {
+    if (mongoose.Types.ObjectId.isValid(raw)) {
+      const byId = await Order.findById(raw);
+      if (byId) return byId;
+    }
+    return await Order.findOne({ clientOrderId: raw });
+  } catch (e) {
+    console.error('findOrderDocByParam', e);
+    return null;
+  }
+}
+
+function emitOrderLiveToOrderRooms(ioInstance, canonicalOrderId, rawOrderId, payload, legacyStatusPayload) {
+  const rooms = new Set([String(canonicalOrderId).trim()]);
+  const raw = rawOrderId != null ? String(rawOrderId).trim() : '';
+  if (raw && raw !== String(canonicalOrderId).trim()) rooms.add(raw);
+  for (const r of rooms) {
+    if (!r) continue;
+    ioInstance.to(r).emit('order:liveUpdate', payload);
+    if (legacyStatusPayload) {
+      ioInstance.to(r).emit('order:statusUpdated', legacyStatusPayload);
+    }
+  }
+}
+
+function serializeOrderForSocket(doc) {
+  if (!doc) return null;
+  const o = doc.toObject ? doc.toObject({ virtuals: true }) : { ...doc };
+  if (o._id) o.id = String(o._id);
+  return o;
+}
+
+function emitMeasurementOrderToTailor(orderDoc) {
+  try {
+    if (!io || !orderDoc) return;
+    const tid = orderDoc.tailorId != null ? String(orderDoc.tailorId).trim() : '';
+    if (!tid) return;
+    const order = serializeOrderForSocket(orderDoc);
+    io.to(tid).emit('measurement:updated', { order });
+  } catch (e) {
+    console.error('EMIT measurement:updated', e);
+  }
+}
+
 app.post('/orders', async (req, res) => {
-  const { customerId, tailorId, customerName, garmentType, measurements, price, status, dueDate } = req.body || {};
+  const b = req.body || {};
+  const { customerId, tailorId, customerName, garmentType, measurements, price, status, dueDate } = b;
   if (!customerId || !tailorId) {
     return res.status(400).json({ message: 'customerId and tailorId are required.' });
   }
 
   try {
     const savedOrder = await Order.create({
+      clientOrderId: b.clientOrderId != null ? String(b.clientOrderId) : b.orderId != null ? String(b.orderId) : '',
+      source: b.source != null ? String(b.source) : '',
       customerId: String(customerId),
       tailorId: String(tailorId),
       customerName: customerName || '',
+      customerPhone: b.customerPhone != null ? String(b.customerPhone) : '',
       garmentType: garmentType || '',
+      garmentCategory: b.garmentCategory != null ? String(b.garmentCategory) : '',
       measurements: measurements && typeof measurements === 'object' ? measurements : {},
+      style: b.style && typeof b.style === 'object' ? b.style : null,
+      notes: b.notes && typeof b.notes === 'object' ? b.notes : null,
+      orderPayload: b.orderPayload != null ? b.orderPayload : null,
       price: Number(price || 0),
       status: normalizeOrderStatus(status),
       dueDate: dueDate ? new Date(dueDate) : null,
     });
     console.log('ORDER CREATED', savedOrder._id.toString());
+    emitMeasurementOrderToTailor(savedOrder);
     return res.status(201).json(savedOrder);
   } catch (error) {
     console.error('ORDER CREATE ERROR', error);
@@ -232,6 +327,59 @@ app.get('/orders/:orderId', async (req, res) => {
   }
 });
 
+/** Partial wizard / measurement updates — does not replace PUT workflow fields contract */
+app.patch('/orders/:orderId', async (req, res) => {
+  const { orderId } = req.params;
+  const b = req.body && typeof req.body === 'object' ? req.body : {};
+  const updatePayload = {};
+  if (b.customerName != null) updatePayload.customerName = String(b.customerName);
+  if (b.customerPhone != null) updatePayload.customerPhone = String(b.customerPhone);
+  if (b.customerId != null) updatePayload.customerId = String(b.customerId);
+  if (b.garmentType != null) updatePayload.garmentType = String(b.garmentType);
+  if (b.garmentCategory != null) updatePayload.garmentCategory = String(b.garmentCategory);
+  if (b.measurements != null && typeof b.measurements === 'object') {
+    updatePayload.measurements = b.measurements;
+  }
+  if (b.style != null && typeof b.style === 'object') {
+    updatePayload.style = b.style;
+  }
+  if (b.notes != null && typeof b.notes === 'object') {
+    updatePayload.notes = b.notes;
+  }
+  if (b.orderPayload != null) {
+    updatePayload.orderPayload = b.orderPayload;
+  }
+  if (b.dueDate != null) {
+    const d = new Date(b.dueDate);
+    updatePayload.dueDate = Number.isNaN(d.getTime()) ? null : d;
+  }
+  if (b.source != null) updatePayload.source = String(b.source);
+  if (b.clientOrderId != null) updatePayload.clientOrderId = String(b.clientOrderId);
+  else if (b.orderId != null) updatePayload.clientOrderId = String(b.orderId);
+  if (b.price != null) updatePayload.price = Number(b.price) || 0;
+  if (b.tailorId != null) updatePayload.tailorId = String(b.tailorId);
+
+  if (Object.keys(updatePayload).length === 0) {
+    return res.status(400).json({ message: 'No updatable fields in body.' });
+  }
+
+  try {
+    const updatedOrder = await Order.findByIdAndUpdate(
+      orderId,
+      { $set: updatePayload },
+      { new: true, strict: false, runValidators: false }
+    );
+    if (!updatedOrder) {
+      return res.status(404).json({ message: 'Order not found.' });
+    }
+    emitMeasurementOrderToTailor(updatedOrder);
+    return res.status(200).json(updatedOrder);
+  } catch (error) {
+    console.error('ORDER PATCH ERROR', error);
+    return res.status(500).json({ message: 'Unable to update order.' });
+  }
+});
+
 app.put('/orders/:orderId', async (req, res) => {
   const { orderId } = req.params;
   const { status, review, customerReview } = req.body || {};
@@ -251,8 +399,23 @@ app.put('/orders/:orderId', async (req, res) => {
       updatePayload.customerReview = customerReview;
     }
 
+    const rawId = orderId != null ? String(orderId).trim() : '';
+    let resolvedMongoId = null;
+    if (rawId && mongoose.Types.ObjectId.isValid(rawId)) {
+      const exists = await Order.findById(rawId).select('_id').lean();
+      if (exists) resolvedMongoId = String(exists._id);
+    }
+    if (!resolvedMongoId && rawId) {
+      const byClient = await Order.findOne({ clientOrderId: rawId }).select('_id').lean();
+      if (byClient) resolvedMongoId = String(byClient._id);
+    }
+
+    if (!resolvedMongoId) {
+      return res.status(404).json({ message: 'Order not found.' });
+    }
+
     const updatedOrder = await Order.findByIdAndUpdate(
-      orderId,
+      resolvedMongoId,
       { $set: updatePayload },
       { new: true, strict: false }
     );
@@ -260,6 +423,8 @@ app.put('/orders/:orderId', async (req, res) => {
     if (!updatedOrder) {
       return res.status(404).json({ message: 'Order not found.' });
     }
+
+    emitMeasurementOrderToTailor(updatedOrder);
 
     console.log('ORDER STATUS UPDATED', {
       orderId: updatedOrder._id.toString(),
@@ -274,22 +439,96 @@ app.put('/orders/:orderId', async (req, res) => {
 
 io.on('connection', (socket) => {
   socket.on('join_user', ({ userId } = {}) => {
-    if (!userId) return;
-    console.log('JOIN USER', userId);
-    socket.join(userId);
+    const room = userId != null ? String(userId).trim() : '';
+    if (!room) return;
+    console.log('JOIN USER', room);
+    socket.join(room);
   });
 
   socket.on('join_conversation', ({ conversationId } = {}) => {
-    if (!conversationId) return;
-    console.log('JOIN CONVERSATION', conversationId);
-    socket.join(conversationId);
+    const room = conversationId != null ? String(conversationId).trim() : '';
+    if (!room) return;
+    console.log('JOIN CONVERSATION', room);
+    socket.join(room);
+  });
+
+  socket.on('join_order_room', (orderId) => {
+    const room = orderId != null ? String(orderId).trim() : '';
+    if (!room) return;
+    socket.join(room);
+  });
+
+  socket.on('order:active', (data = {}) => {
+    const orderId = data.orderId != null ? String(data.orderId).trim() : '';
+    if (!orderId) return;
+    socket.join(orderId);
+    io.to(orderId).emit('order:sync', { orderId });
+  });
+
+  socket.on('order:statusUpdate', async (data = {}) => {
+    console.log('[SERVER] status update:', data);
+    const rawOrderId = data.orderId != null ? String(data.orderId).trim() : '';
+    if (!rawOrderId) return;
+
+    socket.join(rawOrderId);
+
+    let doc = null;
+    try {
+      doc = await findOrderDocByParam(rawOrderId);
+    } catch (e) {
+      console.error('[SERVER] order:statusUpdate load', e);
+    }
+
+    const canonicalId = doc ? String(doc._id) : rawOrderId;
+    if (canonicalId !== rawOrderId) {
+      socket.join(canonicalId);
+    }
+
+    const updatedAt = Date.now();
+    const clientTracking = data.status != null ? String(data.status).trim().toUpperCase() : '';
+
+    let status = clientTracking;
+    let currentStep = 0;
+    let wizardData = null;
+
+    if (doc) {
+      status = internalStatusToTrackingStatus(doc.status);
+      currentStep = stepIndexFromOrderDoc(doc);
+      wizardData = doc.orderPayload != null ? doc.orderPayload : null;
+    } else if (!status) {
+      return;
+    }
+
+    const payload = {
+      orderId: canonicalId,
+      status,
+      currentStep,
+      wizardData,
+      updatedAt,
+    };
+
+    const legacy = { orderId: canonicalId, status, updatedAt };
+    emitOrderLiveToOrderRooms(io, canonicalId, rawOrderId, payload, legacy);
+  });
+
+  socket.on('measurement:review', (payload = {}) => {
+    console.log('[SERVER] measurement:review received:', payload?.wizardData?.image);
+
+    try {
+      console.log('[SERVER] Payload size:', JSON.stringify(payload).length);
+    } catch (e) {
+      console.error('[SERVER] Failed to calculate payload size', e);
+    }
+
+    io.emit('measurement:reviewed', payload);
   });
 
   socket.on('request_history', async ({ conversationId } = {}) => {
-    if (!conversationId) return;
+    const cid = conversationId != null ? String(conversationId).trim() : '';
+    if (!cid) return;
     try {
-      console.log('FETCHING CHAT HISTORY FROM DB', conversationId);
-      const history = await Message.find({ conversationId }).sort({ timestamp: 1 }).lean();
+      console.log('FETCHING CHAT HISTORY FROM DB', cid);
+      const history = await Message.find({ conversationId: cid }).sort({ timestamp: 1 }).lean();
       socket.emit('chat_history', { messages: history });
     } catch (error) {
       console.error('REQUEST_HISTORY ERROR', error);
@@ -298,27 +537,45 @@ io.on('connection', (socket) => {
   });
 
   socket.on('send_message', async (payload = {}) => {
-    const { senderId, receiverId, conversationId, content, timestamp, status } = payload;
-    if (!senderId || !receiverId || !conversationId || !String(content || '').trim()) return;
+    const senderId = String(payload?.senderId ?? '').trim();
+    const receiverId = String(payload?.receiverId ?? '').trim();
+    const conversationId = String(payload?.conversationId ?? '').trim();
+    const content = String(payload?.content ?? '').trim();
+    const { timestamp, status } = payload;
+    if (!senderId || !receiverId || !conversationId || !content) {
+      console.warn('SEND_MESSAGE rejected (missing field)', {
+        hasSender: !!senderId,
+        hasReceiver: !!receiverId,
+        hasConv: !!conversationId,
+        hasContent: !!content,
+      });
+      return;
+    }
 
     try {
+      const ts = timestamp ? new Date(timestamp) : new Date();
+      if (Number.isNaN(ts.getTime())) {
+        return;
+      }
       const savedMessage = await Message.create({
         senderId,
         receiverId,
         conversationId,
-        content: String(content).trim(),
-        timestamp: timestamp || new Date().toISOString(),
+        content,
+        timestamp: ts,
         status: status || 'sent',
       });
 
       const message = {
         id: savedMessage._id.toString(),
-        senderId: savedMessage.senderId,
-        receiverId: savedMessage.receiverId,
-        conversationId: savedMessage.conversationId,
-        content: savedMessage.content,
-        timestamp: savedMessage.timestamp,
-        status: savedMessage.status,
+        senderId: String(savedMessage.senderId),
+        receiverId: String(savedMessage.receiverId),
+        conversationId: String(savedMessage.conversationId),
+        content: String(savedMessage.content),
+        timestamp: savedMessage.timestamp?.toISOString
+          ? savedMessage.timestamp.toISOString()
+          : String(savedMessage.timestamp),
+        status: String(savedMessage.status || 'sent'),
       };
 
       console.log('DB MESSAGE SAVED', message.id);

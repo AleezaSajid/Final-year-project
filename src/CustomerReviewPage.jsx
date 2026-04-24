@@ -2,6 +2,8 @@ import React, { useEffect, useMemo, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import DashboardNavbar from "./components/DashboardNavbar";
 import { PageBackground } from "./components/PageBackground.jsx";
+import { notifyChatIdsFromOrderUpdated, publishChatRoomCustomerId } from "./chatUtils.js";
+import { TAILOR_SESSION_STORAGE_KEY } from "./utils/chatIdentity.js";
 
 const API_BASE_URL = "http://localhost:5000";
 
@@ -83,6 +85,19 @@ export default function CustomerReviewPage() {
     setCustomerComment(safeOrder.customerReview?.comment || "");
     setDecision(safeOrder.customerReview?.decision || "Approve");
   }, [order, safeOrder.customerReview]);
+
+  useEffect(() => {
+    if (!order?.customerId) return;
+    const id = String(order.customerId).trim();
+    if (id) publishChatRoomCustomerId(id);
+    try {
+      const tid = order.tailorId != null ? String(order.tailorId).trim() : "";
+      if (tid) localStorage.setItem(TAILOR_SESSION_STORAGE_KEY, tid);
+    } catch {
+      /* ignore */
+    }
+    notifyChatIdsFromOrderUpdated();
+  }, [order]);
 
   const submitCustomerReview = async () => {
     if (!safeOrder?.id) return;

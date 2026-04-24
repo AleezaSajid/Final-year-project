@@ -5,6 +5,7 @@ import styled from "styled-components";
 import { LandingStylePageBackground } from "./components/LandingStylePageBackground.jsx";
 import { useAuth } from "./context/AuthContext.jsx";
 import { useSewServeLogoProcessedSrc } from "./hooks/useSewServeLogoProcessedSrc";
+import { setUserRole } from "./utils/userRole";
 
 const LOGO_SRC = `${process.env.PUBLIC_URL || ""}/images/hero/sewserve-logo.png`;
 
@@ -427,6 +428,7 @@ export default function TailorLoginPage() {
     setLoading(true);
     try {
       await login(email.trim(), password);
+      setUserRole("tailor");
       navigate("/tailor/dashboard", { replace: true });
     } catch (err) {
       setError(err.message || "Sign in failed");

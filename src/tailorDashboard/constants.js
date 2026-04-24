@@ -98,7 +98,12 @@ export const seedOrders = [
 ];
 
 export const normalizeOrder = (order) => ({
-  id: order.id || order._id || `ORD-${Date.now()}`,
+  id:
+    order.id != null
+      ? String(order.id)
+      : order._id != null
+        ? String(order._id)
+        : `ORD-${Date.now()}`,
   customerName: order.customerName || "Customer",
   customerId:
     order.customerId ||
@@ -115,6 +120,20 @@ export const normalizeOrder = (order) => ({
   tailorId: order.tailorId || tailorId,
   price: Number(order.price || 0),
   orderImages: Array.isArray(order.orderImages) ? order.orderImages : [],
+  measurements:
+    order.measurements && typeof order.measurements === "object" && !Array.isArray(order.measurements)
+      ? order.measurements
+      : {},
+  orderPayload: order.orderPayload != null ? order.orderPayload : undefined,
+  /** Full unfiltered measurement wizard state when synced via measurement:review */
+  wizardData:
+    order.wizardData && typeof order.wizardData === "object" && !Array.isArray(order.wizardData)
+      ? order.wizardData
+      : undefined,
+  customerPhone: order.customerPhone != null && String(order.customerPhone).trim() !== "" ? String(order.customerPhone) : "",
+  style:
+    order.style && typeof order.style === "object" && !Array.isArray(order.style) ? order.style : null,
+  notes: order.notes && typeof order.notes === "object" && !Array.isArray(order.notes) ? order.notes : null,
 });
 
 export const getProfileImageSrc = (picture) => (picture ? picture : DEFAULT_AVATAR);

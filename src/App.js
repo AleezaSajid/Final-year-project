@@ -15,12 +15,14 @@ import OrderTracking from "./OrderTracking";
 import LocalTailors from "./LocalTailors";
 import WorkspaceSelect from "./WorkspaceSelect";
 import { RoleProvider } from "./context/RoleContext";
+import { CustomerChatProvider } from "./context/CustomerChatContext.jsx";
 import { PageBackground } from "./components/PageBackground.jsx";
 
 function App() {
   return (
     <RoleProvider>
       <Router>
+      <CustomerChatProvider>
       <Routes>
         <Route path="/" element={<SewServeLandingPage />} />
         <Route path="/orders" element={<OrderTrackingPage />} />
@@ -51,6 +53,7 @@ function App() {
           }
         />
       </Routes>
+      </CustomerChatProvider>
       </Router>
     </RoleProvider>
   );

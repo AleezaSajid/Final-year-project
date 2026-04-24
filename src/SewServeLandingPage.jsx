@@ -5,10 +5,6 @@ import {
   Ruler,
   MapPinned,
   ShieldCheck,
-  UserPlus,
-  FileText,
-  PackageCheck,
-  Shirt,
   Mail,
   Phone,
   MapPin,
@@ -22,6 +18,7 @@ import {
 
 import { SiFacebook, SiInstagram, SiPinterest, SiWhatsapp } from "react-icons/si";
 import LandingNavbar from "./components/LandingNavbar.jsx";
+import HowItWorksSplitSection from "./components/HowItWorksSplitSection.jsx";
 import { useSewServeLogoProcessedSrc } from "./hooks/useSewServeLogoProcessedSrc";
 const navLinks = [
   { label: "Home", sectionId: "home" },
@@ -88,13 +85,6 @@ const features = [
     icon: ShieldCheck,
     route: "/features/local-tailors",
   },
-];
-
-const steps = [
-  { title: "Register", description: "Create your account in seconds to begin your tailoring journey.", icon: UserPlus },
-  { title: "Submit Measurements", description: "Use our smart form to provide accurate measurements from any device.", icon: FileText },
-  { title: "Track Orders", description: "Monitor your order status from stitching to dispatch in real time.", icon: PackageCheck },
-  { title: "Receive Garments", description: "Get perfectly tailored garments delivered to your doorstep.", icon: Shirt },
 ];
 
 const testimonials = [
@@ -175,16 +165,6 @@ export default function SewServeLandingPage() {
       return;
     }
     navigate("/", { state: { scrollTo: sectionId } });
-  };
-
-  const handleDashboardNavigate = () => {
-    const token =
-      localStorage.getItem("sewserve_auth_token") || sessionStorage.getItem("sewserve_auth_token");
-    if (token) {
-      navigate("/select-workspace");
-    } else {
-      navigate("/login");
-    }
   };
 
   return (
@@ -445,7 +425,6 @@ export default function SewServeLandingPage() {
           logoDisplaySrc={logoDisplaySrc}
           navLinks={navLinks}
           onSectionNavigate={handleSectionNavigate}
-          onDashboardNavigate={handleDashboardNavigate}
         />
 
         {/* Hero: full-bleed background + wave; content max-width centered */}
@@ -469,24 +448,27 @@ export default function SewServeLandingPage() {
             className="relative z-10 mx-auto flex min-h-[calc(100dvh-5.5rem)] w-full max-w-7xl flex-col justify-center px-4 pt-12 pb-24 sm:px-6 sm:pt-16 sm:pb-28 md:min-h-[calc(100dvh-6rem)] md:pb-32 lg:min-h-[calc(100dvh-5rem)] lg:px-10 lg:pb-40"
           >
             <div className="grid items-center gap-14 lg:grid-cols-3 lg:gap-12 xl:gap-14">
-              {/* Left image */}
-              <motion.div
-                className="relative z-[4] order-2 flex min-h-0 w-full min-w-0 origin-center scale-[0.96] items-center justify-center self-center py-3 sm:py-4 md:py-5 lg:order-none lg:min-h-0 lg:scale-100 lg:self-stretch lg:py-0"
-                initial={{ opacity: 0, x: -28 }}
-                animate={{ opacity: 1, x: 0 }}
-                transition={{ duration: 0.65, ease: "easeOut" }}
-              >
-                <img
-                  src={HERO_IMAGE_SEWING}
-                  alt="Vintage sewing machine and tailoring tools"
-                  width={720}
-                  height={900}
-                  loading="eager"
-                  decoding="async"
-                  fetchPriority="high"
-                  className="hero-floating-img hero-floating-img--L hero-img-mask-vision mx-auto h-[192px] w-[168px] shrink-0 select-none object-cover object-center opacity-[0.88] sm:h-[208px] sm:w-[184px] md:h-[228px] md:w-[208px] lg:h-[min(420px,52vh)] lg:w-full lg:max-w-[min(100%,28rem)] lg:opacity-100"
-                />
-              </motion.div>
+              {/* Left image — leads sequence; strong boom, then copy animates in */}
+              <div className="relative z-[4] order-2 flex min-h-0 w-full min-w-0 origin-center scale-[0.96] items-center justify-center self-center py-3 sm:py-4 md:py-5 lg:order-none lg:min-h-0 lg:scale-100 lg:self-stretch lg:py-0">
+                <motion.div
+                  initial={{ opacity: 0, scale: 0.75, y: 80 }}
+                  animate={{ opacity: 1, scale: 1, y: 0 }}
+                  transition={{ duration: 0.8, ease: "easeOut" }}
+                  whileHover={{ scale: 1.03, transition: { duration: 0.25, ease: "easeOut" } }}
+                  className="origin-center will-change-transform"
+                >
+                  <img
+                    src={HERO_IMAGE_SEWING}
+                    alt="Vintage sewing machine and tailoring tools"
+                    width={720}
+                    height={900}
+                    loading="eager"
+                    decoding="async"
+                    fetchPriority="high"
+                    className="hero-floating-img hero-floating-img--L hero-img-mask-vision mx-auto h-[192px] w-[168px] shrink-0 select-none object-cover object-center opacity-[0.88] sm:h-[208px] sm:w-[184px] md:h-[228px] md:w-[208px] lg:h-[min(420px,52vh)] lg:w-full lg:max-w-[min(100%,28rem)] lg:opacity-100"
+                  />
+                </motion.div>
+              </div>
 
               <div className="relative z-[6] order-1 mx-auto flex min-w-0 w-full max-w-lg flex-col items-center text-center lg:order-none">
                 <div className="hero-mid-depth-fog" aria-hidden="true" />
@@ -494,9 +476,9 @@ export default function SewServeLandingPage() {
                 <div className="hero-cinematic-focus" aria-hidden="true" />
                 <div className="relative z-[12] flex w-full justify-center px-3">
                   <motion.h1
-                    initial={{ opacity: 0, y: 14 }}
+                    initial={{ opacity: 0, y: 40 }}
                     animate={{ opacity: 1, y: 0 }}
-                    transition={{ duration: 0.7, ease: [0.25, 0.1, 0.25, 1] }}
+                    transition={{ duration: 0.6, delay: 0.4, ease: "easeOut" }}
                     className="inline-block max-w-none text-center font-['Playfair_Display',Georgia,serif] text-[clamp(1.25rem,4.25vw,2.5rem)] font-bold leading-[1.2] tracking-[-0.02em] whitespace-nowrap drop-shadow-[0_2px_3px_rgba(0,0,0,0.07)]"
                   >
                     <span className="bg-gradient-to-b from-[#070b14] to-[#1e293b] bg-clip-text text-transparent">
@@ -505,17 +487,17 @@ export default function SewServeLandingPage() {
                   </motion.h1>
                 </div>
                 <motion.p
-                  initial={{ opacity: 0, y: 10 }}
+                  initial={{ opacity: 0, y: 40 }}
                   animate={{ opacity: 1, y: 0 }}
-                  transition={{ duration: 0.6, delay: 0.1, ease: [0.25, 0.1, 0.25, 1] }}
+                  transition={{ duration: 0.6, delay: 0.52, ease: "easeOut" }}
                   className="relative z-[12] mx-auto mt-8 max-w-lg text-base font-normal leading-[1.6] tracking-[0.01em] text-ink-muted sm:text-[1rem]"
                 >
                   From measurement to delivery, experience a seamless tailoring journey designed around you.
                 </motion.p>
                 <motion.div
-                  initial={{ opacity: 0, y: 10 }}
+                  initial={{ opacity: 0, y: 40 }}
                   animate={{ opacity: 1, y: 0 }}
-                  transition={{ duration: 0.55, delay: 0.16, ease: [0.25, 0.1, 0.25, 1] }}
+                  transition={{ duration: 0.6, delay: 1.0, ease: "easeOut" }}
                   className="relative z-[12] mt-11 flex justify-center"
                 >
                   <button
@@ -529,13 +511,14 @@ export default function SewServeLandingPage() {
                 </motion.div>
               </div>
 
-              <motion.div
-                className="relative z-[4] order-3 flex min-h-0 w-full min-w-0 origin-center scale-[0.96] items-center justify-center self-center py-3 sm:py-4 md:py-5 lg:order-none lg:min-h-0 lg:scale-100 lg:self-stretch lg:py-0"
-                initial={{ opacity: 0, x: 28 }}
-                animate={{ opacity: 1, x: 0 }}
-                transition={{ duration: 0.65, ease: "easeOut" }}
-              >
-                <div className="hero-mannequin-wrap hero-floating-img--R mx-auto">
+              <div className="relative z-[4] order-3 flex min-h-0 w-full min-w-0 origin-center scale-[0.96] items-center justify-center self-center py-3 sm:py-4 md:py-5 lg:order-none lg:min-h-0 lg:scale-100 lg:self-stretch lg:py-0">
+                <motion.div
+                  initial={{ opacity: 0, scale: 0.75, y: 80 }}
+                  animate={{ opacity: 1, scale: 1, y: 0 }}
+                  transition={{ duration: 0.8, ease: "easeOut" }}
+                  whileHover={{ scale: 1.03, transition: { duration: 0.25, ease: "easeOut" } }}
+                  className="hero-mannequin-wrap hero-floating-img--R mx-auto origin-center will-change-transform"
+                >
                   <img
                     src={HERO_IMAGE_MANNEQUIN}
                     alt="Tailored suit on a dress form with measuring tape"
@@ -547,8 +530,8 @@ export default function SewServeLandingPage() {
                     className="hero-floating-img hero-img-mask-vision mx-auto h-[192px] w-[168px] shrink-0 select-none object-cover object-center opacity-[0.88] sm:h-[208px] sm:w-[184px] md:h-[228px] md:w-[208px] lg:h-[min(420px,52vh)] lg:w-full lg:max-w-[min(100%,28rem)] lg:opacity-100"
                   />
                   <span className="hero-mannequin-bottom-shadow" aria-hidden />
-                </div>
-              </motion.div>
+                </motion.div>
+              </div>
             </div>
           </section>
 
@@ -623,47 +606,7 @@ export default function SewServeLandingPage() {
           </div>
         </motion.section>
 
-        {/* How It Works Section */}
-        <motion.section
-          id="how-it-works"
-          className="ss-glass-surface relative z-[1] border-t border-white/25 py-[72px] shadow-[0_20px_56px_-24px_rgba(15,23,42,0.1)] sm:py-20 md:py-[88px]"
-          variants={sectionReveal}
-          initial="hidden"
-          whileInView="visible"
-          viewport={{ once: true, amount: 0.2 }}
-        >
-          <div className="mx-auto w-full max-w-7xl px-4 sm:px-6 lg:px-8">
-            <div className="mx-auto max-w-2xl text-center">
-              <h2 className="text-apple-h2 font-semibold tracking-tight text-ink">How It Works</h2>
-              <p className="mt-2.5 text-base leading-[1.6] text-ink-muted">
-                Start in minutes and enjoy a smooth tailoring experience end to end.
-              </p>
-            </div>
-
-            <div className="mt-12 grid gap-6 sm:grid-cols-2 lg:grid-cols-4">
-              {steps.map((step, index) => {
-                const Icon = step.icon;
-                return (
-                  <article
-                    key={step.title}
-                    className="ss-glass-card group rounded-apple-card p-5 shadow-lg shadow-slate-900/5 transition-all duration-200 ease-out hover:-translate-y-1 hover:shadow-xl hover:shadow-slate-900/10 sm:p-6"
-                  >
-                    <div className="flex items-center gap-3">
-                      <span className="inline-flex h-9 w-9 items-center justify-center rounded-full bg-gradient-to-br from-emerald-600 to-emerald-800 text-sm font-bold text-white shadow-sm">
-                        {index + 1}
-                      </span>
-                      <div className="inline-flex rounded-lg bg-emerald-50 p-2 text-emerald-700 transition-colors duration-300 group-hover:bg-emerald-100">
-                        <Icon className="h-5 w-5" />
-                      </div>
-                    </div>
-                    <h3 className="mt-4 text-apple-h3 font-semibold tracking-tight text-ink">{step.title}</h3>
-                    <p className="mt-2.5 text-base leading-[1.6] text-ink-muted">{step.description}</p>
-                  </article>
-                );
-              })}
-            </div>
-          </div>
-        </motion.section>
+        <HowItWorksSplitSection />
 
         {/* Testimonials Section */}
         <motion.section

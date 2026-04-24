@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { ChevronDown, Menu, Scissors, User, X } from "lucide-react";
+import { getUserRole } from "../utils/userRole";
 
 const DEFAULT_NAV_LINKS = [
   { label: "Home", sectionId: "home" },
@@ -12,10 +13,19 @@ const DEFAULT_NAV_LINKS = [
 /**
  * Public marketing site header (home page): glass nav with login role dropdown.
  */
+function readAuthToken() {
+  try {
+    return localStorage.getItem("sewserve_auth_token") || sessionStorage.getItem("sewserve_auth_token");
+  } catch {
+    return null;
+  }
+}
+
 export default function LandingNavbar({
   logoDisplaySrc,
   navLinks = DEFAULT_NAV_LINKS,
   onSectionNavigate,
+  /** When set, Dashboard click uses this instead of default token/role routing (e.g. noop on dashboard pages). */
   onDashboardNavigate,
   /** When true, "Track Orders" sits in the center nav after Dashboard (customer dashboard mock). */
   trackOrdersInNavCenter = false,
@@ -26,7 +36,9 @@ export default function LandingNavbar({
   const isDashboardActive = ["/customer/dashboard", "/tailor/dashboard", "/dashboard"].includes(location.pathname);
   const isTrackOrdersActive = location.pathname === "/orders";
   const [loginMenuOpen, setLoginMenuOpen] = useState(false);
+  const [dashboardMenuOpen, setDashboardMenuOpen] = useState(false);
   const loginDropdownRef = useRef(null);
+  const dashboardDropdownRef = useRef(null);
   const navRef = useRef(null);
   const itemRefs = useRef({});
   const hoverKeyRef = useRef(null);
@@ -149,6 +161,9 @@ export default function LandingNavbar({
       if (!loginDropdownRef.current?.contains(event.target)) {
         setLoginMenuOpen(false);
       }
+      if (!dashboardDropdownRef.current?.contains(event.target)) {
+        setDashboardMenuOpen(false);
+      }
     }
     document.addEventListener("mousedown", handlePointerDown);
     document.addEventListener("touchstart", handlePointerDown, { passive: true });
@@ -163,14 +178,73 @@ export default function LandingNavbar({
   const goCustomerLogin = () => {
     navigate("/login");
     setLoginMenuOpen(false);
+    setDashboardMenuOpen(false);
     handleCloseMobileMenu();
   };
 
   const goTailorLogin = () => {
     navigate("/tailor-login");
     setLoginMenuOpen(false);
+    setDashboardMenuOpen(false);
     handleCloseMobileMenu();
   };
+
+  const defaultDashboardNavigate = useCallback(() => {
+    const token = readAuthToken();
+    if (!token) {
+      setLoginMenuOpen(false);
+      setDashboardMenuOpen((open) => !open);
+      return;
+    }
+    setDashboardMenuOpen(false);
+    const role = getUserRole();
+    if (role === "customer") {
+      navigate("/customer/dashboard");
+      handleCloseMobileMenu();
+      return;
+    }
+    if (role === "tailor") {
+      navigate("/tailor/dashboard");
+      handleCloseMobileMenu();
+      return;
+    }
+    navigate("/select-workspace");
+    handleCloseMobileMenu();
+  }, [navigate]);
+
+  const handleDashboardNavigate = useCallback(() => {
+    if (typeof onDashboardNavigate === "function") {
+      onDashboardNavigate();
+      handleCloseMobileMenu();
+      return;
+    }
+    defaultDashboardNavigate();
+  }, [defaultDashboardNavigate, onDashboardNavigate]);
+
+  const dashboardRoleMenu = (
+    <>
+      <button
+        type="button"
+        role="menuitem"
+        onClick={goCustomerLogin}
+        className="flex w-full items-center gap-2.5 rounded-lg px-[14px] py-[10px] text-left text-sm font-semibold text-[#1a1a1a] transition-all duration-200 ease-out hover:scale-[1.01] hover:bg-[#f5f5f7] hover:text-slate-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-600/20 focus-visible:ring-offset-1"
+      >
+        <User size={16} strokeWidth={2} className="shrink-0 text-current" aria-hidden />
+        <span>Customer Login</span>
+      </button>
+      <button
+        type="button"
+        role="menuitem"
+        onClick={goTailorLogin}
+        className="flex w-full items-center gap-2.5 rounded-lg px-[14px] py-[10px] text-left text-sm font-semibold text-[#1a1a1a] transition-all duration-200 ease-out hover:scale-[1.01] hover:bg-[#f5f5f7] hover:text-slate-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-600/20 focus-visible:ring-offset-1"
+      >
+        <Scissors size={16} strokeWidth={2} className="shrink-0 text-current" aria-hidden />
+        <span>Tailor Login</span>
+      </button>
+    </>
+  );
+
+  const tokenPresent = Boolean(readAuthToken());
 
   return (
     <header className="ss-glass-surface sticky top-0 z-50 border-b border-white/35 shadow-[0_8px_32px_-8px_rgba(15,23,42,0.08)]">
@@ -261,19 +335,56 @@ export default function LandingNavbar({
               {link.label}
             </button>
           ))}
-          <button
-            ref={setItemRef("dashboard")}
-            type="button"
-            onClick={onDashboardNavigate}
-            onMouseEnter={() => onNavItemEnter("dashboard")}
-            onFocus={() => onNavItemFocus("dashboard")}
-            className={`ss-landing-nav-link px-3 py-2 text-sm font-medium focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-600/25 focus-visible:ring-offset-2 ${
-              isDashboardActive ? "ss-landing-nav-link--active" : "text-slate-600"
-            }`}
-            aria-current={isDashboardActive ? "page" : undefined}
-          >
-            Dashboard
-          </button>
+          {tokenPresent ? (
+            <button
+              ref={setItemRef("dashboard")}
+              type="button"
+              onClick={handleDashboardNavigate}
+              onMouseEnter={() => onNavItemEnter("dashboard")}
+              onFocus={() => onNavItemFocus("dashboard")}
+              className={`ss-landing-nav-link px-3 py-2 text-sm font-medium focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-600/25 focus-visible:ring-offset-2 ${
+                isDashboardActive ? "ss-landing-nav-link--active" : "text-slate-600"
+              }`}
+              aria-current={isDashboardActive ? "page" : undefined}
+            >
+              Dashboard
+            </button>
+          ) : (
+            <div className="relative" ref={dashboardDropdownRef}>
+              <button
+                ref={setItemRef("dashboard")}
+                type="button"
+                id="landing-dashboard-trigger"
+                aria-expanded={dashboardMenuOpen}
+                aria-haspopup="menu"
+                aria-controls="landing-dashboard-menu"
+                onClick={() => {
+                  setLoginMenuOpen(false);
+                  handleDashboardNavigate();
+                }}
+                onMouseEnter={() => onNavItemEnter("dashboard")}
+                onFocus={() => onNavItemFocus("dashboard")}
+                className={`ss-landing-nav-link px-3 py-2 text-sm font-medium focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-600/25 focus-visible:ring-offset-2 ${
+                  isDashboardActive ? "ss-landing-nav-link--active" : "text-slate-600"
+                }`}
+                aria-current={isDashboardActive ? "page" : undefined}
+              >
+                Dashboard
+              </button>
+              <div
+                id="landing-dashboard-menu"
+                role="menu"
+                aria-labelledby="landing-dashboard-trigger"
+                className={`absolute left-0 top-full z-[60] mt-2 flex min-w-[180px] flex-col gap-1 rounded-[13px] bg-white/90 p-2 shadow-[0_10px_30px_rgba(0,0,0,0.08)] backdrop-blur-[10px] transition-[opacity,transform] duration-200 ease-out ${
+                  dashboardMenuOpen
+                    ? "pointer-events-auto translate-y-0 opacity-100"
+                    : "pointer-events-none -translate-y-1 opacity-0"
+                }`}
+              >
+                {dashboardRoleMenu}
+              </div>
+            </div>
+          )}
           {trackOrdersInNavCenter && (
             <button
               ref={setItemRef("track")}
@@ -313,7 +424,10 @@ export default function LandingNavbar({
           <div className="relative" ref={loginDropdownRef}>
             <button
               type="button"
-              onClick={() => setLoginMenuOpen((open) => !open)}
+              onClick={() => {
+                setDashboardMenuOpen(false);
+                setLoginMenuOpen((open) => !open);
+              }}
               aria-expanded={loginMenuOpen}
               aria-haspopup="menu"
               aria-controls="landing-login-menu"
@@ -400,17 +514,27 @@ export default function LandingNavbar({
             ))}
             <button
               type="button"
-              onClick={() => {
-                handleCloseMobileMenu();
-                onDashboardNavigate();
-              }}
+              onClick={handleDashboardNavigate}
               className={`rounded-lg px-3 py-2 text-left text-sm font-medium transition duration-200 ease-out hover:-translate-y-0.5 hover:bg-white/15 hover:text-[#4a7c59] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-600/25 focus-visible:ring-offset-2 ${
                 isDashboardActive ? "bg-white/20 font-semibold text-emerald-900" : "text-slate-600"
               }`}
+              aria-expanded={!tokenPresent ? dashboardMenuOpen : undefined}
+              aria-controls={!tokenPresent ? "landing-dashboard-menu-mobile" : undefined}
+              aria-haspopup={!tokenPresent ? "menu" : undefined}
               aria-current={isDashboardActive ? "page" : undefined}
             >
               Dashboard
             </button>
+            {!tokenPresent && dashboardMenuOpen ? (
+              <div
+                id="landing-dashboard-menu-mobile"
+                role="menu"
+                aria-label="Choose account for dashboard"
+                className="ml-2 flex flex-col gap-1 border-l border-emerald-200/70 py-1 pl-3"
+              >
+                {dashboardRoleMenu}
+              </div>
+            ) : null}
             <button
               type="button"
               onClick={() => {

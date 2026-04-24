@@ -1,13 +1,29 @@
-﻿import React, { useEffect } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { motion } from "framer-motion";
-import { useNavigate } from "react-router-dom";
+import { useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import { FaTwitter } from "react-icons/fa6";
 import { SiFacebook, SiInstagram } from "react-icons/si";
+import { Check } from "lucide-react";
 import { SewServeBrandImg } from "./components/SewServeBrandImg.jsx";
 import { LandingStylePageBackground } from "./components/LandingStylePageBackground.jsx";
 import LandingNavbar from "./components/LandingNavbar.jsx";
 import { useSewServeLogoProcessedSrc } from "./hooks/useSewServeLogoProcessedSrc";
-import { Check, Scissors, Truck } from "lucide-react";
+import { getOrderById, listOrdersForCustomer } from "./api/ordersApi.js";
+import { ensureSocketThen, socket } from "./socket";
+import { resolveCustomerIdForChat } from "./utils/chatIdentity.js";
+import {
+  internalStatusToTrackingEnum,
+  resolveInternalStatusFromTracking,
+  trackingEnumToProgress,
+  trackingEnumToWorkflowStepIndex,
+} from "./utils/orderLiveStatus.js";
+import {
+  getNextWorkflowLabel,
+  getWorkflowIndexFromOrder,
+  isOrderWorkflowCompleted,
+  normalizeWorkflowStatus,
+  ORDER_WORKFLOW_STEPS,
+} from "./utils/orderWorkflow.js";
 
 const LOGO_SRC = `${process.env.PUBLIC_URL || ""}/images/hero/sewserve-logo.png`;
 
@@ -18,48 +34,15 @@ const navLinks = [
   { label: "Contact", sectionId: "contact" },
 ];
 
-/** Placeholder order for the tracking UI until real data is wired in */
-const DEMO_ORDER = {
-  id: "123456",
-  status: "In Progress",
-  progress: 50,
-  date: "2026-04-05",
-};
-
 const sectionReveal = {
   hidden: { opacity: 0, y: 20 },
   visible: { opacity: 1, y: 0, transition: { duration: 0.55, ease: "easeOut" } },
 };
 
-/** Maps order progress to UI phases matching the track-order mockup */
-function getTrackingPhases(order) {
-  if (!order) {
-    return {
-      m: "completed",
-      t: "active",
-      d: "pending",
-      line12: "active",
-      line23: "pending",
-    };
-  }
-  const p = order.progress ?? 0;
-  const done = order.status === "Completed" || p >= 100;
-  if (done) {
-    return { m: "completed", t: "completed", d: "completed", line12: "done", line23: "done" };
-  }
-  if (p >= 66) {
-    return { m: "completed", t: "completed", d: "active", line12: "done", line23: "active" };
-  }
-  if (p >= 33) {
-    return { m: "completed", t: "active", d: "pending", line12: "active", line23: "pending" };
-  }
-  return { m: "active", t: "pending", d: "pending", line12: "pending", line23: "pending" };
-}
-
 function formatLongDate(iso) {
   if (!iso) return "—";
-  const d = new Date(`${iso}T12:00:00`);
-  if (Number.isNaN(d.getTime())) return iso;
+  const d = new Date(`${String(iso).slice(0, 10)}T12:00:00`);
+  if (Number.isNaN(d.getTime())) return String(iso);
   return d.toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" });
 }
 
@@ -69,58 +52,16 @@ function expectedDeliveryIso(orderDate) {
   return d.toISOString().slice(0, 10);
 }
 
-/** Matches track-order card mock: 3 rows, dividers, gradient icon band, centered copy, pill badge */
-const TRACK_CARD_THEME = {
-  completed: {
-    headerGradient: "from-sky-100/90 via-sky-50/40 to-white",
-    iconRing: "bg-[#2D7A5E]",
-    title: "text-[#2D7A5E]",
-    badge: "bg-[#2D7A5E] text-white",
-  },
-  active: {
-    headerGradient: "from-amber-50/95 via-amber-50/30 to-white",
-    iconRing: "bg-[#C9A227]",
-    title: "text-[#B8860B]",
-    badge: "bg-[#C9A227] text-white",
-  },
-  pending: {
-    headerGradient: "from-slate-100/90 via-slate-50/50 to-white",
-    iconRing: "bg-slate-300",
-    title: "text-slate-600",
-    badge: "bg-slate-200 text-slate-700",
-  },
-};
-
-function phaseBadgeLabel(phase) {
-  if (phase === "completed") return "Completed";
-  if (phase === "active") return "In Progress";
-  return "Pending";
-}
-
-function TrackStatusCard({ tone, title, description, children }) {
-  const theme = TRACK_CARD_THEME[tone] ?? TRACK_CARD_THEME.pending;
-  return (
-    <div className="flex flex-col overflow-hidden rounded-apple-card border border-gray-100 bg-white shadow-lg">
-      <div
-        className={`flex justify-center border-b border-gray-100 bg-gradient-to-b px-5 py-5 sm:py-6 ${theme.headerGradient}`}
-      >
-        <div
-          className={`flex h-12 w-12 items-center justify-center rounded-full shadow-md ring-1 ring-black/5 ${theme.iconRing}`}
-        >
-          {children}
-        </div>
-      </div>
-      <div className="border-b border-gray-100 bg-white px-5 py-4 text-center sm:px-6 sm:py-5">
-        <h3 className={`text-apple-h3 font-semibold ${theme.title}`}>{title}</h3>
-        <p className="mt-2.5 text-base font-normal leading-[1.6] text-ink-muted">{description}</p>
-      </div>
-      <div className="flex justify-center bg-white px-5 py-4">
-        <span className={`inline-flex rounded-full px-4 py-1.5 text-xs font-semibold tracking-wide ${theme.badge}`}>
-          {phaseBadgeLabel(tone)}
-        </span>
-      </div>
-    </div>
-  );
+function isoFromMaybeDate(val) {
+  if (val == null || val === "") return "";
+  if (typeof val === "string") return val.slice(0, 10);
+  try {
+    const d = new Date(val);
+    if (!Number.isNaN(d.getTime())) return d.toISOString().slice(0, 10);
+  } catch {
+    /* ignore */
+  }
+  return "";
 }
 
 function SewServeFooter() {
@@ -179,12 +120,35 @@ function SewServeFooter() {
   );
 }
 
+function resolvedWorkflowIndex(order) {
+  if (!order) return 0;
+  if (isOrderWorkflowCompleted(order)) return ORDER_WORKFLOW_STEPS.length - 1;
+  const raw = order.currentStepIndex;
+  if (raw != null && String(raw).trim() !== "" && Number.isFinite(Number(raw))) {
+    return Math.max(0, Math.min(ORDER_WORKFLOW_STEPS.length - 1, Number(raw)));
+  }
+  return getWorkflowIndexFromOrder(order);
+}
+
+function stepRowState(index, activeIndex, allComplete) {
+  if (allComplete) return "completed";
+  if (index < activeIndex) return "completed";
+  if (index === activeIndex) return "active";
+  return "upcoming";
+}
+
 export default function OrderTrackingPage() {
   const navigate = useNavigate();
+  const location = useLocation();
+  const [searchParams] = useSearchParams();
   const logoDisplaySrc = useSewServeLogoProcessedSrc(LOGO_SRC);
 
-  const displayOrder = DEMO_ORDER;
-  const phases = getTrackingPhases(displayOrder);
+  const [order, setOrder] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [orderStatus, setOrderStatus] = useState(null);
+  const [, setLiveProgress] = useState(null);
+  const [, setCurrentStep] = useState(null);
+  const [, setOrderDetails] = useState(null);
 
   const handleSectionNavigate = (sectionId) => {
     navigate("/", { state: { scrollTo: sectionId } });
@@ -199,6 +163,35 @@ export default function OrderTrackingPage() {
       navigate("/login");
     }
   };
+
+  const loadOrder = useCallback(async () => {
+    const paramId = searchParams.get("orderId") || searchParams.get("id");
+    const stateId = location.state?.orderId ?? location.state?.trackingOrderId;
+    const explicitId = paramId || stateId;
+
+    setLoading(true);
+    try {
+      if (explicitId) {
+        const doc = await getOrderById(String(explicitId).trim());
+        setOrder(doc);
+      } else {
+        const cid = resolveCustomerIdForChat(null);
+        const list = await listOrdersForCustomer(cid);
+        const sorted = [...list].sort((a, b) => {
+          const ta = new Date(a.createdAt || a.date || 0).getTime();
+          const tb = new Date(b.createdAt || b.date || 0).getTime();
+          return tb - ta;
+        });
+        const active = sorted.find((o) => !isOrderWorkflowCompleted(o));
+        setOrder(active ?? null);
+      }
+    } catch (err) {
+      console.error(err);
+      setOrder(null);
+    } finally {
+      setLoading(false);
+    }
+  }, [searchParams, location.state]);
 
   useEffect(() => {
     document.title = "SewServe | Track Your Order";
@@ -227,11 +220,178 @@ export default function OrderTrackingPage() {
     };
   }, []);
 
-  const expectedDel = expectedDeliveryIso(displayOrder?.date);
-  const orderRef = displayOrder?.id != null ? `#SS${String(displayOrder.id).replace(/^#/, "")}` : "#SS—";
+  useEffect(() => {
+    void loadOrder();
+  }, [loadOrder]);
 
-  const seg12Green = phases.line12 === "done" || phases.line12 === "active";
-  const seg23Green = phases.line23 === "done" || phases.line23 === "active";
+  useEffect(() => {
+    if (!order) {
+      setOrderStatus(null);
+      setLiveProgress(null);
+      setCurrentStep(null);
+      return;
+    }
+    const internal = normalizeWorkflowStatus(order.status);
+    const track = internalStatusToTrackingEnum(internal);
+    if (track) {
+      setOrderStatus(track);
+      setLiveProgress(trackingEnumToProgress(track));
+    } else {
+      setOrderStatus(null);
+      setLiveProgress(null);
+    }
+    const idx = getWorkflowIndexFromOrder(order);
+    setCurrentStep(Number.isFinite(idx) ? idx : 0);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- sync when tracked order fields change
+  }, [order?.id, order?.status, order?.currentStepIndex]);
+
+  useEffect(() => {
+    if (!order) {
+      setOrderDetails(null);
+      return;
+    }
+    const oid = order.id ?? order._id;
+    const internal = normalizeWorkflowStatus(order.status);
+    const track = internalStatusToTrackingEnum(internal);
+    setOrderDetails({
+      orderId: oid,
+      status: track ?? internal,
+      currentStep: order.currentStepIndex ?? getWorkflowIndexFromOrder(order),
+      wizardData: order.orderPayload ?? order.wizardData ?? null,
+      updatedAt:
+        order.updatedAt != null && order.updatedAt !== ""
+          ? new Date(order.updatedAt).getTime()
+          : Date.now(),
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- mirror selected fields only
+  }, [order?.id, order?.status, order?.currentStepIndex, order?.orderPayload, order?.wizardData, order?.updatedAt]);
+
+  useEffect(() => {
+    if (!orderStatus) return;
+    setOrderDetails((prev) =>
+      prev && typeof prev === "object" ? { ...prev, status: orderStatus } : { status: orderStatus }
+    );
+  }, [orderStatus]);
+
+  useEffect(() => {
+    if (!order) return;
+    const currentOrderId = String(order.id ?? order._id ?? "").trim();
+    if (!currentOrderId) return;
+
+    const joinOrderRoom = () => {
+      socket.emit("join_order_room", currentOrderId);
+    };
+    ensureSocketThen(joinOrderRoom);
+    socket.on("connect", joinOrderRoom);
+
+    const onLiveUpdate = (data) => {
+      if (!data) return;
+      if (String(data.orderId) !== String(currentOrderId)) return;
+      setOrderStatus(data.status);
+      setLiveProgress(trackingEnumToProgress(data.status));
+      if (data.currentStep != null && Number.isFinite(Number(data.currentStep))) {
+        setCurrentStep(Number(data.currentStep));
+      }
+      setOrder((prev) => {
+        if (!prev) return prev;
+        if (String(prev.id ?? prev._id ?? "").trim() !== String(currentOrderId)) return prev;
+        const curIdx =
+          data.currentStep != null && Number.isFinite(Number(data.currentStep))
+            ? Math.max(0, Math.min(ORDER_WORKFLOW_STEPS.length - 1, Number(data.currentStep)))
+            : getWorkflowIndexFromOrder(prev);
+        const internal = resolveInternalStatusFromTracking(data.status, curIdx);
+        const stepIdx =
+          data.currentStep != null && Number.isFinite(Number(data.currentStep))
+            ? Math.max(0, Math.min(ORDER_WORKFLOW_STEPS.length - 1, Number(data.currentStep)))
+            : trackingEnumToWorkflowStepIndex(data.status, curIdx);
+        return {
+          ...prev,
+          status: internal,
+          currentStepIndex: stepIdx,
+          orderPayload: data.wizardData != null ? data.wizardData : prev.orderPayload,
+          wizardData: data.wizardData != null ? data.wizardData : prev.wizardData,
+        };
+      });
+      setOrderDetails((prev) => ({
+        ...(prev && typeof prev === "object" ? prev : {}),
+        orderId: data.orderId,
+        status: data.status,
+        currentStep: data.currentStep,
+        wizardData: data.wizardData ?? (prev && prev.wizardData),
+        updatedAt: data.updatedAt,
+      }));
+    };
+
+    const onSync = (data) => {
+      if (!data || String(data.orderId) !== String(currentOrderId)) return;
+      void loadOrder();
+    };
+
+    socket.on("order:liveUpdate", onLiveUpdate);
+    socket.on("order:sync", onSync);
+    return () => {
+      socket.off("connect", joinOrderRoom);
+      socket.off("order:liveUpdate", onLiveUpdate);
+      socket.off("order:sync", onSync);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- room + handlers keyed to order id
+  }, [order?.id, order?._id, loadOrder]);
+
+  useEffect(() => {
+    const onRefresh = () => {
+      void loadOrder();
+    };
+    const onVis = () => {
+      if (document.visibilityState === "visible") void loadOrder();
+    };
+    window.addEventListener("sewserve:orders-refresh", onRefresh);
+    window.addEventListener("focus", onRefresh);
+    document.addEventListener("visibilitychange", onVis);
+    return () => {
+      window.removeEventListener("sewserve:orders-refresh", onRefresh);
+      window.removeEventListener("focus", onRefresh);
+      document.removeEventListener("visibilitychange", onVis);
+    };
+  }, [loadOrder]);
+
+  const isDone = useMemo(() => isOrderWorkflowCompleted(order), [order]);
+  const activeIdx = useMemo(() => resolvedWorkflowIndex(order), [order]);
+  const normStatus = useMemo(() => normalizeWorkflowStatus(order?.status), [order?.status]);
+
+  const orderRef = useMemo(() => {
+    if (!order) return "—";
+    const raw = order.id ?? order._id;
+    if (raw == null || raw === "") return "—";
+    return `#SS${String(raw).replace(/^#/, "")}`;
+  }, [order]);
+
+  const orderDateDisplay = useMemo(() => {
+    if (!order) return "—";
+    if (typeof order.orderDate === "string" && order.orderDate.trim() !== "") return order.orderDate.trim();
+    const iso = isoFromMaybeDate(order.createdAt ?? order.date);
+    return formatLongDate(iso || undefined);
+  }, [order]);
+
+  const expectedDeliveryDisplay = useMemo(() => {
+    if (!order) return "—";
+    if (typeof order.expectedDelivery === "string" && order.expectedDelivery.trim() !== "") {
+      return order.expectedDelivery.trim();
+    }
+    const dueIso = isoFromMaybeDate(order.dueDate);
+    if (dueIso) return formatLongDate(dueIso);
+    const createdIso = isoFromMaybeDate(order.createdAt ?? order.date);
+    return formatLongDate(expectedDeliveryIso(createdIso || undefined));
+  }, [order]);
+
+  const currentStageLabel = useMemo(() => {
+    if (!order) return "—";
+    return ORDER_WORKFLOW_STEPS[activeIdx]?.label ?? "—";
+  }, [order, activeIdx]);
+
+  const nextStageLabel = useMemo(() => {
+    if (!order) return "—";
+    return getNextWorkflowLabel(activeIdx);
+  }, [order, activeIdx]);
 
   return (
     <div className="relative isolate min-h-screen bg-transparent text-[#6B7280] antialiased">
@@ -289,124 +449,100 @@ export default function OrderTrackingPage() {
                 </p>
               </div>
 
-              <div className="mt-10 grid gap-6 md:grid-cols-3 lg:mt-12 lg:gap-8">
-                <TrackStatusCard
-                  tone={phases.m}
-                  title="Measurement Received"
-                  description="Your measurements have been recorded."
-                >
-                  <Check
-                    className={`h-6 w-6 ${phases.m === "pending" ? "text-slate-600" : "text-white"}`}
-                    strokeWidth={2.5}
-                    aria-hidden
-                  />
-                </TrackStatusCard>
+              {loading ? (
+                <div className="mt-12 text-center text-ink-muted">Loading…</div>
+              ) : !order ? (
+                <div className="mt-12 text-center text-ink-muted">No active order found.</div>
+              ) : (
+                <>
+                  <ul className="mx-auto mt-10 max-w-xl space-y-3 lg:mt-12">
+                    {ORDER_WORKFLOW_STEPS.map((step, index) => {
+                      const rowState = stepRowState(index, activeIdx, isDone);
+                      const done = rowState === "completed";
+                      const active = rowState === "active";
+                      const upcoming = rowState === "upcoming";
+                      return (
+                        <li
+                          key={step.status}
+                          className={`flex items-center gap-3 rounded-apple-card border border-gray-100 bg-white px-4 py-3 shadow-lg ${
+                            upcoming ? "opacity-50" : ""
+                          }`}
+                          aria-current={active ? "step" : undefined}
+                        >
+                          <span
+                            className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-full shadow-sm ring-1 ring-black/5 ${
+                              done ? "bg-[#22c55e] text-white" : active ? "bg-[#C9A227] text-white ring-2 ring-amber-300/70" : "bg-slate-200"
+                            }`}
+                          >
+                            {done ? (
+                              <Check className="h-5 w-5" strokeWidth={2.5} aria-hidden />
+                            ) : active ? (
+                              <span className="h-3 w-3 rounded-full bg-white shadow-sm" aria-hidden />
+                            ) : (
+                              <span className="h-3 w-3 rounded-full bg-slate-400" aria-hidden />
+                            )}
+                          </span>
+                          <span
+                            className={`text-sm ${active ? "font-semibold text-ink" : done ? "font-medium text-[#15803d]" : "text-ink-muted"}`}
+                          >
+                            {step.label}
+                          </span>
+                        </li>
+                      );
+                    })}
+                  </ul>
 
-                <TrackStatusCard
-                  tone={phases.t}
-                  title="Tailoring in Progress"
-                  description="Your garment is currently being tailored."
-                >
-                  <Scissors
-                    className={`h-6 w-6 ${phases.t === "pending" ? "text-slate-600" : "text-white"}`}
-                    strokeWidth={2}
-                    aria-hidden
-                  />
-                </TrackStatusCard>
-
-                <TrackStatusCard
-                  tone={phases.d}
-                  title="Ready for Delivery"
-                  description="Your order is almost ready for dispatch."
-                >
-                  <Truck
-                    className={`h-6 w-6 ${phases.d === "pending" ? "text-slate-600" : "text-white"}`}
-                    strokeWidth={2}
-                    aria-hidden
-                  />
-                </TrackStatusCard>
-              </div>
-
-              {/* Horizontal timeline */}
-              <div className="mx-auto mt-12 max-w-4xl px-2 lg:mt-16">
-                <div className="relative flex items-start justify-between">
-                  <div className="absolute left-[16%] right-[16%] top-[18px] z-0 flex h-0.5 -translate-y-1/2">
-                    <div className={`h-full flex-1 ${seg12Green ? "bg-[#2D7A5E]" : "bg-slate-300"}`} />
-                    <div className={`h-full flex-1 ${seg23Green ? "bg-[#2D7A5E]" : "bg-slate-300"}`} />
-                  </div>
-
-                  <div className="relative z-10 flex w-[30%] flex-col items-center text-center">
-                    <div
-                      className={`flex h-9 w-9 items-center justify-center rounded-full shadow-sm ring-4 ring-white ${
-                        phases.m === "completed" ? "bg-[#2D7A5E]" : phases.m === "active" ? "bg-[#C9A227]" : "bg-slate-300"
-                      }`}
-                    >
-                      <Check className="h-5 w-5 text-white" strokeWidth={2.5} aria-hidden />
-                    </div>
-                    <p className="mt-3 text-xs font-medium text-[#374151] sm:text-sm">Measurements Received</p>
-                  </div>
-                  <div className="relative z-10 flex w-[30%] flex-col items-center text-center">
-                    <div
-                      className={`flex h-9 w-9 items-center justify-center rounded-full shadow-sm ring-4 ring-white ${
-                        phases.t === "completed" ? "bg-[#2D7A5E]" : phases.t === "active" ? "bg-[#C9A227]" : "bg-slate-300"
-                      }`}
-                    >
-                      <Check className="h-5 w-5 text-white" strokeWidth={2.5} aria-hidden />
-                    </div>
-                    <p
-                      className={`mt-3 text-xs font-semibold sm:text-sm ${
-                        phases.t === "active" ? "text-[#B8860B]" : "text-[#374151]"
-                      }`}
-                    >
-                      Tailoring in Progress
-                    </p>
-                  </div>
-                  <div className="relative z-10 flex w-[30%] flex-col items-center text-center">
-                    <div
-                      className={`flex h-9 w-9 items-center justify-center rounded-full shadow-sm ring-4 ring-white ${
-                        phases.d === "completed" ? "bg-[#2D7A5E]" : phases.d === "active" ? "bg-[#C9A227]" : "bg-slate-300"
-                      }`}
-                    >
-                      <Check className="h-5 w-5 text-white" strokeWidth={2.5} aria-hidden />
-                    </div>
-                    <p className="mt-3 text-xs font-medium text-[#374151] sm:text-sm">Out for Delivery</p>
-                  </div>
-                </div>
-              </div>
-
-              {/* Order details + support */}
-              <div className="mx-auto mt-14 max-w-5xl rounded-apple-card border border-slate-100 bg-white/90 px-5 py-8 shadow-[0_8px_30px_rgba(15,23,42,0.06)] sm:px-6 sm:py-8 md:px-10 lg:mt-16">
-                <div className="grid gap-10 md:grid-cols-2 md:gap-0">
-                  <div className="md:pr-10">
-                    <h2 className="text-apple-h3 font-semibold text-ink">Order Details</h2>
-                    <dl className="mt-5 space-y-3 text-sm">
-                      <div className="flex flex-wrap gap-x-2">
-                        <dt className="font-medium text-ink-muted">Order Number</dt>
-                        <dd className="font-semibold text-ink">{orderRef}</dd>
+                  <div className="mx-auto mt-14 max-w-5xl rounded-apple-card border border-slate-100 bg-white/90 px-5 py-8 shadow-[0_8px_30px_rgba(15,23,42,0.06)] sm:px-6 sm:py-8 md:px-10 lg:mt-16">
+                    <div className="grid gap-10 md:grid-cols-2 md:gap-0">
+                      <div className="md:pr-10">
+                        <h2 className="text-apple-h3 font-semibold text-ink">Order Details</h2>
+                        <dl className="mt-5 space-y-3 text-sm">
+                          <div className="flex flex-wrap gap-x-2">
+                            <dt className="font-medium text-ink-muted">Order Number</dt>
+                            <dd className="font-semibold text-ink">{orderRef}</dd>
+                          </div>
+                          <div className="flex flex-wrap gap-x-2">
+                            <dt className="font-medium text-ink-muted">Order Date</dt>
+                            <dd className="font-semibold text-ink">{orderDateDisplay}</dd>
+                          </div>
+                          <div className="flex flex-wrap gap-x-2">
+                            <dt className="font-medium text-ink-muted">Expected Delivery</dt>
+                            <dd className="font-semibold text-ink">{expectedDeliveryDisplay}</dd>
+                          </div>
+                          {normStatus === "completed" ? (
+                            <div className="flex flex-wrap gap-x-2">
+                              <dt className="font-medium text-ink-muted">Status</dt>
+                              <dd className="font-semibold text-ink">Completed ✔</dd>
+                            </div>
+                          ) : (
+                            <>
+                              <div className="flex flex-wrap gap-x-2">
+                                <dt className="font-medium text-ink-muted">Current Stage</dt>
+                                <dd className="font-semibold text-ink">{currentStageLabel}</dd>
+                              </div>
+                              <div className="flex flex-wrap gap-x-2">
+                                <dt className="font-medium text-ink-muted">Next Stage</dt>
+                                <dd className="font-semibold text-ink">{nextStageLabel}</dd>
+                              </div>
+                            </>
+                          )}
+                        </dl>
                       </div>
-                      <div className="flex flex-wrap gap-x-2">
-                        <dt className="font-medium text-ink-muted">Order Date</dt>
-                        <dd className="font-semibold text-ink">{formatLongDate(displayOrder?.date)}</dd>
+                      <div className="relative border-t border-slate-200 pt-10 md:border-l md:border-t-0 md:pl-10 md:pt-0">
+                        <h2 className="text-apple-h3 font-semibold text-ink">Need Help?</h2>
+                        <p className="mt-2.5 text-base leading-[1.6] text-ink-muted">Contact our support team for assistance.</p>
+                        <button
+                          type="button"
+                          onClick={() => navigate({ pathname: "/", hash: "#contact" })}
+                          className="mt-6 w-full rounded-apple bg-[#3E704D] px-[18px] py-2.5 text-sm font-semibold text-white shadow-sm transition-all duration-200 ease-out hover:bg-[#356645] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#3E704D] focus-visible:ring-offset-2 md:max-w-xs"
+                        >
+                          Contact Support
+                        </button>
                       </div>
-                      <div className="flex flex-wrap gap-x-2">
-                        <dt className="font-medium text-ink-muted">Expected Delivery</dt>
-                        <dd className="font-semibold text-ink">{formatLongDate(expectedDel)}</dd>
-                      </div>
-                    </dl>
+                    </div>
                   </div>
-                  <div className="relative border-t border-slate-200 pt-10 md:border-l md:border-t-0 md:pl-10 md:pt-0">
-                    <h2 className="text-apple-h3 font-semibold text-ink">Need Help?</h2>
-                    <p className="mt-2.5 text-base leading-[1.6] text-ink-muted">Contact our support team for assistance.</p>
-                    <button
-                      type="button"
-                      onClick={() => navigate({ pathname: "/", hash: "#contact" })}
-                      className="mt-6 w-full rounded-apple bg-[#3E704D] px-[18px] py-2.5 text-sm font-semibold text-white shadow-sm transition-all duration-200 ease-out hover:bg-[#356645] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#3E704D] focus-visible:ring-offset-2 md:max-w-xs"
-                    >
-                      Contact Support
-                    </button>
-                  </div>
-                </div>
-              </div>
+                </>
+              )}
             </div>
           </motion.section>
         </main>

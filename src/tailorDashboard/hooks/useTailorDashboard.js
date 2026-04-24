@@ -1,7 +1,12 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { socket } from "../../socket";
-import { getConversationId } from "../../chatUtils";
+import { useAuth } from "../../context/AuthContext.jsx";
+import { buildOrderStatusSocketPayload } from "../../utils/orderLiveStatus.js";
+import { getUserRole } from "../../utils/userRole.js";
+import { canUpdateWorkflowStatus, resolveWorkflowControlRole } from "../../utils/workflowRole.js";
+import { buildViewModelFromFullWizardData } from "../../utils/wizardDataToReviewViewModel.js";
+import { ensureSocketThen, socket } from "../../socket";
+import { getConversationId, normalizeChatId } from "../../chatUtils";
 import {
   API_BASE_URL,
   DEFAULT_CUSTOMER_ID,
@@ -17,7 +22,22 @@ import {
   getStatusIndex,
 } from "../constants";
 
+/** Use the snapshot that still has image data (socket may be slim; orders[] may have full DB orderPayload). */
+function pickRichestWizardSnapshot(candidates) {
+  const list = candidates.filter((s) => s && typeof s === "object" && !Array.isArray(s));
+  if (!list.length) return null;
+  const score = (s) => {
+    let n = 0;
+    if (typeof s.image === "string" && s.image.length > 0) n += s.image.length;
+    const d = s.referenceImage?.dataUrl;
+    if (typeof d === "string" && d.length > 0) n += d.length;
+    return n;
+  };
+  return [...list].sort((a, b) => score(b) - score(a))[0];
+}
+
 export function useTailorDashboard() {
+  const { user } = useAuth();
   const navigate = useNavigate();
   const [profiles, setProfiles] = useState(readProfilesFromStorage);
 
@@ -30,7 +50,18 @@ export function useTailorDashboard() {
     }
   });
 
-  const [activeOrderId, setActiveOrderId] = useState("");
+  const [activeOrderId, _setActiveOrderId] = useState("");
+
+  const setActiveOrderId = useCallback((id) => {
+    const next = id != null ? String(id) : "";
+    _setActiveOrderId(next);
+    const raw = next.trim();
+    if (!raw) return;
+    ensureSocketThen(() => {
+      socket.emit("join_order_room", raw);
+      socket.emit("order:active", { orderId: raw });
+    });
+  }, []);
   const [newOrder, setNewOrder] = useState({
     customerName: "",
     garmentType: "",
@@ -45,14 +76,28 @@ export function useTailorDashboard() {
   const [displayMonthlyRevenue, setDisplayMonthlyRevenue] = useState(0);
   const [isAdvancing, setIsAdvancing] = useState(false);
   const [isChatOpen, setIsChatOpen] = useState(false);
+  const isChatOpenRef = useRef(false);
+  const [unreadChatCount, setUnreadChatCount] = useState(0);
   const [activeChatCustomer, setActiveChatCustomer] = useState({ id: "", name: "Customer" });
   const [activeConversationId, setActiveConversationId] = useState("");
+  const [reviewModalOpen, setReviewModalOpen] = useState(false);
+  const [reviewModalOrder, setReviewModalOrder] = useState(null);
+  /** Latest `wizardData` from `measurement:reviewed` (includes normalized `image`). */
+  const [reviewCardData, setReviewCardData] = useState(null);
+
+  useEffect(() => {
+    isChatOpenRef.current = isChatOpen;
+  }, [isChatOpen]);
+
+  useEffect(() => {
+    if (isChatOpen) setUnreadChatCount(0);
+  }, [isChatOpen]);
 
   const fetchOrders = async () => {
     try {
       const res = await fetch(`${API_BASE_URL}/orders/tailor/${tailorId}`);
       const data = await res.json();
-      if (!Array.isArray(data)) return;
+      if (!Array.isArray(data)) return null;
       const normalizedData = data.map(normalizeOrder);
 
       setOrders((prevOrders) => {
@@ -62,8 +107,10 @@ export function useTailorDashboard() {
         }
         return normalizedData;
       });
+      return normalizedData;
     } catch (err) {
       console.error("Error fetching orders", err);
+      return null;
     }
   };
 
@@ -95,16 +142,125 @@ export function useTailorDashboard() {
         ...prev,
         `New message from ${payload?.senderId || "Customer"}: ${payload?.content || ""}`,
       ]);
+      if (!isChatOpenRef.current) {
+        setUnreadChatCount((c) => Math.min(c + 1, 999));
+      }
+    };
+
+    const onMeasurementUpdated = (payload) => {
+      const raw = payload && payload.order;
+      if (!raw || typeof raw !== "object") return;
+      const n = normalizeOrder(raw);
+      if (n.tailorId && String(n.tailorId) !== String(tailorId)) {
+        return;
+      }
+      setOrders((prev) => {
+        const i = prev.findIndex((o) => String(o.id) === String(n.id));
+        if (i === -1) {
+          return [...prev, n];
+        }
+        const next = [...prev];
+        next[i] = { ...next[i], ...n };
+        return next;
+      });
+    };
+
+    const onMeasurementReviewed = (data) => {
+      console.log("[CLIENT] Received review data:", data);
+      console.log("[CLIENT] wizardData.image:", data?.wizardData?.image);
+
+      if (!data || data.orderId == null) return;
+      const wd = data.wizardData;
+      if (!wd || typeof wd !== "object" || Array.isArray(wd)) return;
+
+      if (data?.wizardData) {
+        setReviewCardData(data.wizardData);
+      }
+
+      const id = String(data.orderId);
+
+      if (data?.wizardImageDeferred) {
+        void (async () => {
+          const list = await fetchOrders();
+          if (!list) return;
+          const raw = list.find((o) => String(o.id) === id);
+          if (!raw) return;
+          const refreshed = normalizeOrder(raw);
+          setReviewModalOrder(refreshed);
+          const fullWd = refreshed.wizardData || refreshed.orderPayload;
+          if (fullWd && typeof fullWd === "object" && !Array.isArray(fullWd)) {
+            setReviewCardData(fullWd);
+          }
+        })();
+      }
+      setOrders((prev) => {
+        const i = prev.findIndex((o) => String(o.id) === id);
+        const prevRow = i >= 0 ? prev[i] : {};
+        const view = buildViewModelFromFullWizardData(wd, {
+          ...prevRow,
+          id,
+          _id: id,
+          customerId: prevRow.customerId,
+          clientOrderId: prevRow.clientOrderId,
+          createdAt: prevRow.createdAt,
+        });
+        const tail = data.tailorId != null ? String(data.tailorId) : tailorId;
+        const merged = {
+          ...prevRow,
+          id,
+          _id: id,
+          wizardData: wd,
+          orderPayload: wd,
+          customerName: view.customerName,
+          customerPhone: view.customerPhone,
+          garmentType: view.garmentType,
+          garmentCategory: view.garmentCategory,
+          measurements: view.measurements,
+          style: {
+            fitType: view.style.fitType,
+            fabricType: view.style.fabricType,
+            stylePreference: view.style.stylePreference,
+            neckStyle: view.style.neckStyle,
+          },
+          notes: {
+            deliveryDate: view.notes.deliveryDate,
+            occasion: view.notes.occasion,
+            urgency: view.notes.urgency,
+            specialInstructions: view.notes.specialInstructions,
+            designNote: view.notes.designNote,
+          },
+          tailorId: tail,
+        };
+        const row = normalizeOrder(
+          i === -1
+            ? { ...merged, status: "pending" }
+            : { ...prevRow, ...merged, status: prevRow.status, dueDate: prevRow.dueDate, date: prevRow.date, createdAt: prevRow.createdAt }
+        );
+        if (row.tailorId && String(row.tailorId) !== String(tailorId)) {
+          return prev;
+        }
+        setReviewModalOrder(row);
+        setReviewModalOpen(true);
+        if (i === -1) {
+          return [...prev, row];
+        }
+        const next = [...prev];
+        next[i] = row;
+        return next;
+      });
     };
 
     socket.on("connect", joinRoom);
     if (socket.connected) joinRoom();
     socket.on("new_notification", handleNewNotification);
+    socket.on("measurement:updated", onMeasurementUpdated);
+    socket.on("measurement:reviewed", onMeasurementReviewed);
 
     return () => {
       socket.off("connect", joinRoom);
       socket.off("new_notification", handleNewNotification);
-      socket.disconnect();
+      socket.off("measurement:updated", onMeasurementUpdated);
+      socket.off("measurement:reviewed", onMeasurementReviewed);
     };
   }, []);
 
@@ -141,7 +297,7 @@ export function useTailorDashboard() {
 
   useEffect(() => {
     if (!activeOrder && tailorOrders.length > 0) setActiveOrderId(tailorOrders[0].id);
-  }, [activeOrder, tailorOrders]);
+  }, [activeOrder, tailorOrders, setActiveOrderId]);
 
   useEffect(() => {
     const current = profiles[tailorId] || {};
@@ -221,16 +377,48 @@ export function useTailorDashboard() {
   }, [tailorOrders]);
 
   const updateOrderStatus = async (orderId, newStatus) => {
+    const fromAuth = resolveWorkflowControlRole(user);
+    const fromStorage = getUserRole();
+    const canMutate =
+      canUpdateWorkflowStatus(fromAuth) || canUpdateWorkflowStatus(fromStorage);
+    if (!canMutate) {
+      setNotifications((prev) => [
+        "You can't update workflow from this account. Sign in as a tailor.",
+        ...prev,
+      ]);
+      return;
+    }
+
+    const normalizedStatus = normalizeStatus(newStatus);
+    setOrders((prev) =>
+      prev.map((o) =>
+        String(o.id) === String(orderId)
+          ? { ...o, status: normalizedStatus, workflowStep: getStatusIndex(normalizedStatus) }
+          : o
+      )
+    );
+
     try {
-      await fetch(`${API_BASE_URL}/orders/${orderId}`, {
+      const res = await fetch(`${API_BASE_URL}/orders/${orderId}`, {
         method: "PUT",
         headers: {
           "Content-Type": "application/json",
         },
         body: JSON.stringify({ status: newStatus }),
       });
-      fetchOrders();
+      if (!res.ok) {
+        await fetchOrders();
+        setNotifications((prev) => ["Could not sync status with server.", ...prev]);
+        return;
+      }
+      const statusPayload = buildOrderStatusSocketPayload(orderId, normalizedStatus);
+      ensureSocketThen(() => {
+        socket.emit("join_order_room", String(orderId));
+        socket.emit("order:statusUpdate", statusPayload);
+      });
+      await fetchOrders();
     } catch {
+      await fetchOrders();
       setNotifications((prev) => ["Could not sync status with server.", ...prev]);
     }
   };
@@ -272,13 +460,11 @@ export function useTailorDashboard() {
 
   const openChatForOrder = (order) => {
     if (!order) {
-      console.log("❌ No order or customerId found", order);
       return;
     }
-    const targetCustomerId = order.customerId || DEFAULT_CUSTOMER_ID;
+    const targetCustomerId = normalizeChatId(order.customerId) || DEFAULT_CUSTOMER_ID;
 
     const conversationId = getConversationId(tailorId, targetCustomerId);
-    console.log("💬 Opening chat for:", targetCustomerId, "conversation:", conversationId);
 
     setActiveChatCustomer({
       id: targetCustomerId,
@@ -291,13 +477,12 @@ export function useTailorDashboard() {
   };
 
   const openChatFromActiveOrder = () => {
-    const priorityOrder = tailorOrders.find((order) => order.customerId === DEFAULT_CUSTOMER_ID);
-    const targetOrder = priorityOrder || activeOrder || tailorOrders[0];
+    const targetOrder = activeOrder || tailorOrders[0] || null;
     if (targetOrder) {
       openChatForOrder(targetOrder);
       return;
     }
-    const fallbackCustomerId = activeChatCustomer.id || DEFAULT_CUSTOMER_ID;
+    const fallbackCustomerId = normalizeChatId(activeChatCustomer.id) || DEFAULT_CUSTOMER_ID;
     setActiveConversationId(getConversationId(tailorId, fallbackCustomerId));
     setActiveChatCustomer((prev) => ({
       id: fallbackCustomerId,
@@ -442,6 +627,30 @@ export function useTailorDashboard() {
     return Math.round(((idx + 1) / workflowStages.length) * 100);
   }, [activeOrder]);
 
+  const openMeasurementsReview = useCallback((order) => {
+    if (!order) return;
+    setActiveOrderId(String(order.id));
+    setReviewCardData(null);
+    setReviewModalOrder(normalizeOrder(order));
+    setReviewModalOpen(true);
+  }, [setActiveOrderId]);
+
+  const closeMeasurementsReview = useCallback(() => {
+    setReviewModalOpen(false);
+    setReviewModalOrder(null);
+    setReviewCardData(null);
+  }, []);
+
+  const reviewModalDisplayOrder = useMemo(() => {
+    if (!reviewModalOrder) return null;
+    if (!reviewCardData) return reviewModalOrder;
+    return {
+      ...reviewModalOrder,
+      wizardData: reviewCardData,
+      orderPayload: reviewCardData,
+    };
+  }, [reviewModalOrder, reviewCardData]);
+
   return {
     navigate,
     profiles,
@@ -460,6 +669,7 @@ export function useTailorDashboard() {
     isAdvancing,
     isChatOpen,
     setIsChatOpen,
+    unreadChatCount,
     activeChatCustomer,
     activeConversationId,
     tailorOrders,
@@ -482,5 +692,11 @@ export function useTailorDashboard() {
     donutGradient,
     expectedDeliveryLabel,
     workflowProgressPct,
+    reviewModalOpen,
+    setReviewModalOpen,
+    reviewModalOrder,
+    reviewModalDisplayOrder,
+    openMeasurementsReview,
+    closeMeasurementsReview,
   };
 }

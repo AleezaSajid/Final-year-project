@@ -1,9 +1,11 @@
-import React, { useMemo, useState } from "react";
+import React, { useMemo, useRef, useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { motion } from "framer-motion";
 import { Bell, LogOut, Menu, MessageCircle, UserRound, X } from "lucide-react";
 import { SewServeBrandImg } from "./SewServeBrandImg.jsx";
 import { clearUserRole } from "../utils/userRole";
+import { useCustomerChat } from "../context/CustomerChatContext.jsx";
+import { useTailorDashboardChat } from "../context/TailorDashboardChatContext.jsx";
 
 function isDashboardRoute(pathname) {
   if (["/select-workspace", "/workspace"].includes(pathname)) return true;
@@ -13,9 +15,22 @@ function isDashboardRoute(pathname) {
   return false;
 }
 
+/** Customer-facing routes where navbar chat opens CustomerChatWindow (same room as tailor chat). */
+function isCustomerChatRoute(pathname) {
+  return pathname === "/customer/dashboard" || pathname.startsWith("/customer/review");
+}
+
+/** Tailor main dashboard — {@link TailorDashboardChatContext} is mounted here only. */
+function isTailorDashboardChatRoute(pathname) {
+  return pathname === "/dashboard" || pathname === "/tailor/dashboard";
+}
+
+/** Order tracking UI — {@link OrderTrackingPage} (`/orders`), scroll to #order-tracking section */
+const ORDER_TRACKING_PAGE_PATH = "/orders#order-tracking";
+
 const navLinks = [
   { label: "Dashboard", to: null, match: "dashboard" },
-  { label: "Orders", to: "/orders", match: "orders" },
+  { label: "Orders", to: ORDER_TRACKING_PAGE_PATH, match: "orders" },
   { label: "Profile", to: "/profile", match: "profile" },
 ];
 
@@ -23,8 +38,50 @@ export default function DashboardNavbar() {
   const navigate = useNavigate();
   const location = useLocation();
   const [mobileOpen, setMobileOpen] = useState(false);
+  const customerChat = useCustomerChat();
+  const tailorDashChat = useTailorDashboardChat();
+  const tailorChatRef = useRef(tailorDashChat);
+  tailorChatRef.current = tailorDashChat;
+  const customerChatRef = useRef(customerChat);
+  customerChatRef.current = customerChat;
 
   const handleCloseMobileMenu = () => setMobileOpen(false);
+
+  const handleNavbarChatClick = () => {
+    console.log("NAVBAR CHAT CLICKED", { path: location.pathname });
+
+    if (isTailorDashboardChatRoute(location.pathname) && tailorDashChat?.openChatFromActiveOrder) {
+      console.log("OPENING CONVERSATION", { role: "tailor", via: "openChatFromActiveOrder" });
+      tailorDashChat.openChatFromActiveOrder();
+      handleCloseMobileMenu();
+      window.setTimeout(() => {
+        const t = tailorChatRef.current;
+        const receiverId = t?.activeChatCustomer?.id;
+        const conv = t?.activeConversationId;
+        console.log("CONVERSATION ID", conv);
+        console.log("SENDER / RECEIVER IDS", { senderId: t?.senderId, receiverId });
+      }, 0);
+      return;
+    }
+    if (isCustomerChatRoute(location.pathname) && customerChat?.openCustomerChat) {
+      const senderId = customerChat.customerId;
+      const receiverId = customerChat.tailorIdForChat;
+      const conv = customerChat.conversationId;
+      console.log("OPENING CONVERSATION", { role: "customer", via: "openCustomerChat" });
+      console.log("CONVERSATION ID", conv);
+      console.log("SENDER / RECEIVER IDS", { senderId, receiverId });
+      customerChat.openCustomerChat();
+      handleCloseMobileMenu();
+      window.setTimeout(() => {
+        const c = customerChatRef.current;
+        console.log("CONVERSATION ID (post-open)", c?.conversationId);
+        console.log("SENDER / RECEIVER IDS (post-open)", { senderId: c?.customerId, receiverId: c?.tailorIdForChat });
+      }, 0);
+      return;
+    }
+    navigate("/select-workspace");
+    handleCloseMobileMenu();
+  };
 
   const handleLogout = () => {
     localStorage.removeItem("sewserve_auth_token");
@@ -43,12 +100,25 @@ export default function DashboardNavbar() {
     };
   }, [location.pathname]);
 
+  const tailorUnreadChat = tailorDashChat?.unreadChatCount ?? 0;
+  const customerUnreadChat = customerChat?.unreadChatCount ?? 0;
+  const isTailorChatRoute = isTailorDashboardChatRoute(location.pathname);
+  const isCustomerChat = isCustomerChatRoute(location.pathname);
+  const chatUnreadForRoute = isTailorChatRoute ? tailorUnreadChat : isCustomerChat ? customerUnreadChat : 0;
+  const showChatUnreadBadge =
+    (isTailorChatRoute || isCustomerChat) && chatUnreadForRoute > 0;
+  const chatBadgeText = chatUnreadForRoute > 99 ? "99+" : String(chatUnreadForRoute);
+  const chatUnreadAria =
+    chatUnreadForRoute === 1
+      ? "1 unread message"
+      : `${chatUnreadForRoute > 99 ? "99+" : chatUnreadForRoute} unread messages`;
+
   return (
-    <header className="ss-navbar-root sticky top-0 z-50 font-['Inter',system-ui,sans-serif]">
+    <header className="ss-glass-surface sticky top-0 z-50 border-b border-white/35 font-['Inter',system-ui,sans-serif]">
       <style>
         {`
-          .ss-navbar-root {
-            border-bottom: 1px solid rgba(255, 255, 255, 0.35);
+          /* Same frosted shell as home (LandingNavbar + SewServeLandingPage .ss-glass-surface) */
+          .ss-glass-surface {
             background: linear-gradient(180deg, rgba(255, 255, 255, 0.22) 0%, rgba(255, 255, 255, 0.08) 100%);
             -webkit-backdrop-filter: blur(28px) saturate(180%);
             backdrop-filter: blur(28px) saturate(180%);
@@ -95,11 +165,11 @@ export default function DashboardNavbar() {
           <button
             type="button"
             onClick={() => {
-              navigate("/select-workspace");
+              navigate("/");
               handleCloseMobileMenu();
             }}
             className="inline-flex items-center text-lg font-bold text-slate-900"
-            aria-label="Go to workspace selection"
+            aria-label="Go to SewServe home"
           >
             <SewServeBrandImg
               decorative
@@ -113,19 +183,15 @@ export default function DashboardNavbar() {
             const active = linkIsActive(link);
             if (link.match === "dashboard") {
               return (
-                <button
+                <span
                   key={link.label}
-                  type="button"
-                  onClick={() => {
-                    navigate("/select-workspace");
-                    handleCloseMobileMenu();
-                  }}
-                  className={`ss-navbar-link whitespace-nowrap px-2.5 text-sm font-medium text-slate-600 ${
+                  className={`ss-navbar-link cursor-default whitespace-nowrap px-2.5 text-sm font-medium text-slate-600 select-none ${
                     active ? "ss-navbar-link--active" : ""
                   }`}
+                  aria-current={active ? "page" : undefined}
                 >
                   {link.label}
-                </button>
+                </span>
               );
             }
             return (
@@ -144,28 +210,43 @@ export default function DashboardNavbar() {
 
         <div className="relative z-20 ml-auto flex shrink-0 items-center gap-2">
           <div className="hidden items-center gap-2 md:flex">
+            <motion.div className="relative" whileHover={{ scale: 1.04 }} whileTap={{ scale: 0.96 }}>
+              <motion.button
+                type="button"
+                onClick={handleNavbarChatClick}
+                className={`relative inline-flex h-10 w-10 items-center justify-center rounded-xl border border-white/50 bg-white/35 shadow-sm backdrop-blur-sm transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#3b6b52]/30 ${
+                  isTailorChatRoute || isCustomerChat
+                    ? "text-[#2d5a3d] hover:bg-emerald-50/50 hover:text-[#1a3d2a]"
+                    : "text-slate-600 hover:bg-white/55 hover:text-[#1e293b]"
+                }`}
+                aria-label={
+                  isTailorChatRoute
+                    ? `Open chat with customer${showChatUnreadBadge ? `, ${chatUnreadAria}` : ""}`
+                    : isCustomerChat
+                      ? `Open chat with your tailor${showChatUnreadBadge ? `, ${chatUnreadAria}` : ""}`
+                      : "Open workspace messages"
+                }
+                transition={{ type: "spring", stiffness: 420, damping: 28 }}
+              >
+                <MessageCircle className="h-[1.125rem] w-[1.125rem] text-inherit" strokeWidth={2} aria-hidden />
+              </motion.button>
+              {showChatUnreadBadge ? (
+                <span
+                  className="pointer-events-none absolute -right-0.5 -top-0.5 z-10 flex h-5 min-w-[1.25rem] items-center justify-center rounded-full border-2 border-white bg-red-500 px-1 text-[10px] font-bold tabular-nums leading-none text-white shadow-sm ring-2 ring-white"
+                  aria-hidden
+                >
+                  {chatBadgeText}
+                </span>
+              ) : null}
+            </motion.div>
             <motion.button
               type="button"
               onClick={() => {
-                navigate("/select-workspace");
+                navigate(ORDER_TRACKING_PAGE_PATH);
                 handleCloseMobileMenu();
               }}
               className="inline-flex h-10 w-10 items-center justify-center rounded-xl border border-white/50 bg-white/35 text-slate-600 shadow-sm backdrop-blur-sm transition hover:bg-white/55 hover:text-[#1e293b] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#3b6b52]/30"
-              aria-label="Open workspace messages"
-              whileHover={{ scale: 1.04 }}
-              whileTap={{ scale: 0.96 }}
-              transition={{ type: "spring", stiffness: 420, damping: 28 }}
-            >
-              <MessageCircle className="h-[1.125rem] w-[1.125rem]" strokeWidth={2} aria-hidden />
-            </motion.button>
-            <motion.button
-              type="button"
-              onClick={() => {
-                navigate("/orders");
-                handleCloseMobileMenu();
-              }}
-              className="inline-flex h-10 w-10 items-center justify-center rounded-xl border border-white/50 bg-white/35 text-slate-600 shadow-sm backdrop-blur-sm transition hover:bg-white/55 hover:text-[#1e293b] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#3b6b52]/30"
-              aria-label="Notifications and order updates"
+              aria-label="Open order tracking"
               whileHover={{ scale: 1.04 }}
               whileTap={{ scale: 0.96 }}
               transition={{ type: "spring", stiffness: 420, damping: 28 }}
@@ -236,20 +317,18 @@ export default function DashboardNavbar() {
           <div className="mt-4 flex flex-1 flex-col gap-1 overflow-y-auto">
             <button
               type="button"
-              onClick={() => {
-                navigate("/select-workspace");
-                handleCloseMobileMenu();
-              }}
+              onClick={handleCloseMobileMenu}
               className={`rounded-xl px-3 py-2.5 text-left text-sm font-medium transition ${
                 linkIsActive({ match: "dashboard" })
                   ? "bg-white/50 text-slate-900 ring-1 ring-white/45"
                   : "text-slate-600 hover:bg-white/35"
               }`}
+              aria-current={linkIsActive({ match: "dashboard" }) ? "page" : undefined}
             >
               Dashboard
             </button>
             <Link
-              to="/orders"
+              to={ORDER_TRACKING_PAGE_PATH}
               onClick={handleCloseMobileMenu}
               className={`rounded-xl px-3 py-2.5 text-left text-sm font-medium transition ${
                 linkIsActive({ match: "orders" })
@@ -274,19 +353,25 @@ export default function DashboardNavbar() {
           <div className="mt-auto space-y-2 border-t border-white/25 pt-4">
             <button
               type="button"
-              onClick={() => {
-                navigate("/select-workspace");
-                handleCloseMobileMenu();
-              }}
-              className="flex w-full items-center justify-center gap-2 rounded-xl border border-white/45 bg-white/35 py-2.5 text-sm font-semibold text-slate-700 shadow-sm backdrop-blur-sm"
+              onClick={handleNavbarChatClick}
+              className="relative flex w-full items-center justify-center gap-2 rounded-xl border border-white/45 bg-white/35 py-2.5 text-sm font-semibold text-slate-800 shadow-sm backdrop-blur-sm transition hover:bg-emerald-50/40"
+              aria-label={showChatUnreadBadge ? `Messages, ${chatUnreadAria}` : "Open messages"}
             >
-              <MessageCircle className="h-4 w-4" aria-hidden />
-              Messages
+              <MessageCircle className="h-4 w-4 shrink-0 text-[#2d5a3d]" strokeWidth={2} aria-hidden />
+              <span className="text-[#1a3d2a]">Messages</span>
+              {showChatUnreadBadge ? (
+                <span
+                  className="pointer-events-none absolute right-3 top-2 z-10 flex h-5 min-w-[1.25rem] items-center justify-center rounded-full border-2 border-white bg-red-500 px-1 text-[10px] font-bold tabular-nums leading-none text-white shadow-sm ring-2 ring-white"
+                  aria-hidden
+                >
+                  {chatBadgeText}
+                </span>
+              ) : null}
             </button>
             <button
               type="button"
               onClick={() => {
-                navigate("/orders");
+                navigate(ORDER_TRACKING_PAGE_PATH);
                 handleCloseMobileMenu();
               }}
               className="flex w-full items-center justify-center gap-2 rounded-xl border border-white/45 bg-white/35 py-2.5 text-sm font-semibold text-slate-700 shadow-sm backdrop-blur-sm"

@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useMemo, useState } from "react";
 import { motion } from "framer-motion";
 import {
   Calendar,
@@ -21,15 +21,24 @@ import {
   TD_SECONDARY_NAVY_BTN,
 } from "../tailorDashboardClassNames";
 
+const TASK_MAP = {
+  order_placed: "Review & Approve Order",
+  pending: "Review & Approve Order",
+  measurements_verified: "Verify Measurements",
+  stitching: "Stitch Garment",
+  quality_check: "Quality Check",
+  ready_for_delivery: "Prepare Delivery",
+  last_review: "Final Inspection",
+  needs_alteration: "Final Inspection",
+};
+
 export default function TdDashboardOverview({
   notifications,
   notificationText,
   welcomeName,
   displayStats,
   upcomingOrders,
-  currentTaskLines,
-  workflowProgressPct,
-  expectedDeliveryLabel,
+  orders,
   calendarPreview,
   measurementsCandidates,
   setActiveOrderId,
@@ -37,7 +46,52 @@ export default function TdDashboardOverview({
   advanceWorkflow,
   navigate,
   activeOrder,
+  activeOrderId,
+  updateOrderStatus,
+  openMeasurementsReview,
 }) {
+  const [expandedTaskId, setExpandedTaskId] = useState(null);
+
+  const tasks = useMemo(
+    () =>
+      upcomingOrders
+        .filter((order) => normalizeStatus(order.status) !== "completed")
+        .slice(0, 5)
+        .map((order) => ({
+          id: order.id,
+          title: TASK_MAP[normalizeStatus(order.status)] || "Continue Work",
+          customer: order.customerName,
+          garment: order.garmentType,
+          due: order.dueDate || order.date,
+          status: order.status,
+        })),
+    [upcomingOrders]
+  );
+
+  const handleMarkDone = async (taskId) => {
+    console.log("[MarkDone] clicked:", taskId);
+    try {
+      const order = orders.find((o) => String(o.id) === String(taskId));
+      if (!order) return;
+      const currentIndex = getStatusIndex(order.status);
+      const nextIndex = Math.min(currentIndex + 1, workflowStages.length - 1);
+      const nextStatus = workflowStages[nextIndex].status;
+      await updateOrderStatus(taskId, nextStatus);
+      if (nextStatus === "last_review") {
+        navigate(`/tailor/last-review/${taskId}`, {
+          state: {
+            order: {
+              ...order,
+              status: "last_review",
+            },
+          },
+        });
+      }
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
   const glassCard = TD_GLASS_CARD;
   const glassCardCompact = TD_GLASS_CARD_COMPACT;
   const secondaryNavyBtn = TD_SECONDARY_NAVY_BTN;
@@ -130,35 +184,92 @@ export default function TdDashboardOverview({
                 <p className="mt-2.5 text-xs leading-[1.6] text-ink-muted">Priority work on your bench</p>
               </div>
             </div>
-            <ul className="mt-4 space-y-3">
-              {currentTaskLines.map((line, idx) => (
-                <li
-                  key={idx}
-                  className="flex gap-3 border-b border-slate-200/40 pb-3 text-sm text-slate-700 last:border-0 last:pb-0"
-                >
-                  <span className="text-base leading-none text-emerald-600" aria-hidden>
-                    ✶
-                  </span>
-                  <span>{line}</span>
-                </li>
-              ))}
-            </ul>
-            <div className="mt-5">
-              <div className="h-2 overflow-hidden rounded-full bg-slate-200/80">
-                <motion.div
-                  className="h-full rounded-full bg-gradient-to-r from-emerald-500 to-emerald-700"
-                  initial={false}
-                  animate={{ width: `${workflowProgressPct}%` }}
-                  transition={{ duration: 0.65, ease: [0.22, 1, 0.36, 1] }}
-                />
-              </div>
-              <p className="mt-2 text-right text-xs text-slate-500">
-                Expected delivery: <span className="font-medium text-slate-700">{expectedDeliveryLabel}</span>
-              </p>
-            </div>
+            {tasks.length === 0 ? (
+              <p className="mt-4 text-sm text-slate-500">No active tasks</p>
+            ) : (
+              <ul className="mt-4 space-y-3">
+                {tasks.map((task) => {
+                  const activeIdx = getStatusIndex(task.status);
+                  const isRowActive = String(task.id) === String(activeOrderId);
+                  const isExpanded = expandedTaskId === task.id;
+                  return (
+                    <li
+                      key={task.id}
+                      className={`overflow-hidden rounded-xl border transition-colors ${
+                        isRowActive ? "border-emerald-500 bg-emerald-50" : "border-slate-200/50 bg-white/20"
+                      }`}
+                    >
+                      <div
+                        role="button"
+                        tabIndex={0}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter" || e.key === " ") {
+                            e.preventDefault();
+                            setActiveOrderId(task.id);
+                          }
+                        }}
+                        onClick={() => setActiveOrderId(task.id)}
+                        className="flex w-full flex-col gap-2 p-3 text-left sm:flex-row sm:items-center sm:justify-between sm:gap-4"
+                      >
+                        <div className="min-w-0 flex-1">
+                          <p className="text-sm font-semibold text-slate-900">{task.title}</p>
+                          <p className="mt-0.5 text-sm text-slate-600">
+                            {task.customer}
+                            {task.garment ? <span className="text-slate-400"> · {task.garment}</span> : null}
+                          </p>
+                          <p className="mt-1 text-xs text-slate-500">Due: {task.due || "—"}</p>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setExpandedTaskId((id) => (id === task.id ? null : task.id));
+                          }}
+                          className="shrink-0 rounded-lg border border-slate-200/80 bg-white/80 px-3 py-1.5 text-xs font-semibold text-slate-800 shadow-sm transition hover:bg-white"
+                        >
+                          View
+                        </button>
+                      </div>
+                      {isExpanded ? (
+                        <div className="space-y-3 border-t border-slate-200/40 bg-white/40 px-3 py-3 sm:px-4">
+                          <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">Workflow</p>
+                          <ol className="space-y-2">
+                            {workflowStages.map((stage, i) => {
+                              const isDone = i < activeIdx;
+                              const isCurrent = i === activeIdx;
+                              return (
+                                <li key={stage.status} className="flex items-center gap-2 text-sm text-slate-700">
+                                  <span className="w-5 text-center" aria-hidden>
+                                    {isDone ? "✔" : isCurrent ? "➤" : "○"}
+                                  </span>
+                                  <span className={isCurrent ? "font-semibold text-emerald-800" : ""}>{stage.label}</span>
+                                </li>
+                              );
+                            })}
+                          </ol>
+                          <div className="pt-1">
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                void handleMarkDone(task.id);
+                              }}
+                              className="rounded-lg bg-gradient-to-r from-[#166534] to-[#15803d] px-3 py-2 text-xs font-semibold text-white shadow-sm transition hover:brightness-105"
+                            >
+                              Mark done
+                            </button>
+                          </div>
+                        </div>
+                      ) : null}
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
           </motion.div>
 
           <motion.div
+            id="td-upcoming"
             initial={{ opacity: 0, y: 14 }}
             whileInView={{ opacity: 1, y: 0 }}
             viewport={{ once: true, margin: "-40px" }}
@@ -266,7 +377,10 @@ export default function TdDashboardOverview({
                     <motion.button
                       type="button"
                       whileTap={{ scale: 0.97 }}
-                      onClick={() => setActiveOrderId(order.id)}
+                      onClick={() => {
+                        setActiveOrderId(order.id);
+                        openMeasurementsReview?.(order);
+                      }}
                       className={secondaryNavyBtn}
                     >
                       Review

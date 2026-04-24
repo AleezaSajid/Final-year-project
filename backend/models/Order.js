@@ -19,14 +19,47 @@ const orderSchema = new mongoose.Schema(
       default: '',
       trim: true,
     },
+    customerPhone: {
+      type: String,
+      default: '',
+      trim: true,
+    },
     garmentType: {
       type: String,
       default: '',
       trim: true,
     },
+    garmentCategory: {
+      type: String,
+      default: '',
+      trim: true,
+    },
     measurements: {
-      type: Object,
+      type: mongoose.Schema.Types.Mixed,
       default: {},
+    },
+    style: {
+      type: mongoose.Schema.Types.Mixed,
+      default: null,
+    },
+    notes: {
+      type: mongoose.Schema.Types.Mixed,
+      default: null,
+    },
+    /** Full wizard structured payload (optional duplicate for APIs that store one blob) */
+    orderPayload: {
+      type: mongoose.Schema.Types.Mixed,
+      default: null,
+    },
+    source: {
+      type: String,
+      default: '',
+      trim: true,
+    },
+    clientOrderId: {
+      type: String,
+      default: '',
+      trim: true,
     },
     price: {
       type: Number,
@@ -34,12 +67,25 @@ const orderSchema = new mongoose.Schema(
     },
     status: {
       type: String,
-      default: 'pending',
-      enum: ['pending', 'in_progress', 'completed'],
+      default: 'order_placed',
       index: true,
+      trim: true,
+    },
+    /** Index in canonical workflow (0 = order_placed … 6 = completed); kept in sync with status on writes */
+    currentStepIndex: {
+      type: Number,
+      default: 0,
     },
     dueDate: {
       type: Date,
+      default: null,
+    },
+    review: {
+      type: mongoose.Schema.Types.Mixed,
+      default: null,
+    },
+    customerReview: {
+      type: mongoose.Schema.Types.Mixed,
       default: null,
     },
   },

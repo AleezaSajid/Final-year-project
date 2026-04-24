@@ -4,7 +4,7 @@ export const ROLE_KEY = "sewserve_user_role";
 export const ROLE_CHANGE_EVENT = "sewserve-role-change";
 
 export function setUserRole(role) {
-  if (role !== "tailor" && role !== "customer") return;
+  if (role !== "tailor" && role !== "customer" && role !== "admin") return;
   localStorage.setItem(ROLE_KEY, role);
   if (typeof window !== "undefined") {
     window.dispatchEvent(new CustomEvent(ROLE_CHANGE_EVENT, { detail: role }));
@@ -13,11 +13,11 @@ export function setUserRole(role) {
 
 export function getUserRole() {
   let role = localStorage.getItem(ROLE_KEY);
-  if (role === "tailor" || role === "customer") {
+  if (role === "tailor" || role === "customer" || role === "admin") {
     return role;
   }
   const legacy = localStorage.getItem("sewserve_selected_role");
-  if (legacy === "tailor" || legacy === "customer") {
+  if (legacy === "tailor" || legacy === "customer" || legacy === "admin") {
     localStorage.setItem(ROLE_KEY, legacy);
     localStorage.removeItem("sewserve_selected_role");
     return legacy;

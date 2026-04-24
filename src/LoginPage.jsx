@@ -6,6 +6,7 @@ import { motion } from "framer-motion";
 import { LandingStylePageBackground } from "./components/LandingStylePageBackground.jsx";
 import { useAuth } from "./context/AuthContext.jsx";
 import { useSewServeLogoProcessedSrc } from "./hooks/useSewServeLogoProcessedSrc";
+import { setUserRole } from "./utils/userRole";
 
 const LOGO_SRC = `${process.env.PUBLIC_URL || ""}/images/hero/sewserve-logo.png`;
 
@@ -459,6 +460,7 @@ export default function SignInPage() {
     setLoading(true);
     try {
       await login(email.trim(), password);
+      setUserRole("customer");
       navigate("/customer/dashboard", { replace: true });
     } catch (err) {
       setError(err.message || "Sign in failed");

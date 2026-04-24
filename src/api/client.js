@@ -2,7 +2,7 @@
  * Development: call API on port 5000 using the same host as the page (localhost vs 127.0.0.1 must match).
  * Override with REACT_APP_API_BASE_URL when needed.
  */
-function apiBaseUrl() {
+export function getApiBaseUrl() {
   const fromEnv = process.env.REACT_APP_API_BASE_URL;
   if (fromEnv != null && String(fromEnv).trim() !== "") {
     return String(fromEnv).replace(/\/$/, "");
@@ -15,6 +15,10 @@ function apiBaseUrl() {
     return "http://localhost:5000";
   }
   return "";
+}
+
+function apiBaseUrl() {
+  return getApiBaseUrl();
 }
 
 export async function api(path, options = {}) {

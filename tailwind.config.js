@@ -15,6 +15,7 @@ module.exports = {
         "apple-h3": ["1.4rem", { lineHeight: "1.35" }],
       },
       colors: {
+        primary: "#4c7c4c",
         ink: {
           DEFAULT: "#1a1a1a",
           muted: "#6B7280",

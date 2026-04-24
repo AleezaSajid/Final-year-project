@@ -4,6 +4,9 @@ import { useNavigate } from "react-router-dom";
 import { Check, ChevronLeft, ChevronRight, Upload } from "lucide-react";
 import WizardNavbar from "./components/WizardNavbar";
 import { saveWizardDraft } from "./api/wizardDraftApi";
+import { useAuth } from "./context/AuthContext.jsx";
+import { clearLinkedWizardOrderId, syncWizardOrderToServer } from "./utils/measurementWizardOrderSync.js";
+import { emitWizardMeasurementReview } from "./utils/measurementReviewSocket.js";
 
 const WIZARD_STEPS = [
   { id: 1, title: "Customer Info", component: "CustomerInfo" },
@@ -920,6 +923,7 @@ function ReviewStep({
 
 export default function MeasurementWizard() {
   const navigate = useNavigate();
+  const { user } = useAuth();
   const [activeStep, setActiveStep] = useState(initialWizardFromStorage.activeStep);
   const [customerInfo, setCustomerInfo] = useState(initialWizardFromStorage.customerInfo);
   const [selectedGarmentType, setSelectedGarmentType] = useState(
@@ -967,6 +971,7 @@ export default function MeasurementWizard() {
   }
 
   const resetWizardProgress = useCallback(() => {
+    clearLinkedWizardOrderId();
     try {
       localStorage.removeItem(STORAGE_KEY);
     } catch {
@@ -1089,6 +1094,77 @@ export default function MeasurementWizard() {
   }, [activeStep]);
 
   useEffect(() => {
+    const t = window.setTimeout(() => {
+      void syncWizardOrderToServer(
+        {
+          activeStep,
+          customerInfo,
+          selectedGarmentType,
+          customGarmentType,
+          referenceImage,
+          selectedNeck,
+          measurements,
+          styleOptions,
+          designBrief,
+          data,
+          draftVersion,
+        },
+        user
+      );
+    }, 1500);
+    return () => clearTimeout(t);
+  }, [
+    user,
+    activeStep,
+    customerInfo,
+    selectedGarmentType,
+    customGarmentType,
+    referenceImage,
+    selectedNeck,
+    measurements,
+    styleOptions,
+    designBrief,
+    data,
+    draftVersion,
+  ]);
+
+  useEffect(() => {
+    if (activeStep !== 6) return;
+    const t = window.setTimeout(() => {
+      void emitWizardMeasurementReview(
+        {
+          activeStep,
+          customerInfo,
+          selectedGarmentType,
+          customGarmentType,
+          referenceImage,
+          selectedNeck,
+          measurements,
+          styleOptions,
+          designBrief,
+          data,
+          draftVersion,
+        },
+        user
+      );
+    }, 800);
+    return () => clearTimeout(t);
+  }, [
+    activeStep,
+    user,
+    customerInfo,
+    selectedGarmentType,
+    customGarmentType,
+    referenceImage,
+    selectedNeck,
+    measurements,
+    styleOptions,
+    designBrief,
+    data,
+    draftVersion,
+  ]);
+
+  useEffect(() => {
     setFieldInsight(getAdaptiveHint(activeStep));
   }, [activeStep]);
 
@@ -1131,7 +1207,25 @@ export default function MeasurementWizard() {
       return;
     }
     setError("");
-    navigate("/measurements/style");
+    void (async () => {
+      await emitWizardMeasurementReview(
+        {
+          activeStep,
+          customerInfo,
+          selectedGarmentType,
+          customGarmentType,
+          referenceImage,
+          selectedNeck,
+          measurements,
+          styleOptions,
+          designBrief,
+          data,
+          draftVersion,
+        },
+        user
+      );
+      navigate("/customer/dashboard");
+    })();
   };
 
   const clampedStep = Math.min(6, Math.max(1, activeStep));

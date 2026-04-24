@@ -3,6 +3,8 @@ import { useNavigate } from "react-router-dom";
 import { motion } from "framer-motion";
 import { Scissors, UserRound } from "lucide-react";
 import { PageBackground } from "./components/PageBackground.jsx";
+import { useAuth } from "./context/AuthContext.jsx";
+import { syncTailorSessionFromTailorUser } from "./utils/chatIdentity.js";
 import { setUserRole } from "./utils/userRole";
 
 const WORKSPACE_ROLES_KEY = "sewserve_workspace_roles";
@@ -38,6 +40,7 @@ function toSlug(displayRole) {
 
 export default function WorkspaceSelect() {
   const navigate = useNavigate();
+  const { user } = useAuth();
   const [ready, setReady] = useState(false);
 
   const roles = useMemo(() => readWorkspaceRoles(), []);
@@ -58,16 +61,22 @@ export default function WorkspaceSelect() {
       const only = roles[0];
       const slug = toSlug(only);
       setUserRole(slug);
+      if (slug === "tailor") {
+        syncTailorSessionFromTailorUser(user);
+      }
       navigate(pathForSlug(slug), { replace: true });
       return;
     }
 
     setReady(true);
-  }, [navigate, roles]);
+  }, [navigate, roles, user]);
 
   const choose = (role) => {
     const slug = toSlug(role);
     setUserRole(slug);
+    if (slug === "tailor") {
+      syncTailorSessionFromTailorUser(user);
+    }
     navigate(pathForSlug(slug), { replace: true });
   };
 
