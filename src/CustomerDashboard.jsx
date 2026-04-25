@@ -16,6 +16,7 @@ import {
 import { notifyChatIdsFromOrderUpdated, publishChatRoomCustomerId } from "./chatUtils.js";
 import { listOrdersForCustomer, mapOrdersToRecentRows } from "./api/ordersApi.js";
 import { mapApiOrderToRecentRow } from "./utils/mapApiOrderToRecentRow.js";
+import { socket } from "./socket.js";
 import DashboardNavbar from "./components/DashboardNavbar.jsx";
 import { LandingStylePageBackground } from "./components/LandingStylePageBackground.jsx";
 import { useAuth } from "./context/AuthContext.jsx";
@@ -71,6 +72,37 @@ const C = {
   yellow: "#e1a92a",
   redBrown: "#c25441",
 };
+
+const EMPTY_PROFILE_ROWS = { measurement: [], styleOptions: [], notes: [] };
+
+function isPlainOrderObject(v) {
+  return v != null && typeof v === "object" && !Array.isArray(v);
+}
+
+/** Merge partial socket/API payloads without dropping nested order fields. */
+function mergeOrderPatch(existing, patch) {
+  if (!isPlainOrderObject(patch)) return existing;
+  const base = isPlainOrderObject(existing) ? existing : {};
+  const out = { ...base, ...patch };
+  for (const key of ["notes", "orderPayload", "wizardData", "measurements", "style"]) {
+    const p = patch[key];
+    const e = base[key];
+    if (isPlainOrderObject(p) && isPlainOrderObject(e)) {
+      out[key] = { ...e, ...p };
+    } else if (p !== undefined) {
+      out[key] = p;
+    }
+  }
+  return out;
+}
+
+function sortOrdersByNewestFirst(list) {
+  return [...list].sort((a, b) => {
+    const ta = new Date(a.createdAt || a.date || 0).getTime();
+    const tb = new Date(b.createdAt || b.date || 0).getTime();
+    return tb - ta;
+  });
+}
 
 /**
  * Pull garment + style labels from latest API order (or nested orderPayload).
@@ -263,14 +295,15 @@ function ProfileRows({ rows }) {
 }
 
 /**
- * Exclusive accordion — rows from selected order when `profileFromOrder` is set, else Measurement Wizard localStorage.
+ * Profile rows from the selected API order when available; wizard draft only after load confirms zero orders.
  */
-function MeasurementProfileAccordion({ profileFromOrder }) {
+function MeasurementProfileAccordion({ profileFromOrder, ordersLoading, ordersLength }) {
+  const allowWizardFallback = !ordersLoading && ordersLength === 0;
   const [openId, setOpenId] = useState(/** @type {"measurement" | "styleOptions" | "notes" | null} */ ("measurement"));
   const [wizardProfile, setWizardProfile] = useState(() => buildDashboardProfileRows(readWizardStateFromStorage()));
 
   useEffect(() => {
-    if (profileFromOrder != null) return undefined;
+    if (profileFromOrder != null || !allowWizardFallback) return undefined;
     const sync = () => setWizardProfile(buildDashboardProfileRows(readWizardStateFromStorage()));
     const onStorage = (e) => {
       if (e.key === MEASUREMENT_WIZARD_STORAGE_KEY || e.key === null) sync();
@@ -282,9 +315,9 @@ function MeasurementProfileAccordion({ profileFromOrder }) {
       window.removeEventListener("storage", onStorage);
       window.removeEventListener("focus", sync);
     };
-  }, [profileFromOrder]);
+  }, [profileFromOrder, allowWizardFallback]);
 
-  const profile = profileFromOrder ?? wizardProfile;
+  const profile = profileFromOrder ?? (allowWizardFallback ? wizardProfile : EMPTY_PROFILE_ROWS);
 
   const toggle = (id) => {
     setOpenId((current) => (current === id ? null : id));
@@ -365,6 +398,25 @@ function orderIdentity(order) {
   return String(raw ?? "").trim();
 }
 
+function upsertCustomerOrderList(prev, raw, customerId) {
+  if (!raw || typeof raw !== "object") return prev;
+  const cid = String(customerId || "").trim();
+  const orderCid = String(raw.customerId || "").trim();
+  if (!cid || orderCid !== cid) return prev;
+  const id = orderIdentity(raw);
+  if (!id) return prev;
+  const i = prev.findIndex((o) => orderIdentity(o) === id);
+  let next;
+  if (i === -1) {
+    next = [raw, ...prev];
+  } else {
+    const merged = mergeOrderPatch(prev[i], raw);
+    next = [...prev];
+    next[i] = merged;
+  }
+  return sortOrdersByNewestFirst(next);
+}
+
 /** Garment label for “Showing details for…” (API + nested payload + table fallback). */
 function profileContextGarmentLabel(order) {
   if (!order || typeof order !== "object") return "Latest Order";
@@ -396,14 +448,14 @@ function formatRawOrderStatus(order) {
 /**
  * Order-aware Help & Support card with quick actions, modals, and FAQ.
  */
-function HelpSupportCard({ customerOrders, onTrackOrder }) {
+function HelpSupportCard({ orders, onTrackOrder }) {
   const [contactOpen, setContactOpen] = useState(false);
   const [reportOpen, setReportOpen] = useState(false);
   const [faqOpenId, setFaqOpenId] = useState(/** @type {string | null} */ (null));
   const [reportOrderKey, setReportOrderKey] = useState("");
   const [reportText, setReportText] = useState("");
 
-  const latestOrder = customerOrders[0] ?? null;
+  const latestOrder = orders[0] ?? null;
   const latestRow = latestOrder ? mapApiOrderToRecentRow(latestOrder) : null;
 
   useEffect(() => {
@@ -419,14 +471,14 @@ function HelpSupportCard({ customerOrders, onTrackOrder }) {
   }, [contactOpen, reportOpen]);
 
   const openReportModal = () => {
-    const key = orderIdentity(latestOrder) || orderIdentity(customerOrders[0]) || "";
+    const key = orderIdentity(latestOrder) || orderIdentity(orders[0]) || "";
     setReportOrderKey(key);
     setReportText("");
     setReportOpen(true);
   };
 
   const submitReport = () => {
-    const order = customerOrders.find((o) => orderIdentity(o) === reportOrderKey) || customerOrders[0];
+    const order = orders.find((o) => orderIdentity(o) === reportOrderKey) || orders[0];
     if (!order) return;
     const row = mapApiOrderToRecentRow(order);
     const subject = `SewServe: Issue report — ${row.orderId}`;
@@ -453,7 +505,7 @@ function HelpSupportCard({ customerOrders, onTrackOrder }) {
     setFaqOpenId((cur) => (cur === id ? null : id));
   };
 
-  const hasOrders = customerOrders.length > 0;
+  const hasOrders = orders.length > 0;
 
   return (
     <>
@@ -659,7 +711,7 @@ function HelpSupportCard({ customerOrders, onTrackOrder }) {
               onChange={(e) => setReportOrderKey(e.target.value)}
               className="mt-1.5 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-800 shadow-sm focus:border-emerald-500/50 focus:outline-none focus:ring-2 focus:ring-emerald-600/25"
             >
-              {customerOrders.map((o) => {
+              {orders.map((o) => {
                 const id = orderIdentity(o);
                 const r = mapApiOrderToRecentRow(o);
                 return (
@@ -707,22 +759,22 @@ function HelpSupportCard({ customerOrders, onTrackOrder }) {
 export default function CustomerDashboard() {
   const navigate = useNavigate();
   const { user } = useAuth();
-  const [customerOrders, setCustomerOrders] = useState([]);
+  const [orders, setOrders] = useState([]);
   /** Selected order for details (workflow/profile); empty string = default to latest in list. */
   const [activeOrderId, setActiveOrderId] = useState("");
   const [ordersLoading, setOrdersLoading] = useState(true);
   const [ordersError, setOrdersError] = useState("");
 
-  const recentRows = useMemo(() => mapOrdersToRecentRows(customerOrders), [customerOrders]);
+  const recentRows = useMemo(() => mapOrdersToRecentRows(orders), [orders]);
 
   const activeOrder = useMemo(() => {
-    if (!customerOrders.length) return null;
+    if (!orders.length) return null;
     if (activeOrderId) {
-      const found = customerOrders.find((o) => orderIdentity(o) === activeOrderId);
+      const found = orders.find((o) => orderIdentity(o) === activeOrderId);
       if (found) return found;
     }
-    return customerOrders[0] ?? null;
-  }, [customerOrders, activeOrderId]);
+    return orders[0] ?? null;
+  }, [orders, activeOrderId]);
 
   const profileFromOrder = useMemo(() => {
     if (!activeOrder) return null;
@@ -730,7 +782,7 @@ export default function CustomerDashboard() {
   }, [activeOrder]);
 
   const scrollToRecentOrders = useCallback(() => {
-    const first = customerOrders[0];
+    const first = orders[0];
     setActiveOrderId(first ? orderIdentity(first) : "");
     window.requestAnimationFrame(() => {
       document.getElementById("customer-dashboard-recent-orders")?.scrollIntoView({
@@ -739,37 +791,71 @@ export default function CustomerDashboard() {
       });
       document.getElementById("customer-dashboard-recent-orders")?.focus({ preventScroll: true });
     });
-  }, [customerOrders]);
+  }, [orders]);
 
-  const refreshOrders = useCallback(async () => {
+  const fetchOrders = useCallback(async () => {
     setOrdersLoading(true);
     setOrdersError("");
     try {
       const cid = resolveCustomerIdForChat(user);
       const list = await listOrdersForCustomer(cid);
-      const sorted = [...list].sort((a, b) => {
-        const ta = new Date(a.createdAt || a.date || 0).getTime();
-        const tb = new Date(b.createdAt || b.date || 0).getTime();
-        return tb - ta;
-      });
-      setCustomerOrders(sorted);
+      const sorted = sortOrdersByNewestFirst(list);
+      setOrders(sorted);
     } catch (e) {
       setOrdersError(e instanceof Error ? e.message : "Could not load orders.");
-      setCustomerOrders([]);
+      setOrders([]);
     } finally {
       setOrdersLoading(false);
     }
   }, [user]);
 
   useEffect(() => {
-    void refreshOrders();
-  }, [refreshOrders]);
+    void fetchOrders();
+  }, [fetchOrders]);
+
+  useEffect(() => {
+    const cid = String(resolveCustomerIdForChat(user) || "").trim();
+    if (!cid) return undefined;
+
+    const onOrderNew = (payload) => {
+      const raw = payload && payload.order;
+      if (!raw || typeof raw !== "object") return;
+      if (String(raw.customerId || "").trim() !== cid) return;
+      setOrders((prev) => upsertCustomerOrderList(prev, raw, cid));
+    };
+
+    const onMeasurementUpdated = (payload) => {
+      const raw = payload && payload.order;
+      if (!raw || typeof raw !== "object") return;
+      if (String(raw.customerId || "").trim() !== cid) return;
+      setOrders((prev) => upsertCustomerOrderList(prev, raw, cid));
+    };
+
+    const onOrderStatusUpdated = (data) => {
+      if (!data || data.orderId == null || data.status == null) return;
+      const oid = String(data.orderId);
+      const st = String(data.status);
+      setOrders((prev) =>
+        prev.map((o) => (orderIdentity(o) === oid ? mergeOrderPatch(o, { status: st }) : o))
+      );
+    };
+
+    socket.on("order:new", onOrderNew);
+    socket.on("measurement:updated", onMeasurementUpdated);
+    socket.on("order:statusUpdated", onOrderStatusUpdated);
+
+    return () => {
+      socket.off("order:new", onOrderNew);
+      socket.off("measurement:updated", onMeasurementUpdated);
+      socket.off("order:statusUpdated", onOrderStatusUpdated);
+    };
+  }, [user]);
 
   useEffect(() => {
     if (!activeOrderId) return;
-    const stillHere = customerOrders.some((o) => orderIdentity(o) === activeOrderId);
+    const stillHere = orders.some((o) => orderIdentity(o) === activeOrderId);
     if (!stillHere) setActiveOrderId("");
-  }, [customerOrders, activeOrderId]);
+  }, [orders, activeOrderId]);
 
   useEffect(() => {
     const cid = resolveCustomerIdForChat(user);
@@ -791,17 +877,17 @@ export default function CustomerDashboard() {
       /* ignore */
     }
     notifyChatIdsFromOrderUpdated();
-  }, [activeOrder, customerOrders, user]);
+  }, [activeOrder, orders, user]);
 
   useEffect(() => {
-    const onRefresh = () => void refreshOrders();
+    const onRefresh = () => void fetchOrders();
     window.addEventListener("sewserve:orders-refresh", onRefresh);
     window.addEventListener("focus", onRefresh);
     return () => {
       window.removeEventListener("sewserve:orders-refresh", onRefresh);
       window.removeEventListener("focus", onRefresh);
     };
-  }, [refreshOrders]);
+  }, [fetchOrders]);
 
   return (
     <div
@@ -894,7 +980,7 @@ export default function CustomerDashboard() {
                           </td>
                         </tr>
                       ) : (
-                        customerOrders.map((order) => {
+                        orders.map((order) => {
                           const row = mapApiOrderToRecentRow(order);
                           return (
                             <tr key={row.rawId || row.orderId || orderIdentity(order)} className="border-b border-gray-100 last:border-0">
@@ -956,6 +1042,8 @@ export default function CustomerDashboard() {
                     <MeasurementProfileAccordion
                       key={profileFromOrder ? orderIdentity(activeOrder) || "order" : "wizard"}
                       profileFromOrder={profileFromOrder}
+                      ordersLoading={ordersLoading}
+                      ordersLength={orders.length}
                     />
                   </div>
 
@@ -975,7 +1063,7 @@ export default function CustomerDashboard() {
                 <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                   <StyleInspirationCard latestOrder={activeOrder} />
 
-                  <HelpSupportCard customerOrders={customerOrders} onTrackOrder={scrollToRecentOrders} />
+                  <HelpSupportCard orders={orders} onTrackOrder={scrollToRecentOrders} />
                 </div>
               </div>
             </div>

@@ -22,11 +22,11 @@ export function normalizeWorkflowStatus(raw) {
     .trim()
     .toLowerCase()
     .replace(/\s+/g, "_");
-  if (s === "pending" || s === "new" || s === "processing" || s === "order_placed") return "order_placed";
+  if (s === "pending" || s === "new" || s === "order_placed") return "order_placed";
   if (s === "measurement_done" || s === "measurements_done" || s === "measurements_verified") {
     return "measurements_verified";
   }
-  if (s === "in_progress" || s === "inprogress") return "stitching";
+  if (s === "processing" || s === "in_progress" || s === "inprogress") return "stitching";
   if (s === "delivered") return "completed";
   if (ORDER_WORKFLOW_STATUSES.includes(s)) return s;
   return "order_placed";

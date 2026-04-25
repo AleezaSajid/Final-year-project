@@ -225,14 +225,21 @@ export async function listOrdersForCustomer(customerId) {
   const cid = String(customerId || "").trim();
   if (!cid) return [];
 
+  const base = getApiBaseUrl();
+  if (!base) {
+    throw new Error("API base URL is not configured.");
+  }
+
   try {
-    const data = await api(`/api/orders?customerId=${encodeURIComponent(cid)}`, { method: "GET" });
-    const list = unwrapList(data);
+    const res = await fetch(`${base}/orders?customerId=${encodeURIComponent(cid)}`, {
+      credentials: "include",
+    });
+    if (!res.ok) throw new Error(`Orders request failed (${res.status})`);
+    const data = await res.json();
+    const list = Array.isArray(data) ? data : unwrapList(data);
     return list.filter((o) => String(o.customerId || o.customer?.id || "") === cid);
   } catch (e1) {
     try {
-      const base = getApiBaseUrl();
-      if (!base) throw e1;
       const res = await fetch(`${base}/orders/customer/${encodeURIComponent(cid)}`, {
         credentials: "include",
       });

@@ -11,29 +11,70 @@ import {
   API_BASE_URL,
   DEFAULT_CUSTOMER_ID,
   GARMENT_REGEX,
+  isPendingWorkflowStatus,
   normalizeOrder,
   normalizeStatus,
   readProfilesFromStorage,
-  seedOrders,
-  SHARED_ORDER_STORAGE_KEY,
+  resolveOrderWorkflowState,
   tailorId,
   TAILOR_PROFILE_STORAGE_KEY,
+  WORKFLOW_NON_COMPLETED_STATUSES,
   workflowStages,
-  getStatusIndex,
 } from "../constants";
 
-/** Use the snapshot that still has image data (socket may be slim; orders[] may have full DB orderPayload). */
-function pickRichestWizardSnapshot(candidates) {
-  const list = candidates.filter((s) => s && typeof s === "object" && !Array.isArray(s));
-  if (!list.length) return null;
-  const score = (s) => {
-    let n = 0;
-    if (typeof s.image === "string" && s.image.length > 0) n += s.image.length;
-    const d = s.referenceImage?.dataUrl;
-    if (typeof d === "string" && d.length > 0) n += d.length;
-    return n;
-  };
-  return [...list].sort((a, b) => score(b) - score(a))[0];
+function isPlainOrderObject(v) {
+  return v != null && typeof v === "object" && !Array.isArray(v);
+}
+
+/** Deep-merge nested blobs so socket/API partials do not wipe richer local rows. */
+function mergeOrderPatch(existing, patch) {
+  if (!isPlainOrderObject(patch)) return existing;
+  const base = isPlainOrderObject(existing) ? existing : {};
+  const out = { ...base, ...patch };
+  for (const key of ["notes", "orderPayload", "wizardData", "measurements", "style"]) {
+    const p = patch[key];
+    const e = base[key];
+    if (isPlainOrderObject(p) && isPlainOrderObject(e)) {
+      out[key] = { ...e, ...p };
+    } else if (p !== undefined) {
+      out[key] = p;
+    }
+  }
+  return out;
+}
+
+function rawOrderMongoId(raw) {
+  if (!raw || typeof raw !== "object") return "";
+  if (raw.id != null && String(raw.id).trim() !== "") return String(raw.id).trim();
+  const oid = raw._id;
+  if (oid != null && typeof oid === "object" && "$oid" in oid && oid.$oid != null) {
+    return String(oid.$oid).trim();
+  }
+  if (oid != null) {
+    const s = String(oid);
+    if (s && s !== "[object Object]") return s.trim();
+  }
+  return "";
+}
+
+function upsertOrdersMerged(prev, raw, tailorIdFilter) {
+  if (!raw || typeof raw !== "object") return prev;
+  const tid = raw.tailorId != null ? String(raw.tailorId).trim() : "";
+  if (tid && String(tailorIdFilter).trim() !== tid) return prev;
+  const id = rawOrderMongoId(raw);
+  if (!id) return prev;
+  const i = prev.findIndex((o) => String(o.id ?? o._id) === id);
+  if (i === -1) {
+    return [toStoreOrder(raw), ...prev];
+  }
+  const mergedRaw = mergeOrderPatch(prev[i], raw);
+  const next = [...prev];
+  next[i] = toStoreOrder(mergedRaw);
+  return next;
+}
+
+function toStoreOrder(raw) {
+  return normalizeOrder(raw);
 }
 
 export function useTailorDashboard() {
@@ -41,14 +82,7 @@ export function useTailorDashboard() {
   const navigate = useNavigate();
   const [profiles, setProfiles] = useState(readProfilesFromStorage);
 
-  const [orders, setOrders] = useState(() => {
-    try {
-      const saved = localStorage.getItem(SHARED_ORDER_STORAGE_KEY);
-      return saved ? JSON.parse(saved).map(normalizeOrder) : seedOrders.map(normalizeOrder);
-    } catch {
-      return seedOrders.map(normalizeOrder);
-    }
-  });
+  const [orders, setOrders] = useState(() => []);
 
   const [activeOrderId, _setActiveOrderId] = useState("");
 
@@ -102,15 +136,20 @@ export function useTailorDashboard() {
 
   const fetchOrders = useCallback(async () => {
     try {
-      const res = await fetch(`${API_BASE_URL}/orders/tailor/${tailorId}`);
+      const url = `${API_BASE_URL}/orders?tailorId=${encodeURIComponent(tailorId)}`;
+      const res = await fetch(url);
       const data = await res.json();
       if (!Array.isArray(data)) return null;
-      const normalizedData = data.map(normalizeOrder);
+      const normalizedData = data.map(toStoreOrder);
 
       setOrders((prevOrders) => {
-        if (normalizedData.length > prevOrders.length) {
-          const newOrderItem = normalizedData[normalizedData.length - 1];
-          setNotifications((prev) => [...prev, `New order from ${newOrderItem.customerId}`]);
+        const prevIds = new Set(prevOrders.map((o) => String(o.id ?? o._id)));
+        const newcomers = normalizedData.filter((o) => !prevIds.has(String(o.id ?? o._id)));
+        if (newcomers.length) {
+          setNotifications((prev) => [
+            ...newcomers.map((o) => `New order from ${o.customerId || "customer"}`),
+            ...prev,
+          ]);
         }
         return normalizedData;
       });
@@ -122,16 +161,7 @@ export function useTailorDashboard() {
   }, [tailorId]);
 
   useEffect(() => {
-    localStorage.setItem(SHARED_ORDER_STORAGE_KEY, JSON.stringify(orders));
-  }, [orders]);
-
-  useEffect(() => {
     void fetchOrders();
-    const interval = setInterval(() => {
-      void fetchOrders();
-    }, 3000);
-
-    return () => clearInterval(interval);
   }, [fetchOrders]);
 
   useEffect(() => {
@@ -159,39 +189,14 @@ export function useTailorDashboard() {
     const onMeasurementUpdated = (payload) => {
       const raw = payload && payload.order;
       if (!raw || typeof raw !== "object") return;
-      const n = normalizeOrder(raw);
-      if (n.tailorId && String(n.tailorId) !== String(tailorId)) {
-        return;
-      }
-      setOrders((prev) => {
-        const i = prev.findIndex((o) => String(o.id) === String(n.id));
-        if (i === -1) {
-          return [...prev, n];
-        }
-        const next = [...prev];
-        next[i] = { ...next[i], ...n };
-        return next;
-      });
+      setOrders((prev) => upsertOrdersMerged(prev, raw, tailorId));
     };
 
     const onOrderNew = (payload) => {
-      console.log("[TailorDashboard] new order received:", payload);
+      console.log("Incoming order:", payload?.order);
       const raw = payload && payload.order;
       if (!raw || typeof raw !== "object") return;
-      const n = normalizeOrder(raw);
-      if (n.tailorId && String(n.tailorId) !== String(tailorId)) {
-        return;
-      }
-      setOrders((prev) => {
-        const i = prev.findIndex((o) => String(o.id) === String(n.id));
-        if (i === -1) {
-          return [n, ...prev];
-        }
-        const next = [...prev];
-        next[i] = { ...next[i], ...n };
-        return next;
-      });
-      void fetchOrders();
+      setOrders((prev) => upsertOrdersMerged(prev, raw, tailorId));
     };
 
     const onOrderStatusUpdatedRelay = (data) => {
@@ -203,7 +208,7 @@ export function useTailorDashboard() {
         prev.map((order) => {
           const id = String(order.id ?? order._id ?? "");
           if (id !== oid) return order;
-          return { ...order, status: normalizeStatus(st) };
+          return toStoreOrder(mergeOrderPatch(order, { status: st }));
         })
       );
     };
@@ -226,9 +231,9 @@ export function useTailorDashboard() {
         void (async () => {
           const list = await fetchOrders();
           if (!list) return;
-          const raw = list.find((o) => String(o.id) === id);
+          const raw = list.find((o) => String(o.id ?? o._id) === id);
           if (!raw) return;
-          const refreshed = normalizeOrder(raw);
+          const refreshed = toStoreOrder(raw);
           setReviewModalOrder(refreshed);
           const fullWd = refreshed.wizardData || refreshed.orderPayload;
           if (fullWd && typeof fullWd === "object" && !Array.isArray(fullWd)) {
@@ -237,7 +242,7 @@ export function useTailorDashboard() {
         })();
       }
       setOrders((prev) => {
-        const i = prev.findIndex((o) => String(o.id) === id);
+        const i = prev.findIndex((o) => String(o.id ?? o._id) === id);
         const prevRow = i >= 0 ? prev[i] : {};
         const view = buildViewModelFromFullWizardData(wd, {
           ...prevRow,
@@ -248,8 +253,7 @@ export function useTailorDashboard() {
           createdAt: prevRow.createdAt,
         });
         const tail = data.tailorId != null ? String(data.tailorId) : tailorId;
-        const merged = {
-          ...prevRow,
+        const patch = {
           id,
           _id: id,
           wizardData: wd,
@@ -274,10 +278,16 @@ export function useTailorDashboard() {
           },
           tailorId: tail,
         };
-        const row = normalizeOrder(
+        const merged = mergeOrderPatch(prevRow, patch);
+        const row = toStoreOrder(
           i === -1
-            ? { ...merged, status: "pending" }
-            : { ...prevRow, ...merged, status: prevRow.status, dueDate: prevRow.dueDate, date: prevRow.date, createdAt: prevRow.createdAt }
+            ? merged
+            : {
+                ...merged,
+                dueDate: prevRow.dueDate ?? merged.dueDate,
+                date: prevRow.date ?? merged.date,
+                createdAt: prevRow.createdAt ?? merged.createdAt,
+              }
         );
         if (row.tailorId && String(row.tailorId) !== String(tailorId)) {
           return prev;
@@ -309,7 +319,7 @@ export function useTailorDashboard() {
       socket.off("order:new", onOrderNew);
       socket.off("order:statusUpdated", onOrderStatusUpdatedRelay);
     };
-  }, [fetchOrders]);
+  }, [fetchOrders, tailorId]);
 
   useEffect(() => {
     console.log("[TailorDashboard] isChatOpen:", isChatOpen);
@@ -357,9 +367,13 @@ export function useTailorDashboard() {
 
   const stats = useMemo(() => {
     const total = tailorOrders.length;
-    const pending = tailorOrders.filter((o) => o.status === "pending").length;
-    const inProgress = tailorOrders.filter((o) => o.status !== "pending" && o.status !== "completed").length;
-    const completed = tailorOrders.filter((o) => o.status === "completed").length;
+    const pending = tailorOrders.filter((o) => isPendingWorkflowStatus(resolveOrderWorkflowState(o).internalStatus)).length;
+    const inProgress = tailorOrders.filter((o) => {
+      const s = resolveOrderWorkflowState(o).internalStatus;
+      if (s === "completed") return false;
+      return WORKFLOW_NON_COMPLETED_STATUSES.has(s) && !isPendingWorkflowStatus(s);
+    }).length;
+    const completed = tailorOrders.filter((o) => resolveOrderWorkflowState(o).internalStatus === "completed").length;
     return { total, pending, inProgress, completed };
   }, [tailorOrders]);
 
@@ -369,7 +383,7 @@ export function useTailorDashboard() {
     const currentYear = now.getFullYear();
 
     return tailorOrders
-      .filter((order) => order.status === "completed")
+      .filter((order) => resolveOrderWorkflowState(order).internalStatus === "completed")
       .filter((order) => {
         const d = new Date(order.date || order.createdAt);
         return d.getMonth() === currentMonth && d.getFullYear() === currentYear;
@@ -411,7 +425,7 @@ export function useTailorDashboard() {
       orders.filter(
         (order) =>
           String(order.tailorId ?? "").trim() === String(tailorId).trim() &&
-          normalizeStatus(order.status) !== "completed"
+          resolveOrderWorkflowState(order).internalStatus !== "completed"
       ),
     [orders]
   );
@@ -420,7 +434,7 @@ export function useTailorDashboard() {
     const nowMs = Date.now();
     const oneDayMs = 24 * 60 * 60 * 1000;
     return tailorOrders
-      .filter((order) => order.status === "pending")
+      .filter((order) => isPendingWorkflowStatus(resolveOrderWorkflowState(order).internalStatus))
       .filter((order) => {
         const orderTime = new Date(order.createdAt || order.date).getTime();
         return Number.isFinite(orderTime) && nowMs - orderTime <= oneDayMs;
@@ -442,20 +456,26 @@ export function useTailorDashboard() {
     }
 
     const normalizedStatus = normalizeStatus(newStatus);
+    const resolvedPatch = resolveOrderWorkflowState({ status: normalizedStatus });
     setOrders((prev) =>
       prev.map((o) =>
         String(o.id) === String(orderId)
-          ? { ...o, status: normalizedStatus, workflowStep: getStatusIndex(normalizedStatus) }
+          ? toStoreOrder(
+              mergeOrderPatch(o, {
+                status: normalizedStatus,
+                currentStepIndex: resolvedPatch.workflowIndex,
+                currentStep: resolvedPatch.workflowIndex,
+              })
+            )
           : o
       )
     );
 
     try {
-      const stepIdx = getStatusIndex(normalizedStatus);
       const updated = await patchOrderWizardFields(String(orderId), {
         status: normalizedStatus,
-        currentStep: stepIdx,
-        currentStepIndex: stepIdx,
+        currentStep: resolvedPatch.workflowIndex,
+        currentStepIndex: resolvedPatch.workflowIndex,
       });
       const oid = String(updated._id ?? updated.id ?? orderId);
       ensureSocketThen(() => {
@@ -475,7 +495,7 @@ export function useTailorDashboard() {
   const advanceWorkflow = async () => {
     if (!activeOrder) return;
     setIsAdvancing(true);
-    const currentIndex = getStatusIndex(activeOrder.status);
+    const { workflowIndex: currentIndex } = resolveOrderWorkflowState(activeOrder);
     const nextIndex = Math.min(currentIndex + 1, workflowStages.length - 1);
     const nextStatus = workflowStages[nextIndex].status;
     await updateOrderStatus(activeOrder.id, nextStatus);
@@ -574,9 +594,9 @@ export function useTailorDashboard() {
       }
 
       const payload = await response.json();
-      const createdOrder = normalizeOrder(payload);
-      setOrders((prev) => [createdOrder, ...prev]);
+      const createdOrder = toStoreOrder(payload);
       setActiveOrderId(createdOrder.id);
+      void fetchOrders();
       setNotifications((prev) => [`New order added for ${createdOrder.customerName}.`, ...prev]);
       setNewOrder({ customerName: "", garmentType: "", dueDate: "", price: "", orderImages: [] });
       setFormErrors({});
@@ -614,13 +634,13 @@ export function useTailorDashboard() {
 
   const currentTaskLines = useMemo(() => {
     const lines = [];
-    const pend = tailorOrders.filter((o) => normalizeStatus(o.status) === "pending");
+    const pend = tailorOrders.filter((o) => isPendingWorkflowStatus(resolveOrderWorkflowState(o).internalStatus));
     if (pend[0]) {
       lines.push(
         `Finish ${pend[0].customerName} ${pend[0].garmentType} — Due ${pend[0].dueDate || pend[0].date || "soon"}`
       );
     }
-    const any = tailorOrders.find((o) => normalizeStatus(o.status) !== "completed");
+    const any = tailorOrders.find((o) => resolveOrderWorkflowState(o).internalStatus !== "completed");
     if (any && lines.length < 2) {
       lines.push(`Review ${any.customerName} request — Awaiting approval`);
     }
@@ -633,7 +653,7 @@ export function useTailorDashboard() {
   const calendarPreview = useMemo(
     () =>
       [...tailorOrders]
-        .filter((o) => normalizeStatus(o.status) !== "completed")
+        .filter((o) => resolveOrderWorkflowState(o).internalStatus !== "completed")
         .filter((o) => o.dueDate || o.date)
         .sort((a, b) => String(a.dueDate || a.date).localeCompare(String(b.dueDate || b.date)))
         .slice(0, 2),
@@ -641,11 +661,13 @@ export function useTailorDashboard() {
   );
 
   const measurementsCandidates = useMemo(() => {
-    const activeTask = (st) =>
-      ["measurements_verified", "stitching", "quality_check"].includes(normalizeStatus(st));
+    const activeTask = (o) =>
+      ["measurements_verified", "processing", "in_progress", "stitching", "quality_check"].includes(
+        resolveOrderWorkflowState(o).internalStatus
+      );
     return newOrders.length
       ? newOrders.slice(0, 3)
-      : tailorOrders.filter((o) => activeTask(o.status)).slice(0, 3);
+      : tailorOrders.filter((o) => activeTask(o)).slice(0, 3);
   }, [newOrders, tailorOrders]);
 
   const donutGradient = useMemo(() => {
@@ -673,7 +695,7 @@ export function useTailorDashboard() {
 
   const workflowProgressPct = useMemo(() => {
     if (!activeOrder) return 0;
-    const idx = getStatusIndex(activeOrder.status);
+    const { workflowIndex: idx } = resolveOrderWorkflowState(activeOrder);
     return Math.round(((idx + 1) / workflowStages.length) * 100);
   }, [activeOrder]);
 
@@ -681,7 +703,7 @@ export function useTailorDashboard() {
     if (!order) return;
     setActiveOrderId(String(order.id));
     setReviewCardData(null);
-    setReviewModalOrder(normalizeOrder(order));
+    setReviewModalOrder(toStoreOrder(order));
     setReviewModalOpen(true);
   }, [setActiveOrderId]);
 
@@ -704,6 +726,7 @@ export function useTailorDashboard() {
   return {
     navigate,
     profiles,
+    /** Live list from GET /orders + socket merges (source for Current Tasks). */
     orders,
     setOrders,
     activeOrderId,

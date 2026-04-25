@@ -12,7 +12,7 @@ import {
 import {
   DEFAULT_AVATAR,
   getStatusIndex,
-  normalizeStatus,
+  resolveOrderWorkflowState,
   workflowStages,
 } from "../constants";
 import {
@@ -25,6 +25,8 @@ const TASK_MAP = {
   order_placed: "Review & Approve Order",
   pending: "Review & Approve Order",
   measurements_verified: "Verify Measurements",
+  processing: "Processing",
+  in_progress: "In Progress",
   stitching: "Stitch Garment",
   quality_check: "Quality Check",
   ready_for_delivery: "Prepare Delivery",
@@ -92,6 +94,11 @@ function wizardSummaryFromOrder(order) {
   );
 }
 
+function orderIsActiveCurrentTask(order) {
+  const w = resolveOrderWorkflowState(order);
+  return w.isActiveTask && w.internalStatus !== "completed";
+}
+
 export default function TdDashboardOverview({
   notifications,
   notificationText,
@@ -99,7 +106,6 @@ export default function TdDashboardOverview({
   displayStats,
   upcomingOrders,
   orders,
-  tailorOrders,
   calendarPreview,
   measurementsCandidates,
   setActiveOrderId,
@@ -123,32 +129,57 @@ export default function TdDashboardOverview({
   }, [fetchOrders]);
 
   const tasks = useMemo(() => {
-    const currentTasks = [...tailorOrders]
-      .filter((order) => normalizeStatus(order.status) !== "completed")
+    const list = Array.isArray(orders) ? orders : [];
+
+    const filtered = [...list]
+      .filter((order) => orderIsActiveCurrentTask(order))
       .sort(
         (a, b) =>
           new Date(b.createdAt || b.date || 0).getTime() -
           new Date(a.createdAt || a.date || 0).getTime()
-      )
-      .map((order) => ({
-        id: order.id ?? order._id,
-        title: TASK_MAP[normalizeStatus(order.status)] || "Continue Work",
-        customer: order.customerName,
-        garment: order.garmentType,
+      );
+
+    return filtered.map((order) => {
+      const { internalStatus: internal } = resolveOrderWorkflowState(order);
+      const idStr = String(order._id ?? order.id ?? "");
+      const _idStr = order._id != null ? String(order._id) : idStr;
+      const item =
+        (typeof order.garmentType === "string" && order.garmentType.trim()) ||
+        (order.orderPayload?.garment && typeof order.orderPayload.garment.type === "string"
+          ? order.orderPayload.garment.type
+          : "") ||
+        "";
+      return {
+        _id: _idStr,
+        id: idStr,
+        title: TASK_MAP[internal] || "Continue Work",
+        customerName: order.customerName || order.customerId || "",
+        customerId: order.customerId,
+        item,
+        customer: order.customerName || order.customerId || "",
+        garment: item || order.garmentType || "",
         due: order.dueDate || order.date,
-        status: order.status,
+        status: internal,
+        statusInternal: internal,
         wizardSummary: wizardSummaryFromOrder(order),
-      }));
-    return currentTasks;
-  }, [tailorOrders]);
+        /** Full normalized row for `WizardOrderReviewModal` (wizard payload, measurements, etc.). */
+        sourceOrder: order,
+      };
+    });
+  }, [orders]);
+
+  const openCurrentTaskWizard = (task) => {
+    if (!task?.sourceOrder) return;
+    const key = String(task._id || task.id || "");
+    if (key) setActiveOrderId(key);
+    openMeasurementsReview(task.sourceOrder);
+  };
 
   const handleMarkDone = async (taskId) => {
     try {
-      const order =
-        orders.find((o) => String(o.id) === String(taskId)) ||
-        tailorOrders.find((o) => String(o.id) === String(taskId));
+      const order = orders.find((o) => String(o._id ?? o.id) === String(taskId));
       if (!order) return;
-      const currentIndex = getStatusIndex(order.status);
+      const { workflowIndex: currentIndex } = resolveOrderWorkflowState(order);
       const nextIndex = Math.min(currentIndex + 1, workflowStages.length - 1);
       const nextStatus = workflowStages[nextIndex].status;
       await updateOrderStatus(taskId, nextStatus);
@@ -264,12 +295,13 @@ export default function TdDashboardOverview({
             ) : (
               <ul className="mt-4 space-y-3">
                 {tasks.map((task) => {
-                  const activeIdx = getStatusIndex(task.status);
-                  const isRowActive = String(task.id) === String(activeOrderId);
-                  const isExpanded = expandedTaskId === task.id;
+                  const rowKey = task._id || task.id;
+                  const activeIdx = getStatusIndex(task.statusInternal);
+                  const isRowActive = String(rowKey) === String(activeOrderId);
+                  const isExpanded = expandedTaskId === rowKey;
                   return (
                     <li
-                      key={task.id}
+                      key={rowKey}
                       className={`overflow-hidden rounded-xl border transition-colors ${
                         isRowActive ? "border-emerald-500 bg-emerald-50" : "border-slate-200/50 bg-white/20"
                       }`}
@@ -280,10 +312,10 @@ export default function TdDashboardOverview({
                         onKeyDown={(e) => {
                           if (e.key === "Enter" || e.key === " ") {
                             e.preventDefault();
-                            setActiveOrderId(task.id);
+                            openCurrentTaskWizard(task);
                           }
                         }}
-                        onClick={() => setActiveOrderId(task.id)}
+                        onClick={() => openCurrentTaskWizard(task)}
                         className="flex w-full flex-col gap-2 p-3 text-left sm:flex-row sm:items-center sm:justify-between sm:gap-4"
                       >
                         <div className="min-w-0 flex-1">
@@ -338,7 +370,8 @@ export default function TdDashboardOverview({
                           type="button"
                           onClick={(e) => {
                             e.stopPropagation();
-                            setExpandedTaskId((id) => (id === task.id ? null : task.id));
+                            openCurrentTaskWizard(task);
+                            setExpandedTaskId((id) => (id === rowKey ? null : rowKey));
                           }}
                           className="shrink-0 rounded-lg border border-slate-200/80 bg-white/80 px-3 py-1.5 text-xs font-semibold text-slate-800 shadow-sm transition hover:bg-white"
                         >
@@ -367,7 +400,7 @@ export default function TdDashboardOverview({
                               type="button"
                               onClick={(e) => {
                                 e.stopPropagation();
-                                void handleMarkDone(task.id);
+                                void handleMarkDone(String(rowKey));
                               }}
                               className="rounded-lg bg-gradient-to-r from-[#166534] to-[#15803d] px-3 py-2 text-xs font-semibold text-white shadow-sm transition hover:brightness-105"
                             >
@@ -549,11 +582,12 @@ export default function TdDashboardOverview({
               type="button"
               whileTap={{ scale: 0.985 }}
               onClick={() => {
-                if (
-                  activeOrder &&
-                  getStatusIndex(activeOrder.status) < workflowStages.length - 1 &&
-                  normalizeStatus(activeOrder.status) !== "needs_alteration"
-                ) {
+                if (!activeOrder) {
+                  navigate("/tailor-profile");
+                  return;
+                }
+                const w = resolveOrderWorkflowState(activeOrder);
+                if (w.workflowIndex < workflowStages.length - 1 && w.internalStatus !== "needs_alteration") {
                   advanceWorkflow();
                 } else {
                   navigate("/tailor-profile");

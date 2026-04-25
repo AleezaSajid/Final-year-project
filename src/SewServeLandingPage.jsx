@@ -76,7 +76,7 @@ const features = [
     bannerLabel: "Order Tracking",
     description: "Stay updated from tailoring in progress to final delivery with live status updates.",
     icon: MapPinned,
-    route: "/features/order-tracking",
+    route: "/orders#order-tracking",
   },
   {
     title: "Trusted Local Tailors",

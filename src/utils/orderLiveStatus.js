@@ -30,7 +30,9 @@ export function internalStatusToTrackingEnum(internalNormalized) {
     .toLowerCase();
   if (s === "pending" || s === "order_placed") return TRACKING_STATUS.ORDER_PLACED;
   if (s === "measurements_verified") return TRACKING_STATUS.MEASUREMENTS_VERIFIED;
-  if (s === "stitching" || s === "needs_alteration") return TRACKING_STATUS.STITCHING;
+  if (s === "stitching" || s === "needs_alteration" || s === "processing" || s === "in_progress") {
+    return TRACKING_STATUS.STITCHING;
+  }
   if (s === "quality_check") return TRACKING_STATUS.QUALITY_CHECK;
   if (s === "ready_for_delivery" || s === "last_review") return TRACKING_STATUS.READY;
   if (s === "completed") return TRACKING_STATUS.COMPLETED;

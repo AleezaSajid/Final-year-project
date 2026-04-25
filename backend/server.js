@@ -156,12 +156,13 @@ app.post('/api/logout', (req, res) => {
 });
 
 const normalizeOrderStatus = (status = '') => {
-  const value = String(status).trim().toLowerCase();
-  if (value === 'in progress' || value === 'in_progress') return 'in_progress';
+  const value = String(status).trim().toLowerCase().replace(/\s+/g, '_');
+  if (value === 'in_progress' || value === 'inprogress') return 'in_progress';
   if (
     value === 'order_placed' ||
     value === 'pending' ||
     value === 'measurements_verified' ||
+    value === 'processing' ||
     value === 'stitching' ||
     value === 'quality_check' ||
     value === 'ready_for_delivery' ||
@@ -179,31 +180,36 @@ function internalStatusToTrackingStatus(s) {
   const v = normalizeOrderStatus(s);
   if (v === 'pending' || v === 'order_placed') return 'ORDER_PLACED';
   if (v === 'measurements_verified') return 'MEASUREMENTS_VERIFIED';
-  if (v === 'stitching' || v === 'in_progress' || v === 'needs_alteration') return 'STITCHING';
+  if (v === 'stitching' || v === 'in_progress' || v === 'processing' || v === 'needs_alteration') {
+    return 'STITCHING';
+  }
   if (v === 'quality_check') return 'QUALITY_CHECK';
   if (v === 'ready_for_delivery' || v === 'last_review') return 'READY';
   if (v === 'completed') return 'COMPLETED';
   return 'ORDER_PLACED';
 }
 
+const MAX_WORKFLOW_STEP_INDEX = 8; // 0..8 inclusive (pending → completed)
+
 function stepIndexFromOrderDoc(doc) {
   if (!doc) return 0;
   const raw = doc.currentStepIndex;
   if (raw != null && Number.isFinite(Number(raw))) {
-    return Math.max(0, Math.min(6, Number(raw)));
+    return Math.max(0, Math.min(MAX_WORKFLOW_STEP_INDEX, Number(raw)));
   }
   const v = normalizeOrderStatus(doc.status);
   const map = {
     pending: 0,
     order_placed: 0,
     measurements_verified: 1,
-    stitching: 2,
-    in_progress: 2,
-    quality_check: 3,
-    ready_for_delivery: 4,
-    last_review: 5,
-    completed: 6,
-    needs_alteration: 2,
+    processing: 2,
+    in_progress: 3,
+    stitching: 4,
+    quality_check: 5,
+    ready_for_delivery: 6,
+    last_review: 7,
+    completed: 8,
+    needs_alteration: 4,
   };
   return map[v] ?? 0;
 }
@@ -296,6 +302,22 @@ app.post('/orders', async (req, res) => {
   } catch (error) {
     console.error('ORDER CREATE ERROR', error);
     return res.status(500).json({ message: 'Unable to create order right now.' });
+  }
+});
+
+/** Unified list: optional ?customerId= & ?tailorId= (same collection as customer/tailor routes). */
+app.get('/orders', async (req, res) => {
+  try {
+    const q = {};
+    const customerId = req.query.customerId != null ? String(req.query.customerId).trim() : '';
+    const tailorId = req.query.tailorId != null ? String(req.query.tailorId).trim() : '';
+    if (customerId) q.customerId = customerId;
+    if (tailorId) q.tailorId = tailorId;
+    const orders = await Order.find(q).sort({ createdAt: -1 });
+    return res.status(200).json(orders);
+  } catch (error) {
+    console.error('FETCH ORDERS (QUERY) ERROR', error);
+    return res.status(500).json({ message: 'Unable to fetch orders.' });
   }
 });
 
@@ -399,10 +421,10 @@ app.patch('/orders/:orderId', async (req, res) => {
     updatePayload.status = normalizeOrderStatus(String(b.status));
   }
   if (b.currentStepIndex != null && Number.isFinite(Number(b.currentStepIndex))) {
-    updatePayload.currentStepIndex = Math.max(0, Math.min(6, Number(b.currentStepIndex)));
+    updatePayload.currentStepIndex = Math.max(0, Math.min(MAX_WORKFLOW_STEP_INDEX, Number(b.currentStepIndex)));
   }
   if (b.currentStep != null && Number.isFinite(Number(b.currentStep))) {
-    updatePayload.currentStepIndex = Math.max(0, Math.min(6, Number(b.currentStep)));
+    updatePayload.currentStepIndex = Math.max(0, Math.min(MAX_WORKFLOW_STEP_INDEX, Number(b.currentStep)));
   }
 
   if (Object.keys(updatePayload).length === 0) {
