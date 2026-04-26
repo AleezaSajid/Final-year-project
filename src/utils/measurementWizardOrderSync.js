@@ -1,5 +1,6 @@
 import { createMeasurementOrder, patchOrderWizardFields } from "../api/ordersApi.js";
 import { buildMeasurementOrderPayload, measurementOrderPayloadToServerBody } from "./measurementOrderPayload.js";
+import { CUSTOMER_ID_STORAGE_KEY, TAILOR_SESSION_STORAGE_KEY } from "./chatIdentity.js";
 
 export const WIZARD_LINKED_ORDER_ID_KEY = "sewserve_wizard_linked_order_id";
 
@@ -78,6 +79,16 @@ export async function syncWizardOrderToServer(snapshot, authUser) {
   if (!snapshot || typeof snapshot !== "object") return;
 
   const { payload, flat } = buildPayloadAndFlat(snapshot, authUser);
+  try {
+    if (payload?.customer?.id) {
+      localStorage.setItem(CUSTOMER_ID_STORAGE_KEY, String(payload.customer.id));
+    }
+    if (payload?.tailorId) {
+      localStorage.setItem(TAILOR_SESSION_STORAGE_KEY, String(payload.tailorId));
+    }
+  } catch {
+    /* ignore storage errors */
+  }
   let linked = getLinkedWizardOrderId();
 
   if (!linked) {
@@ -102,11 +113,13 @@ export async function syncWizardOrderToServer(snapshot, authUser) {
     }
   }
 
-  if (!linked) return;
+  if (!linked) return null;
   try {
     const patch = pickPatchBody(flat);
     await patchOrderWizardFields(linked, patch);
+    return linked;
   } catch (e) {
     console.warn("[measurement sync] patch failed", e);
+    return null;
   }
 }

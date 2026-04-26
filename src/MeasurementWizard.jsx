@@ -1129,42 +1129,6 @@ export default function MeasurementWizard() {
   ]);
 
   useEffect(() => {
-    if (activeStep !== 6) return;
-    const t = window.setTimeout(() => {
-      void emitWizardMeasurementReview(
-        {
-          activeStep,
-          customerInfo,
-          selectedGarmentType,
-          customGarmentType,
-          referenceImage,
-          selectedNeck,
-          measurements,
-          styleOptions,
-          designBrief,
-          data,
-          draftVersion,
-        },
-        user
-      );
-    }, 800);
-    return () => clearTimeout(t);
-  }, [
-    activeStep,
-    user,
-    customerInfo,
-    selectedGarmentType,
-    customGarmentType,
-    referenceImage,
-    selectedNeck,
-    measurements,
-    styleOptions,
-    designBrief,
-    data,
-    draftVersion,
-  ]);
-
-  useEffect(() => {
     setFieldInsight(getAdaptiveHint(activeStep));
   }, [activeStep]);
 
@@ -1208,8 +1172,10 @@ export default function MeasurementWizard() {
     }
     setError("");
     void (async () => {
-      await emitWizardMeasurementReview(
-        {
+      try {
+        // Start a fresh order on final submit so completed/old linked orders are never reused.
+        clearLinkedWizardOrderId();
+        const snapshot = {
           activeStep,
           customerInfo,
           selectedGarmentType,
@@ -1221,10 +1187,17 @@ export default function MeasurementWizard() {
           designBrief,
           data,
           draftVersion,
-        },
-        user
-      );
-      navigate("/customer/dashboard");
+        };
+        const result = await emitWizardMeasurementReview(snapshot, user);
+        if (!result?.orderId) {
+          throw new Error("Order was not created. Please try Complete Setup again.");
+        }
+        window.dispatchEvent(new CustomEvent("sewserve:orders-refresh"));
+        resetWizardProgress();
+        navigate("/customer/dashboard");
+      } catch (e) {
+        setError(e instanceof Error ? e.message : "Could not complete setup. Please try again.");
+      }
     })();
   };
 

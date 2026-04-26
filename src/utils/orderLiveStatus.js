@@ -1,4 +1,4 @@
-import { normalizeWorkflowStatus, ORDER_WORKFLOW_STEPS } from "./orderWorkflow.js";
+import { getTrackingStatus, normalizeWorkflowStatus, ORDER_WORKFLOW_STEPS } from "./orderWorkflow.js";
 
 /** Shared live-tracking enums (uppercase) — same on tailor emit and customer receive. */
 export const TRACKING_STATUS = {
@@ -25,18 +25,7 @@ export const TRACKING_STATUS_PROGRESS = {
  * @returns {keyof typeof TRACKING_STATUS | null}
  */
 export function internalStatusToTrackingEnum(internalNormalized) {
-  const s = String(internalNormalized || "")
-    .trim()
-    .toLowerCase();
-  if (s === "pending" || s === "order_placed") return TRACKING_STATUS.ORDER_PLACED;
-  if (s === "measurements_verified") return TRACKING_STATUS.MEASUREMENTS_VERIFIED;
-  if (s === "stitching" || s === "needs_alteration" || s === "processing" || s === "in_progress") {
-    return TRACKING_STATUS.STITCHING;
-  }
-  if (s === "quality_check") return TRACKING_STATUS.QUALITY_CHECK;
-  if (s === "ready_for_delivery" || s === "last_review") return TRACKING_STATUS.READY;
-  if (s === "completed") return TRACKING_STATUS.COMPLETED;
-  return null;
+  return getTrackingStatus(internalNormalized);
 }
 
 /**

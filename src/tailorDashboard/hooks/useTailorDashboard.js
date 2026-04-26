@@ -142,17 +142,7 @@ export function useTailorDashboard() {
       if (!Array.isArray(data)) return null;
       const normalizedData = data.map(toStoreOrder);
 
-      setOrders((prevOrders) => {
-        const prevIds = new Set(prevOrders.map((o) => String(o.id ?? o._id)));
-        const newcomers = normalizedData.filter((o) => !prevIds.has(String(o.id ?? o._id)));
-        if (newcomers.length) {
-          setNotifications((prev) => [
-            ...newcomers.map((o) => `New order from ${o.customerId || "customer"}`),
-            ...prev,
-          ]);
-        }
-        return normalizedData;
-      });
+      setOrders(() => normalizedData);
       return normalizedData;
     } catch (err) {
       console.error("Error fetching orders", err);
@@ -163,6 +153,13 @@ export function useTailorDashboard() {
   useEffect(() => {
     void fetchOrders();
   }, [fetchOrders]);
+
+  useEffect(() => {
+    // Remove legacy "New order from ..." noise from existing in-memory notifications.
+    setNotifications((prev) =>
+      prev.filter((note) => !String(note ?? "").toLowerCase().startsWith("new order from "))
+    );
+  }, []);
 
   useEffect(() => {
     localStorage.setItem(TAILOR_PROFILE_STORAGE_KEY, JSON.stringify(profiles));
@@ -187,30 +184,37 @@ export function useTailorDashboard() {
     };
 
     const onMeasurementUpdated = (payload) => {
-      const raw = payload && payload.order;
+      const raw = payload?.fullOrder || payload?.order;
       if (!raw || typeof raw !== "object") return;
+      console.log("[Tailor Sync] measurement:updated", raw.id ?? raw._id ?? "");
       setOrders((prev) => upsertOrdersMerged(prev, raw, tailorId));
     };
 
     const onOrderNew = (payload) => {
-      console.log("Incoming order:", payload?.order);
-      const raw = payload && payload.order;
+      const raw = payload?.fullOrder || payload?.order;
       if (!raw || typeof raw !== "object") return;
+      console.log("[Tailor Sync] order:new", raw.id ?? raw._id ?? "");
       setOrders((prev) => upsertOrdersMerged(prev, raw, tailorId));
     };
 
     const onOrderStatusUpdatedRelay = (data) => {
-      if (!data || data.orderId == null) return;
+      if (!data) return;
+      const raw = data.fullOrder;
+      if (raw && typeof raw === "object") {
+        console.log("[Tailor Sync] order:statusUpdated fullOrder", raw.id ?? raw._id ?? "");
+        setOrders((prev) => upsertOrdersMerged(prev, raw, tailorId));
+        return;
+      }
+      if (data.orderId == null) return;
       const oid = String(data.orderId);
       const st = data.status != null ? String(data.status) : "";
       if (!st) return;
-      setOrders((prev) =>
-        prev.map((order) => {
-          const id = String(order.id ?? order._id ?? "");
-          if (id !== oid) return order;
-          return toStoreOrder(mergeOrderPatch(order, { status: st }));
-        })
-      );
+      console.log("[Tailor Sync] order:statusUpdated patch", oid, st);
+      setOrders((prev) => prev.map((order) => {
+        const id = String(order.id ?? order._id ?? "");
+        if (id !== oid) return order;
+        return toStoreOrder(mergeOrderPatch(order, { status: st }));
+      }));
     };
 
     const onMeasurementReviewed = (data) => {
@@ -218,6 +222,7 @@ export function useTailorDashboard() {
       console.log("[CLIENT] wizardData.image:", data?.wizardData?.image);
 
       if (!data || data.orderId == null) return;
+      console.log("[Tailor Sync] measurement:reviewed", data.orderId);
       const wd = data.wizardData;
       if (!wd || typeof wd !== "object" || Array.isArray(wd)) return;
 

@@ -818,23 +818,34 @@ export default function CustomerDashboard() {
     if (!cid) return undefined;
 
     const onOrderNew = (payload) => {
-      const raw = payload && payload.order;
+      const raw = payload?.fullOrder || payload?.order;
       if (!raw || typeof raw !== "object") return;
       if (String(raw.customerId || "").trim() !== cid) return;
+      console.log("[Customer Sync] order:new", raw.id ?? raw._id ?? "");
       setOrders((prev) => upsertCustomerOrderList(prev, raw, cid));
     };
 
     const onMeasurementUpdated = (payload) => {
-      const raw = payload && payload.order;
+      const raw = payload?.fullOrder || payload?.order;
       if (!raw || typeof raw !== "object") return;
       if (String(raw.customerId || "").trim() !== cid) return;
+      console.log("[Customer Sync] measurement:updated", raw.id ?? raw._id ?? "");
       setOrders((prev) => upsertCustomerOrderList(prev, raw, cid));
     };
 
     const onOrderStatusUpdated = (data) => {
-      if (!data || data.orderId == null || data.status == null) return;
+      if (!data) return;
+      if (data.fullOrder && typeof data.fullOrder === "object") {
+        const raw = data.fullOrder;
+        if (String(raw.customerId || "").trim() !== cid) return;
+        console.log("[Customer Sync] order:statusUpdated fullOrder", raw.id ?? raw._id ?? "");
+        setOrders((prev) => upsertCustomerOrderList(prev, raw, cid));
+        return;
+      }
+      if (data.orderId == null || data.status == null) return;
       const oid = String(data.orderId);
       const st = String(data.status);
+      console.log("[Customer Sync] order:statusUpdated patch", oid, st);
       setOrders((prev) =>
         prev.map((o) => (orderIdentity(o) === oid ? mergeOrderPatch(o, { status: st }) : o))
       );

@@ -1,3 +1,11 @@
+import {
+  getTrackingStatus,
+  getWorkflowIndex,
+  normalizeWorkflowStatus,
+  resolveWorkflowState,
+  workflowStages as ENGINE_WORKFLOW_STAGES,
+} from "../utils/workflowEngine.js";
+
 export const SHARED_ORDER_STORAGE_KEY = "sewserve_orders";
 export const TAILOR_PROFILE_STORAGE_KEY = "sewserve_tailor_profiles";
 export const GARMENT_REGEX = /^[A-Za-z ]+$/;
@@ -12,18 +20,8 @@ export const DEFAULT_AVATAR = `data:image/svg+xml;utf8,${encodeURIComponent(
   </svg>`
 )}`;
 
-/** Linear tailor workflow (Mark done advances by index). */
-export const workflowStages = [
-  { status: "pending", label: "Order Placed" },
-  { status: "measurements_verified", label: "Measurements Verified" },
-  { status: "processing", label: "Processing" },
-  { status: "in_progress", label: "In Progress" },
-  { status: "stitching", label: "Stitching" },
-  { status: "quality_check", label: "Quality Check" },
-  { status: "ready_for_delivery", label: "Ready for Delivery" },
-  { status: "last_review", label: "Last Review" },
-  { status: "completed", label: "Completed" },
-];
+/** Shared workflow source of truth (from workflowEngine). */
+export const workflowStages = ENGINE_WORKFLOW_STAGES;
 
 /** All non-terminal statuses (stats / “active” work). */
 export const WORKFLOW_NON_COMPLETED_STATUSES = new Set([
@@ -39,30 +37,15 @@ export const WORKFLOW_NON_COMPLETED_STATUSES = new Set([
   "needs_alteration",
 ]);
 
-const KNOWN_STATUS = new Set([
-  ...workflowStages.map((s) => s.status),
-  "order_placed",
-  "needs_alteration",
-]);
-
 /**
  * Formatting-only normalization: lowercase, spaces → underscores. Preserves semantic distinctions
  * (processing vs in_progress vs stitching).
  */
-export const normalizeStatus = (value) => {
-  let s = String(value ?? "pending")
-    .trim()
-    .toLowerCase()
-    .replace(/\s+/g, "_");
-  if (s === "inprogress") s = "in_progress";
-  if (s === "orderplaced") s = "order_placed";
-  if (KNOWN_STATUS.has(s)) return s;
-  return "pending";
-};
+export const normalizeStatus = (value) => normalizeWorkflowStatus(value);
 
 export function isPendingWorkflowStatus(status) {
   const s = normalizeStatus(status);
-  return s === "pending" || s === "order_placed";
+  return s === "pending";
 }
 
 function mongoIdToString(maybe) {
@@ -110,24 +93,11 @@ function orderDocId(order) {
 
 /** Aligns with backend / customer `order:live` tracking enums. */
 export function internalStatusToTrackingEnum(internal) {
-  const v = normalizeStatus(internal);
-  if (v === "pending" || v === "order_placed") return "ORDER_PLACED";
-  if (v === "measurements_verified") return "MEASUREMENTS_VERIFIED";
-  if (v === "stitching" || v === "in_progress" || v === "processing" || v === "needs_alteration") {
-    return "STITCHING";
-  }
-  if (v === "quality_check") return "QUALITY_CHECK";
-  if (v === "ready_for_delivery" || v === "last_review") return "READY";
-  if (v === "completed") return "COMPLETED";
-  return "ORDER_PLACED";
+  return getTrackingStatus(internal);
 }
 
 export const getStatusIndex = (status) => {
-  let n = normalizeStatus(status);
-  if (n === "needs_alteration") return workflowStages.findIndex((s) => s.status === "last_review");
-  if (n === "order_placed") n = "pending";
-  const index = workflowStages.findIndex((stage) => stage.status === n);
-  return index >= 0 ? index : 0;
+  return getWorkflowIndex(status);
 };
 
 export const formatStatusLabel = (status) => {
@@ -144,61 +114,13 @@ export const formatStatusLabel = (status) => {
  * `workflowStages` defines step order; index always derived from resolved internal status.
  */
 export function resolveOrderWorkflowState(order) {
-  if (!order || typeof order !== "object") {
-    return {
-      internalStatus: "pending",
-      workflowIndex: 0,
-      trackingEnum: "ORDER_PLACED",
-      isActiveTask: true,
-    };
-  }
-
-  const idxRaw = order.currentStepIndex ?? order.currentStep;
-  const idx =
-    idxRaw != null && Number.isFinite(Number(idxRaw))
-      ? Math.max(0, Math.min(workflowStages.length - 1, Number(idxRaw)))
-      : null;
-
-  const statusRaw = order.status;
-  const hasPrimaryStatus = statusRaw != null && String(statusRaw).trim() !== "";
-
-  let internalStatus = "pending";
-  if (hasPrimaryStatus) {
-    internalStatus = normalizeStatus(String(statusRaw));
-  } else {
-    const fromWs = socketEnumToSnake(order.workflowStatus, idx ?? order.currentStepIndex);
-    if (fromWs) {
-      internalStatus = normalizeStatus(fromWs);
-    } else if (idx != null) {
-      internalStatus = normalizeStatus(workflowStages[idx]?.status || "pending");
-    } else if (order.workflowStatus != null && String(order.workflowStatus).trim() !== "") {
-      const snake = socketEnumToSnake(order.workflowStatus, null);
-      if (snake) internalStatus = normalizeStatus(snake);
-    }
-  }
-
-  const wfRaw = order.workflowStatus;
-  const hasWorkflowField = wfRaw != null && String(wfRaw).trim() !== "";
-  if (hasPrimaryStatus && hasWorkflowField) {
-    const fromStatusOnly = normalizeStatus(String(statusRaw));
-    const mapped = socketEnumToSnake(order.workflowStatus, idx ?? order.currentStepIndex);
-    if (mapped) {
-      const fromWorkflowOnly = normalizeStatus(mapped);
-      if (fromStatusOnly !== fromWorkflowOnly) {
-        console.warn(
-          `WORKFLOW MISMATCH DETECTED ${orderDocId(order)}`,
-          fromStatusOnly,
-          fromWorkflowOnly
-        );
-      }
-    }
-  }
-
-  const workflowIndex = getStatusIndex(internalStatus);
-  const trackingEnum = internalStatusToTrackingEnum(internalStatus);
-  const isActiveTask = WORKFLOW_NON_COMPLETED_STATUSES.has(internalStatus);
-
-  return { internalStatus, workflowIndex, trackingEnum, isActiveTask };
+  const r = resolveWorkflowState(order);
+  return {
+    internalStatus: r.internalStatus,
+    workflowIndex: r.workflowIndex,
+    trackingEnum: r.trackingStatus,
+    isActiveTask: r.isTailorActive,
+  };
 }
 
 export const defaultProfiles = {
@@ -292,10 +214,7 @@ export const normalizeOrder = (order) => {
       order.customerPhone != null && String(order.customerPhone).trim() !== "" ? String(order.customerPhone) : "",
     style: order.style && typeof order.style === "object" && !Array.isArray(order.style) ? order.style : null,
     notes: order.notes && typeof order.notes === "object" && !Array.isArray(order.notes) ? order.notes : null,
-    workflowStatus:
-      order.workflowStatus != null && String(order.workflowStatus).trim() !== ""
-        ? String(order.workflowStatus).trim()
-        : undefined,
+    workflowStatus: normalizedStatus,
     currentStepIndex: workflowIndex,
   };
 };

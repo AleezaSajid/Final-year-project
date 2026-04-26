@@ -175,6 +175,16 @@ const normalizeOrderStatus = (status = '') => {
   return 'pending';
 };
 
+const WORKFLOW_STAGES = [
+  'pending',
+  'measurements_verified',
+  'stitching',
+  'quality_check',
+  'ready_for_delivery',
+  'last_review',
+  'completed',
+];
+
 /** Uppercase tracking enum — must match customer/tailor `orderLiveStatus.js`. */
 function internalStatusToTrackingStatus(s) {
   const v = normalizeOrderStatus(s);
@@ -189,7 +199,7 @@ function internalStatusToTrackingStatus(s) {
   return 'ORDER_PLACED';
 }
 
-const MAX_WORKFLOW_STEP_INDEX = 8; // 0..8 inclusive (pending → completed)
+const MAX_WORKFLOW_STEP_INDEX = WORKFLOW_STAGES.length - 1;
 
 function stepIndexFromOrderDoc(doc) {
   if (!doc) return 0;
@@ -203,15 +213,26 @@ function stepIndexFromOrderDoc(doc) {
     order_placed: 0,
     measurements_verified: 1,
     processing: 2,
-    in_progress: 3,
-    stitching: 4,
-    quality_check: 5,
-    ready_for_delivery: 6,
-    last_review: 7,
-    completed: 8,
-    needs_alteration: 4,
+    in_progress: 2,
+    stitching: 2,
+    quality_check: 3,
+    ready_for_delivery: 4,
+    last_review: 5,
+    completed: 6,
+    needs_alteration: 5,
   };
-  return map[v] ?? 0;
+  return Math.max(0, Math.min(MAX_WORKFLOW_STEP_INDEX, map[v] ?? 0));
+}
+
+function normalizeOrderWorkflowFields(raw = {}) {
+  const status = normalizeOrderStatus(raw.status != null ? raw.status : raw.workflowStatus);
+  const currentStepIndex = stepIndexFromOrderDoc({
+    ...raw,
+    status,
+    currentStepIndex: raw.currentStepIndex ?? raw.currentStep,
+  });
+  const workflowStatus = status;
+  return { status, workflowStatus, currentStepIndex, updatedAt: new Date().toISOString() };
 }
 
 async function findOrderDocByParam(orderIdParam) {
@@ -249,13 +270,43 @@ function serializeOrderForSocket(doc) {
   return o;
 }
 
+function buildWorkflowSocketPayload(orderDoc, fallbackOrderId = '') {
+  const fullOrder = serializeOrderForSocket(orderDoc);
+  const normalized = normalizeOrderWorkflowFields(fullOrder || { id: fallbackOrderId });
+  const orderId = String(fullOrder?.id || fullOrder?._id || fallbackOrderId || '').trim();
+  return {
+    orderId,
+    fullOrder: fullOrder
+      ? {
+          ...fullOrder,
+          status: normalized.status,
+          workflowStatus: normalized.workflowStatus,
+          currentStepIndex: normalized.currentStepIndex,
+        }
+      : null,
+    order: fullOrder
+      ? {
+          ...fullOrder,
+          status: normalized.status,
+          workflowStatus: normalized.workflowStatus,
+          currentStepIndex: normalized.currentStepIndex,
+        }
+      : null,
+    status: normalized.status,
+    workflowStatus: normalized.workflowStatus,
+    currentStepIndex: normalized.currentStepIndex,
+    updatedAt: normalized.updatedAt,
+  };
+}
+
 function emitMeasurementOrderToTailor(orderDoc) {
   try {
     if (!io || !orderDoc) return;
     const tid = orderDoc.tailorId != null ? String(orderDoc.tailorId).trim() : '';
     if (!tid) return;
-    const order = serializeOrderForSocket(orderDoc);
-    io.to(tid).emit('measurement:updated', { order });
+    const payload = buildWorkflowSocketPayload(orderDoc);
+    console.log('[Socket Sync] measurement:updated', payload.orderId, payload.status, payload.currentStepIndex);
+    io.to(tid).emit('measurement:updated', payload);
   } catch (e) {
     console.error('EMIT measurement:updated', e);
   }
@@ -269,9 +320,9 @@ app.post('/orders', async (req, res) => {
   }
 
   try {
-    const initialStatus = normalizeOrderStatus(
-      status != null && String(status).trim() !== '' ? status : 'measurements_verified'
-    );
+    const workflow = normalizeOrderWorkflowFields({
+      status: status != null && String(status).trim() !== '' ? status : 'pending',
+    });
     const savedOrder = await Order.create({
       clientOrderId: b.clientOrderId != null ? String(b.clientOrderId) : b.orderId != null ? String(b.orderId) : '',
       source: b.source != null ? String(b.source) : '',
@@ -286,15 +337,17 @@ app.post('/orders', async (req, res) => {
       notes: b.notes && typeof b.notes === 'object' ? b.notes : null,
       orderPayload: b.orderPayload != null ? b.orderPayload : null,
       price: Number(price || 0),
-      status: initialStatus,
-      currentStepIndex: stepIndexFromOrderDoc({ status: initialStatus }),
+      status: workflow.status,
+      workflowStatus: workflow.workflowStatus,
+      currentStepIndex: workflow.currentStepIndex,
       dueDate: dueDate ? new Date(dueDate) : null,
     });
     console.log('ORDER CREATED', savedOrder._id.toString());
     emitMeasurementOrderToTailor(savedOrder);
     try {
-      const order = serializeOrderForSocket(savedOrder);
-      io.emit('order:new', { order });
+      const payload = buildWorkflowSocketPayload(savedOrder);
+      console.log('[Socket Sync] order:new', payload.orderId, payload.status, payload.currentStepIndex);
+      io.emit('order:new', payload);
     } catch (e) {
       console.error('EMIT order:new', e);
     }
@@ -420,6 +473,9 @@ app.patch('/orders/:orderId', async (req, res) => {
   if (b.status != null && String(b.status).trim() !== '') {
     updatePayload.status = normalizeOrderStatus(String(b.status));
   }
+  if (b.workflowStatus != null && String(b.workflowStatus).trim() !== '' && updatePayload.status == null) {
+    updatePayload.status = normalizeOrderStatus(String(b.workflowStatus));
+  }
   if (b.currentStepIndex != null && Number.isFinite(Number(b.currentStepIndex))) {
     updatePayload.currentStepIndex = Math.max(0, Math.min(MAX_WORKFLOW_STEP_INDEX, Number(b.currentStepIndex)));
   }
@@ -445,10 +501,10 @@ app.patch('/orders/:orderId', async (req, res) => {
       );
     }
 
-    if (updatePayload.status != null && updatePayload.currentStepIndex == null) {
-      const merged = { ...existing.toObject(), status: updatePayload.status };
-      updatePayload.currentStepIndex = stepIndexFromOrderDoc(merged);
-    }
+    const unified = normalizeOrderWorkflowFields({ ...existing.toObject(), ...updatePayload });
+    updatePayload.status = unified.status;
+    updatePayload.workflowStatus = unified.workflowStatus;
+    updatePayload.currentStepIndex = unified.currentStepIndex;
 
     const updatedOrder = await Order.findByIdAndUpdate(
       resolvedId,
@@ -459,6 +515,13 @@ app.patch('/orders/:orderId', async (req, res) => {
       return res.status(404).json({ message: 'Order not found.' });
     }
     emitMeasurementOrderToTailor(updatedOrder);
+    console.log(
+      '[Workflow Engine] PATCH /orders',
+      String(updatedOrder._id),
+      updatedOrder.status,
+      updatedOrder.workflowStatus,
+      updatedOrder.currentStepIndex
+    );
     return res.status(200).json(updatedOrder);
   } catch (error) {
     console.error('ORDER PATCH ERROR', error);
@@ -500,6 +563,15 @@ app.put('/orders/:orderId', async (req, res) => {
       return res.status(404).json({ message: 'Order not found.' });
     }
 
+    const existingOrder = await Order.findById(resolvedMongoId);
+    if (!existingOrder) {
+      return res.status(404).json({ message: 'Order not found.' });
+    }
+    const unified = normalizeOrderWorkflowFields({ ...existingOrder.toObject(), ...updatePayload });
+    updatePayload.status = unified.status;
+    updatePayload.workflowStatus = unified.workflowStatus;
+    updatePayload.currentStepIndex = unified.currentStepIndex;
+
     const updatedOrder = await Order.findByIdAndUpdate(
       resolvedMongoId,
       { $set: updatePayload },
@@ -511,6 +583,9 @@ app.put('/orders/:orderId', async (req, res) => {
     }
 
     emitMeasurementOrderToTailor(updatedOrder);
+    const payload = buildWorkflowSocketPayload(updatedOrder);
+    io.to(payload.orderId).emit('order:statusUpdated', payload);
+    console.log('[Socket Sync] order:statusUpdated', payload.orderId, payload.status, payload.currentStepIndex);
 
     console.log('ORDER STATUS UPDATED', {
       orderId: updatedOrder._id.toString(),
@@ -565,13 +640,20 @@ io.on('connection', (socket) => {
     if (canonicalId !== rawOrderId) {
       socket.join(canonicalId);
     }
-    const out = {
-      orderId: canonicalId,
-      status: data.status != null ? String(data.status) : '',
-    };
+    let updatedDoc = await findOrderDocByParam(canonicalId);
+    if (updatedDoc && data.status != null && String(data.status).trim() !== '') {
+      const unified = normalizeOrderWorkflowFields({ ...updatedDoc.toObject(), status: String(data.status) });
+      updatedDoc = await Order.findByIdAndUpdate(
+        String(updatedDoc._id),
+        { $set: unified },
+        { new: true, strict: false }
+      );
+    }
+    const payload = buildWorkflowSocketPayload(updatedDoc, canonicalId);
+    console.log('[Socket Sync] order:statusUpdated', payload.orderId, payload.status, payload.currentStepIndex);
     const rooms = new Set([canonicalId, rawOrderId]);
     for (const r of rooms) {
-      if (r) io.to(r).emit('order:statusUpdated', out);
+      if (r) io.to(r).emit('order:statusUpdated', payload);
     }
   });
 
@@ -601,31 +683,18 @@ io.on('connection', (socket) => {
       socket.join(canonicalId);
     }
 
-    const updatedAt = Date.now();
-    const clientTracking = data.status != null ? String(data.status).trim().toUpperCase() : '';
-
-    let status = clientTracking;
-    let currentStep = 0;
-    let wizardData = null;
-
-    if (doc) {
-      status = internalStatusToTrackingStatus(doc.status);
-      currentStep = stepIndexFromOrderDoc(doc);
-      wizardData = doc.orderPayload != null ? doc.orderPayload : null;
-    } else if (!status) {
-      return;
+    let updatedDoc = doc;
+    if (updatedDoc && data.status != null && String(data.status).trim() !== '') {
+      const unified = normalizeOrderWorkflowFields({ ...updatedDoc.toObject(), status: String(data.status) });
+      updatedDoc = await Order.findByIdAndUpdate(
+        String(updatedDoc._id),
+        { $set: unified },
+        { new: true, strict: false }
+      );
     }
-
-    const payload = {
-      orderId: canonicalId,
-      status,
-      currentStep,
-      wizardData,
-      updatedAt,
-    };
-
-    const legacy = { orderId: canonicalId, status, updatedAt };
-    emitOrderLiveToOrderRooms(io, canonicalId, rawOrderId, payload, legacy);
+    const payload = buildWorkflowSocketPayload(updatedDoc, canonicalId);
+    console.log('[Socket Sync] order:liveUpdate', payload.orderId, payload.status, payload.currentStepIndex);
+    emitOrderLiveToOrderRooms(io, canonicalId, rawOrderId, payload, payload);
   });
 
   socket.on('measurement:review', (payload = {}) => {
@@ -637,7 +706,29 @@ io.on('connection', (socket) => {
       console.error('[SERVER] Failed to calculate payload size', e);
     }
 
-    io.emit('measurement:reviewed', payload);
+    const rawOrderId = payload.orderId != null ? String(payload.orderId).trim() : '';
+    if (!rawOrderId) {
+      io.emit('measurement:reviewed', payload);
+      return;
+    }
+    void (async () => {
+      const doc = await findOrderDocByParam(rawOrderId);
+      const normalized = buildWorkflowSocketPayload(doc, rawOrderId);
+      const out = {
+        ...payload,
+        orderId: normalized.orderId,
+        fullOrder: normalized.fullOrder,
+        status: normalized.status,
+        workflowStatus: normalized.workflowStatus,
+        currentStepIndex: normalized.currentStepIndex,
+        updatedAt: normalized.updatedAt,
+      };
+      console.log('[Socket Sync] measurement:reviewed', out.orderId, out.status, out.currentStepIndex);
+      io.emit('measurement:reviewed', out);
+    })().catch((e) => {
+      console.error('[Socket Sync] measurement:reviewed', e);
+      io.emit('measurement:reviewed', payload);
+    });
   });
 
   socket.on('request_history', async ({ conversationId } = {}) => {

@@ -17,14 +17,14 @@ import {
 import { ensureSocketThen, socket } from "./socket";
 import { resolveCustomerIdForChat } from "./utils/chatIdentity.js";
 import { getOrderActivityMessage } from "./utils/orderActivityMessage.js";
-import { internalStatusToTrackingEnum, trackingEnumToProgress } from "./utils/orderLiveStatus.js";
+import { trackingEnumToProgress } from "./utils/orderLiveStatus.js";
 import {
   getNextWorkflowLabel,
   getWorkflowIndexFromOrder,
   isOrderWorkflowCompleted,
-  normalizeWorkflowStatus,
   ORDER_WORKFLOW_STEPS,
 } from "./utils/orderWorkflow.js";
+import { getTrackingStatus, normalizeWorkflowStatus, resolveWorkflowState } from "./utils/workflowEngine.js";
 
 const LOGO_SRC = `${process.env.PUBLIC_URL || ""}/images/hero/sewserve-logo.png`;
 
@@ -119,16 +119,6 @@ function SewServeFooter() {
       </div>
     </footer>
   );
-}
-
-function resolvedWorkflowIndex(order) {
-  if (!order) return 0;
-  if (isOrderWorkflowCompleted(order)) return ORDER_WORKFLOW_STEPS.length - 1;
-  const raw = order.currentStepIndex;
-  if (raw != null && String(raw).trim() !== "" && Number.isFinite(Number(raw))) {
-    return Math.max(0, Math.min(ORDER_WORKFLOW_STEPS.length - 1, Number(raw)));
-  }
-  return getWorkflowIndexFromOrder(order);
 }
 
 function orderIdsMatch(a, b) {
@@ -244,7 +234,7 @@ export default function OrderTrackingPage() {
       return;
     }
     const internal = normalizeWorkflowStatus(order.status);
-    const track = internalStatusToTrackingEnum(internal);
+    const track = getTrackingStatus(internal);
     if (track) {
       setOrderStatus(track);
       setLiveProgress(trackingEnumToProgress(track));
@@ -264,7 +254,7 @@ export default function OrderTrackingPage() {
     }
     const oid = order.id ?? order._id;
     const internal = normalizeWorkflowStatus(order.status);
-    const track = internalStatusToTrackingEnum(internal);
+    const track = getTrackingStatus(internal);
     setOrderDetails({
       orderId: oid,
       status: track ?? internal,
@@ -315,7 +305,11 @@ export default function OrderTrackingPage() {
     };
 
     const onLiveUpdate = (data) => {
-      if (data && orderIdsMatch(data.orderId, currentOrderId)) {
+      if (data?.fullOrder && orderIdsMatch(data.orderId, currentOrderId)) {
+        console.log("[Customer Sync] order:liveUpdate fullOrder", data.orderId);
+        setOrder(data.fullOrder);
+      } else if (data && orderIdsMatch(data.orderId, currentOrderId)) {
+        console.log("[Customer Sync] order:liveUpdate patch", data.orderId);
         setOrderStatus(data.status);
         setActivityMessage(getOrderActivityMessage(data.status));
       }
@@ -323,7 +317,11 @@ export default function OrderTrackingPage() {
     };
 
     const onStatusUpdatedRelay = (data) => {
-      if (data && orderIdsMatch(data.orderId, currentOrderId)) {
+      if (data?.fullOrder && orderIdsMatch(data.orderId, currentOrderId)) {
+        console.log("[Customer Sync] order:statusUpdated fullOrder", data.orderId);
+        setOrder(data.fullOrder);
+      } else if (data && orderIdsMatch(data.orderId, currentOrderId)) {
+        console.log("[Customer Sync] order:statusUpdated patch", data.orderId);
         setOrderStatus(data.status);
         setActivityMessage(getOrderActivityMessage(data.status));
       }
@@ -365,7 +363,7 @@ export default function OrderTrackingPage() {
   }, [loadOrder]);
 
   const isDone = useMemo(() => isOrderWorkflowCompleted(order), [order]);
-  const activeIdx = useMemo(() => resolvedWorkflowIndex(order), [order]);
+  const activeIdx = useMemo(() => resolveWorkflowState(order).workflowIndex, [order]);
   const normStatus = useMemo(() => normalizeWorkflowStatus(order?.status), [order?.status]);
 
   const orderRef = useMemo(() => {

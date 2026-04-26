@@ -100,14 +100,14 @@ function buildMeasurementReviewSocketPayload(orderId, tailorId, full) {
  */
 export async function emitWizardMeasurementReview(wizardData, authUser) {
   if (typeof window === "undefined" || !wizardData || typeof wizardData !== "object") {
-    return;
+    return { ok: false, orderId: null };
   }
   const full = cloneWizardState(wizardData);
   normalizeWizardImageForEmit(full);
-  await syncWizardOrderToServer(full, authUser);
-  const orderId = getLinkedWizardOrderId();
+  const syncedOrderId = await syncWizardOrderToServer(full, authUser);
+  const orderId = syncedOrderId || getLinkedWizardOrderId();
   if (!orderId) {
-    return;
+    throw new Error("Could not create order from wizard. Please try again.");
   }
   try {
     await patchOrderWizardFields(orderId, { orderPayload: full });
@@ -118,4 +118,5 @@ export async function emitWizardMeasurementReview(wizardData, authUser) {
   const socketPayload = buildMeasurementReviewSocketPayload(orderId, tailorId, full);
   console.log("[measurement:review emit] wizardData.image:", socketPayload?.wizardData?.image);
   socket.emit("measurement:review", socketPayload);
+  return { ok: true, orderId };
 }

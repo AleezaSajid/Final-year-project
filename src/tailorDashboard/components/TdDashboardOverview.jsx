@@ -15,6 +15,7 @@ import {
   resolveOrderWorkflowState,
   workflowStages,
 } from "../constants";
+import { getPriorityScore, isTailorActiveTask } from "../../utils/workflowEngine.js";
 import {
   TD_GLASS_CARD,
   TD_GLASS_CARD_COMPACT,
@@ -96,7 +97,7 @@ function wizardSummaryFromOrder(order) {
 
 function orderIsActiveCurrentTask(order) {
   const w = resolveOrderWorkflowState(order);
-  return w.isActiveTask && w.internalStatus !== "completed";
+  return isTailorActiveTask(order) && w.internalStatus !== "completed";
 }
 
 export default function TdDashboardOverview({
@@ -133,11 +134,7 @@ export default function TdDashboardOverview({
 
     const filtered = [...list]
       .filter((order) => orderIsActiveCurrentTask(order))
-      .sort(
-        (a, b) =>
-          new Date(b.createdAt || b.date || 0).getTime() -
-          new Date(a.createdAt || a.date || 0).getTime()
-      );
+      .sort((a, b) => getPriorityScore(a) - getPriorityScore(b));
 
     return filtered.map((order) => {
       const { internalStatus: internal } = resolveOrderWorkflowState(order);
@@ -505,49 +502,6 @@ export default function TdDashboardOverview({
             transition={{ duration: 0.45, ease: [0.25, 0.1, 0.25, 1] }}
             className={glassCard}
           >
-            <h2 className="text-apple-h3 font-semibold text-ink">Measurements to Review</h2>
-            <ul className="mt-4 space-y-3">
-              {measurementsCandidates.length > 0 ? (
-                measurementsCandidates.map((order) => (
-                  <li
-                    key={order.id}
-                    className="flex items-center gap-3 border-b border-slate-200/40 pb-3 last:border-0 last:pb-0"
-                  >
-                    <img
-                      src={DEFAULT_AVATAR}
-                      alt=""
-                      className="h-11 w-11 rounded-full border border-white/60 object-cover shadow-sm"
-                    />
-                    <div className="min-w-0 flex-1">
-                      <p className="truncate text-sm font-semibold text-slate-900">{order.customerName}</p>
-                      <p className="text-xs text-slate-500">New measurements</p>
-                    </div>
-                    <motion.button
-                      type="button"
-                      whileTap={{ scale: 0.97 }}
-                      onClick={() => {
-                        setActiveOrderId(order.id);
-                        openMeasurementsReview?.(order);
-                      }}
-                      className={secondaryNavyBtn}
-                    >
-                      Review
-                    </motion.button>
-                  </li>
-                ))
-              ) : (
-                <li className="text-sm text-slate-500">Nothing pending review.</li>
-              )}
-            </ul>
-          </motion.div>
-
-          <motion.div
-            initial={{ opacity: 0, y: 14 }}
-            whileInView={{ opacity: 1, y: 0 }}
-            viewport={{ once: true, margin: "-40px" }}
-            transition={{ duration: 0.45, ease: [0.25, 0.1, 0.25, 1] }}
-            className={glassCard}
-          >
             <h2 className="text-apple-h3 font-semibold text-ink">Order Overview</h2>
             <div className="mt-6 flex flex-col items-center gap-6 sm:flex-row sm:items-center sm:justify-between">
               <ul className="w-full space-y-2.5 text-sm sm:max-w-[12rem]">
@@ -598,6 +552,49 @@ export default function TdDashboardOverview({
               Save &amp; Continue
               <ChevronRight className="h-4 w-4" aria-hidden />
             </motion.button>
+          </motion.div>
+
+          <motion.div
+            initial={{ opacity: 0, y: 14 }}
+            whileInView={{ opacity: 1, y: 0 }}
+            viewport={{ once: true, margin: "-40px" }}
+            transition={{ duration: 0.45, ease: [0.25, 0.1, 0.25, 1] }}
+            className={glassCard}
+          >
+            <h2 className="text-apple-h3 font-semibold text-ink">Measurements to Review</h2>
+            <ul className="mt-4 space-y-3">
+              {measurementsCandidates.length > 0 ? (
+                measurementsCandidates.map((order) => (
+                  <li
+                    key={order.id}
+                    className="flex items-center gap-3 border-b border-slate-200/40 pb-3 last:border-0 last:pb-0"
+                  >
+                    <img
+                      src={DEFAULT_AVATAR}
+                      alt=""
+                      className="h-11 w-11 rounded-full border border-white/60 object-cover shadow-sm"
+                    />
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate text-sm font-semibold text-slate-900">{order.customerName}</p>
+                      <p className="text-xs text-slate-500">New measurements</p>
+                    </div>
+                    <motion.button
+                      type="button"
+                      whileTap={{ scale: 0.97 }}
+                      onClick={() => {
+                        setActiveOrderId(order.id);
+                        openMeasurementsReview?.(order);
+                      }}
+                      className={secondaryNavyBtn}
+                    >
+                      Review
+                    </motion.button>
+                  </li>
+                ))
+              ) : (
+                <li className="text-sm text-slate-500">Nothing pending review.</li>
+              )}
+            </ul>
           </motion.div>
         </div>
       </div>

@@ -71,6 +71,12 @@ const orderSchema = new mongoose.Schema(
       index: true,
       trim: true,
     },
+    workflowStatus: {
+      type: String,
+      default: 'order_placed',
+      index: true,
+      trim: true,
+    },
     /** Index in canonical workflow (0 = pending … 8 = completed); kept in sync with status on writes */
     currentStepIndex: {
       type: Number,
