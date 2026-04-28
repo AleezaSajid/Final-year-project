@@ -14,6 +14,7 @@ import MeasurementWizard from "./MeasurementWizard";
 import OrderTracking from "./OrderTracking";
 import LocalTailors from "./LocalTailors";
 import WorkspaceSelect from "./WorkspaceSelect";
+import EmpowerHer from "./pages/EmpowerHer";
 import { RoleProvider } from "./context/RoleContext";
 import { CustomerChatProvider } from "./context/CustomerChatContext.jsx";
 import { PageBackground } from "./components/PageBackground.jsx";
@@ -42,6 +43,7 @@ function App() {
         <Route path="/features/measurement-wizard" element={<MeasurementWizard />} />
         <Route path="/features/order-tracking" element={<OrderTracking />} />
         <Route path="/features/local-tailors" element={<LocalTailors />} />
+        <Route path="/empower-her" element={<EmpowerHer />} />
         <Route path="/measurements/new" element={<MeasurementWizard />} />
         <Route
           path="/measurements/style"

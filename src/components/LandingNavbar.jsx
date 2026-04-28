@@ -404,6 +404,14 @@ export default function LandingNavbar({
         </div>
 
         <div className="relative z-10 hidden items-center gap-4 md:flex">
+          <button
+            type="button"
+            onClick={() => navigate("/empower-her")}
+            aria-label="Open EmpowerHer page"
+            className="ss-landing-nav-link px-3 py-2 text-sm font-medium text-slate-500 transition duration-200 ease-out hover:-translate-y-0.5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-600/25 focus-visible:ring-offset-2"
+          >
+            For Women
+          </button>
           {!trackOrdersInNavCenter && (
             <button
               ref={setItemRef("track")}
@@ -535,6 +543,17 @@ export default function LandingNavbar({
                 {dashboardRoleMenu}
               </div>
             ) : null}
+            <button
+              type="button"
+              onClick={() => {
+                navigate("/empower-her");
+                handleCloseMobileMenu();
+              }}
+              aria-label="Open EmpowerHer page from mobile menu"
+              className="rounded-lg px-3 py-2 text-left text-sm font-medium text-slate-600 transition duration-200 ease-out hover:-translate-y-0.5 hover:bg-white/15 hover:text-[#4a7c59] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-600/25 focus-visible:ring-offset-2"
+            >
+              For Women
+            </button>
             <button
               type="button"
               onClick={() => {
