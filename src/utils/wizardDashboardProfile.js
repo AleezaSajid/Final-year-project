@@ -254,7 +254,7 @@ export function buildDashboardProfileRowsFromOrder(order) {
   }
 
   const m = mergeLayeredField(order, "measurements");
-  const measurement = MEASUREMENT_ROW_DEFS.map(({ key, label }) => {
+  let measurement = MEASUREMENT_ROW_DEFS.map(({ key, label }) => {
     const raw = m[key];
     const val = raw == null ? "" : String(raw).trim();
     return val ? { label, value: val, unit: "in" } : { label, value: null };

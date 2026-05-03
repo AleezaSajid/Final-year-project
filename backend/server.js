@@ -158,6 +158,7 @@ app.post('/api/logout', (req, res) => {
 const normalizeOrderStatus = (status = '') => {
   const value = String(status).trim().toLowerCase().replace(/\s+/g, '_');
   if (value === 'in_progress' || value === 'inprogress') return 'in_progress';
+  if (value === 'assigned') return 'assigned';
   if (
     value === 'order_placed' ||
     value === 'pending' ||
@@ -188,7 +189,7 @@ const WORKFLOW_STAGES = [
 /** Uppercase tracking enum — must match customer/tailor `orderLiveStatus.js`. */
 function internalStatusToTrackingStatus(s) {
   const v = normalizeOrderStatus(s);
-  if (v === 'pending' || v === 'order_placed') return 'ORDER_PLACED';
+  if (v === 'pending' || v === 'order_placed' || v === 'assigned') return 'ORDER_PLACED';
   if (v === 'measurements_verified') return 'MEASUREMENTS_VERIFIED';
   if (v === 'stitching' || v === 'in_progress' || v === 'processing' || v === 'needs_alteration') {
     return 'STITCHING';
@@ -211,6 +212,7 @@ function stepIndexFromOrderDoc(doc) {
   const map = {
     pending: 0,
     order_placed: 0,
+    assigned: 0,
     measurements_verified: 1,
     processing: 2,
     in_progress: 2,
@@ -309,6 +311,34 @@ function emitMeasurementOrderToTailor(orderDoc) {
     io.to(tid).emit('measurement:updated', payload);
   } catch (e) {
     console.error('EMIT measurement:updated', e);
+  }
+}
+
+/**
+ * Tailor dashboard joins `join_user` with userId === tailor shop id (e.g. T-A1).
+ * Target that room so only the assigned tailor receives the review popup.
+ */
+function emitMeasurementReviewedToTailorRoom(io, out) {
+  if (!io || !out || typeof out !== 'object') return;
+  const fromPayload = out.tailorId != null ? String(out.tailorId).trim() : '';
+  const fromOrder =
+    out.fullOrder && out.fullOrder.tailorId != null ? String(out.fullOrder.tailorId).trim() : '';
+  const tid = fromPayload || fromOrder;
+  const oid = out.orderId != null ? String(out.orderId).trim() : '';
+  let targeted = false;
+  if (tid) {
+    console.log('[Socket Sync] measurement:reviewed → tailor room', tid, oid || out.orderId);
+    io.to(tid).emit('measurement:reviewed', out);
+    targeted = true;
+  }
+  if (oid) {
+    console.log('[Socket Sync] measurement:reviewed → order room', oid);
+    io.to(oid).emit('measurement:reviewed', out);
+    targeted = true;
+  }
+  if (!targeted) {
+    console.warn('[Socket Sync] measurement:reviewed fallback broadcast (no tailorId/orderId)', out.orderId);
+    io.emit('measurement:reviewed', out);
   }
 }
 
@@ -598,7 +628,90 @@ app.put('/orders/:orderId', async (req, res) => {
   }
 });
 
+/** Map matching: lightweight payloads; client merges full tailor rows by id. */
+const MAP_INTEREST_STAGGER_MS = 650;
+
 io.on('connection', (socket) => {
+  socket.on('newOrder', (order) => {
+    console.log('[socket] newOrder received from client:', order);
+    io.emit('newOrder', order);
+  });
+
+  socket.on('newOrder', (data = {}) => {
+    const orderId =
+      data.orderId != null && String(data.orderId).trim() !== ''
+        ? String(data.orderId).trim()
+        : `map_${Date.now()}`;
+    socket.join(`map_order:${orderId}`);
+    console.log('[map] newOrder', orderId);
+    const dueDateRaw =
+      data.dueDate != null && String(data.dueDate).trim() !== '' ? String(data.dueDate).trim() : '';
+    const notesRaw =
+      data.notes != null && String(data.notes).trim() !== '' ? String(data.notes).trim() : '';
+    const tailorBroadcast = {
+      orderId,
+      distance:
+        data.radiusKm != null && data.radiusKm !== ''
+          ? `Within ${data.radiusKm} km`
+          : data.distance != null && String(data.distance).trim() !== ''
+            ? String(data.distance).trim()
+            : '—',
+      dressType:
+        data.garmentType || data.dressType || data.garment || '—',
+      budget:
+        data.budget != null && String(data.budget).trim() !== ''
+          ? String(data.budget).trim()
+          : '—',
+      dueDate: dueDateRaw,
+      notes: notesRaw,
+    };
+    // Notify every connected client (map page does not listen). Ensures tailor tab receives
+    // the alert even when debugging from one machine; broadcast.emit omits only the sender.
+    io.emit('newOrder', tailorBroadcast);
+    const queue = ['T-A1', 't2', 't3'];
+    queue.forEach((tailorId, i) => {
+      setTimeout(() => {
+        socket.emit('tailorInterested', {
+          orderId,
+          tailorId,
+          tailor: { id: tailorId },
+        });
+      }, 500 + i * MAP_INTEREST_STAGGER_MS);
+    });
+  });
+
+  socket.on('interest', (data = {}) => {
+    const orderId = data.orderId != null ? String(data.orderId).trim() : '';
+    const tailorId = data.tailorId != null ? String(data.tailorId).trim() : '';
+    if (!orderId || !tailorId) return;
+    console.log('[map] interest', orderId, tailorId);
+    io.to(`map_order:${orderId}`).emit('tailorInterested', {
+      orderId,
+      tailorId,
+      tailor: { id: tailorId },
+    });
+  });
+
+  socket.on('tailorExpressInterest', (payload = {}) => {
+    const orderId = payload.orderId != null ? String(payload.orderId).trim() : '';
+    const tailor = payload.tailor && typeof payload.tailor === 'object' ? payload.tailor : null;
+    if (!orderId || !tailor) return;
+    io.to(`map_order:${orderId}`).emit('tailorInterested', {
+      orderId,
+      tailorId: String(tailor.id ?? '').trim(),
+      tailor,
+    });
+  });
+
+  socket.on('selectTailor', (data = {}) => {
+    const orderId = data.orderId != null ? String(data.orderId).trim() : '';
+    const tailorId = data.tailorId != null ? String(data.tailorId).trim() : '';
+    console.log('[map] selectTailor', orderId, tailorId);
+    if (orderId) {
+      io.to(`map_order:${orderId}`).emit('mapSelectionAck', { orderId, tailorId });
+    }
+  });
+
   socket.on('join_user', ({ userId } = {}) => {
     const room = userId != null ? String(userId).trim() : '';
     if (!room) return;
@@ -708,7 +821,7 @@ io.on('connection', (socket) => {
 
     const rawOrderId = payload.orderId != null ? String(payload.orderId).trim() : '';
     if (!rawOrderId) {
-      io.emit('measurement:reviewed', payload);
+      emitMeasurementReviewedToTailorRoom(io, payload);
       return;
     }
     void (async () => {
@@ -724,10 +837,10 @@ io.on('connection', (socket) => {
         updatedAt: normalized.updatedAt,
       };
       console.log('[Socket Sync] measurement:reviewed', out.orderId, out.status, out.currentStepIndex);
-      io.emit('measurement:reviewed', out);
+      emitMeasurementReviewedToTailorRoom(io, out);
     })().catch((e) => {
       console.error('[Socket Sync] measurement:reviewed', e);
-      io.emit('measurement:reviewed', payload);
+      emitMeasurementReviewedToTailorRoom(io, payload);
     });
   });
 

@@ -35,6 +35,10 @@ export function clearLinkedWizardOrderId() {
 let createOrderPromise = null;
 
 function buildPayloadAndFlat(snapshot, authUser) {
+  const override =
+    snapshot && typeof snapshot.assignedTailorShopId === "string"
+      ? snapshot.assignedTailorShopId.trim()
+      : "";
   const payload = buildMeasurementOrderPayload({
     customerInfo: snapshot.customerInfo,
     selectedGarmentType: snapshot.selectedGarmentType,
@@ -44,6 +48,7 @@ function buildPayloadAndFlat(snapshot, authUser) {
     designBrief: snapshot.designBrief,
     selectedNeck: snapshot.selectedNeck,
     authUser,
+    tailorShopIdOverride: override || undefined,
   });
   return { payload, flat: measurementOrderPayloadToServerBody(payload) };
 }

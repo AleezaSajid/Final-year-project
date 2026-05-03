@@ -98,6 +98,7 @@ function resolveCustomerId(authUser) {
  *   designBrief: { designNotes?: string; occasion?: string[]; urgency?: string; instructions?: string[]; deliveryDate?: string };
  *   selectedNeck: string;
  *   authUser?: object | null;
+ *   tailorShopIdOverride?: string | null;
  * }} input
  */
 export function buildMeasurementOrderPayload(input) {
@@ -110,6 +111,7 @@ export function buildMeasurementOrderPayload(input) {
     designBrief,
     selectedNeck,
     authUser,
+    tailorShopIdOverride,
   } = input;
 
   const orderId = `ORD-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
@@ -172,7 +174,12 @@ export function buildMeasurementOrderPayload(input) {
     status: workflowStages[0]?.status || "order_placed",
     createdAt,
     /** Must match the tailor id used on `/tailor` dashboard (same as GET /orders/tailor/:id). */
-    tailorId: resolveTailorIdForCustomerChat(authUser) || dashboardDefaultTailorId,
+    tailorId:
+      (typeof tailorShopIdOverride === "string" && tailorShopIdOverride.trim()
+        ? tailorShopIdOverride.trim()
+        : null) ||
+      resolveTailorIdForCustomerChat(authUser) ||
+      dashboardDefaultTailorId,
     dueDate,
   };
 }

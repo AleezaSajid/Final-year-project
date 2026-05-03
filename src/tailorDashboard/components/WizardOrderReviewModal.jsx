@@ -220,10 +220,15 @@ export default function WizardOrderReviewModal({ order, open, onClose, updateOrd
           <div className="flex shrink-0 items-start justify-between gap-3 border-b border-white/35 bg-gradient-to-r from-emerald-50/50 via-white/20 to-sky-50/30 px-5 py-4">
             <div className="min-w-0">
               <p id="wizard-review-title" className="text-lg font-semibold tracking-tight text-slate-900">
-                Measurement details
+                Customer request — measurements &amp; design
               </p>
               <p className="mt-0.5 truncate text-sm text-slate-600">{view.customerName}</p>
               <p className="truncate text-xs text-slate-500">{view.garmentType}</p>
+              <p className="mt-3 rounded-lg border border-emerald-200/70 bg-emerald-50/90 px-3 py-2 text-xs leading-relaxed text-emerald-950">
+                <span className="font-semibold">Action needed:</span> This is a new request from your customer.
+                Review everything below, then use <span className="font-semibold">Accept request</span> to take the
+                order on and mark measurements as verified.
+              </p>
             </div>
             <button
               type="button"
@@ -333,26 +338,32 @@ export default function WizardOrderReviewModal({ order, open, onClose, updateOrd
             </div>
           </div>
 
-          <div className="flex shrink-0 flex-col gap-2 border-t border-white/35 bg-white/25 px-5 py-4 backdrop-blur-md sm:flex-row sm:justify-end">
-            <button
-              type="button"
-              onClick={onClose}
-              className="rounded-xl border border-white/50 bg-white/45 px-4 py-2.5 text-sm font-semibold text-slate-700 shadow-sm backdrop-blur-sm transition hover:bg-white/70 hover:text-slate-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-600/30"
-            >
-              Close
-            </button>
-            <button
-              type="button"
-              onClick={async () => {
-                if (order?.id) {
-                  await updateOrderStatus(order.id, "measurements_verified");
-                }
-                onClose();
-              }}
-              className="rounded-xl bg-gradient-to-b from-[#4a7c59] to-[#3d5d48] px-4 py-2.5 text-sm font-semibold text-white shadow-md shadow-emerald-900/20 transition duration-200 hover:brightness-105 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-600/40 active:scale-[0.98]"
-            >
-              Approve measurements
-            </button>
+          <div className="flex shrink-0 flex-col gap-3 border-t border-white/35 bg-white/25 px-5 py-4 backdrop-blur-md sm:flex-row sm:items-center sm:justify-end">
+            <p className="order-2 text-center text-[11px] text-slate-500 sm:order-1 sm:mr-auto sm:max-w-[55%] sm:text-left">
+              <span className="font-medium text-slate-600">Not ready?</span> Close and come back from{" "}
+              <span className="font-medium text-slate-700">Measurements to Review</span> anytime.
+            </p>
+            <div className="order-1 flex w-full flex-col gap-2 sm:order-2 sm:w-auto sm:flex-row">
+              <button
+                type="button"
+                onClick={onClose}
+                className="rounded-xl border border-white/50 bg-white/45 px-4 py-2.5 text-sm font-semibold text-slate-700 shadow-sm backdrop-blur-sm transition hover:bg-white/70 hover:text-slate-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-600/30"
+              >
+                Close
+              </button>
+              <button
+                type="button"
+                onClick={async () => {
+                  if (order?.id) {
+                    await updateOrderStatus(order.id, "measurements_verified");
+                  }
+                  onClose();
+                }}
+                className="rounded-xl bg-gradient-to-b from-[#4a7c59] to-[#3d5d48] px-4 py-2.5 text-sm font-semibold text-white shadow-md shadow-emerald-900/20 transition duration-200 hover:brightness-105 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-600/40 active:scale-[0.98]"
+              >
+                Accept request
+              </button>
+            </div>
           </div>
         </motion.div>
       </motion.div>

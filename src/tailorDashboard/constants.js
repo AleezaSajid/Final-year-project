@@ -10,6 +10,8 @@ export const SHARED_ORDER_STORAGE_KEY = "sewserve_orders";
 export const TAILOR_PROFILE_STORAGE_KEY = "sewserve_tailor_profiles";
 export const GARMENT_REGEX = /^[A-Za-z ]+$/;
 export const tailorId = "T-A1";
+/** Same cap for “Current Tasks” and “Measurements to Review” (priority-sorted). */
+export const TAILOR_CURRENT_TASKS_VISIBLE_MAX = 2;
 export const DEFAULT_CUSTOMER_ID = "CU-001";
 export const API_BASE_URL = "http://localhost:5000";
 export const DEFAULT_AVATAR = `data:image/svg+xml;utf8,${encodeURIComponent(
@@ -83,12 +85,6 @@ export function socketEnumToSnake(raw, currentStepIndex) {
     return Number.isFinite(idx) && idx >= 7 ? "last_review" : "ready_for_delivery";
   }
   return map[u] || "";
-}
-
-function orderDocId(order) {
-  if (!order || typeof order !== "object") return "";
-  if (order.id != null && String(order.id).trim() !== "") return String(order.id).trim();
-  return mongoIdToString(order._id) || "";
 }
 
 /** Aligns with backend / customer `order:live` tracking enums. */

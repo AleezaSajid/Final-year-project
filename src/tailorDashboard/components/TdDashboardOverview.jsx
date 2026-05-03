@@ -35,66 +35,6 @@ const TASK_MAP = {
   needs_alteration: "Final Inspection",
 };
 
-/** Match Measurement Wizard ids → labels (design-brief step only). */
-const WIZARD_OCCASION_LABELS = {
-  wedding: "Wedding",
-  casual: "Casual",
-  formal: "Formal",
-  party: "Party",
-};
-const WIZARD_URGENCY_LABELS = {
-  normal: "Normal",
-  urgent: "Urgent",
-  express: "Express",
-};
-const WIZARD_INSTRUCTION_LABELS = {
-  "extra-loose": "Extra loose",
-  "slim-fitting": "Slim fitting",
-  "soft-feel": "Soft feel",
-  "heavy-look": "Heavy look",
-};
-
-function wizardSummaryFromOrder(order) {
-  const fromApiNotes = (raw) => {
-    if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
-    const designNote = typeof raw.designNote === "string" ? raw.designNote.trim() : "";
-    const occasion = typeof raw.occasion === "string" ? raw.occasion.trim() : "";
-    const urgency = typeof raw.urgency === "string" ? raw.urgency.trim() : "";
-    const specialInstructions =
-      typeof raw.specialInstructions === "string" ? raw.specialInstructions.trim() : "";
-    if (!designNote && !occasion && !urgency && !specialInstructions) return null;
-    return { designNote, occasion, urgency, specialInstructions };
-  };
-
-  const fromBrief = (db) => {
-    if (!db || typeof db !== "object") return null;
-    const designNote = typeof db.designNotes === "string" ? db.designNotes.trim() : "";
-    const occasion = Array.isArray(db.occasion)
-      ? db.occasion
-          .map((id) => (typeof id === "string" ? WIZARD_OCCASION_LABELS[id] || id : ""))
-          .filter(Boolean)
-          .join(", ")
-      : "";
-    const urgencyRaw = typeof db.urgency === "string" ? db.urgency : "";
-    const urgency = urgencyRaw ? WIZARD_URGENCY_LABELS[urgencyRaw] || urgencyRaw : "";
-    const specialInstructions = Array.isArray(db.instructions)
-      ? db.instructions
-          .map((id) => (typeof id === "string" ? WIZARD_INSTRUCTION_LABELS[id] || id : ""))
-          .filter(Boolean)
-          .join(", ")
-      : "";
-    if (!designNote && !occasion && !urgency && !specialInstructions) return null;
-    return { designNote, occasion, urgency, specialInstructions };
-  };
-
-  return (
-    fromApiNotes(order.notes) ||
-    fromApiNotes(order.orderPayload?.notes) ||
-    fromBrief(order.wizardData?.designBrief) ||
-    fromBrief(order.orderPayload?.designBrief)
-  );
-}
-
 function orderIsActiveCurrentTask(order) {
   const w = resolveOrderWorkflowState(order);
   return isTailorActiveTask(order) && w.internalStatus !== "completed";
@@ -158,18 +98,25 @@ export default function TdDashboardOverview({
         due: order.dueDate || order.date,
         status: internal,
         statusInternal: internal,
-        wizardSummary: wizardSummaryFromOrder(order),
         /** Full normalized row for `WizardOrderReviewModal` (wizard payload, measurements, etc.). */
         sourceOrder: order,
       };
     });
   }, [orders]);
 
-  const openCurrentTaskWizard = (task) => {
+  /** Select task and show workflow on the card only; full wizard details open from “Measurements to Review → Review”. */
+  const focusCurrentTask = (task, toggleExpand = false) => {
     if (!task?.sourceOrder) return;
-    const key = String(task._id || task.id || "");
+    const key = String(task._id ?? task.id ?? "").trim();
     if (key) setActiveOrderId(key);
-    openMeasurementsReview(task.sourceOrder);
+    if (toggleExpand) {
+      setExpandedTaskId((prev) => {
+        const prevStr = prev == null ? "" : String(prev).trim();
+        return prevStr === key ? null : key;
+      });
+    } else {
+      setExpandedTaskId(key);
+    }
   };
 
   const handleMarkDone = async (taskId) => {
@@ -290,126 +237,92 @@ export default function TdDashboardOverview({
             {tasks.length === 0 ? (
               <p className="mt-4 text-sm text-slate-500">No active tasks</p>
             ) : (
-              <ul className="mt-4 space-y-3">
-                {tasks.map((task) => {
-                  const rowKey = task._id || task.id;
-                  const activeIdx = getStatusIndex(task.statusInternal);
-                  const isRowActive = String(rowKey) === String(activeOrderId);
-                  const isExpanded = expandedTaskId === rowKey;
-                  return (
-                    <li
-                      key={rowKey}
-                      className={`overflow-hidden rounded-xl border transition-colors ${
-                        isRowActive ? "border-emerald-500 bg-emerald-50" : "border-slate-200/50 bg-white/20"
-                      }`}
-                    >
-                      <div
-                        role="button"
-                        tabIndex={0}
-                        onKeyDown={(e) => {
-                          if (e.key === "Enter" || e.key === " ") {
-                            e.preventDefault();
-                            openCurrentTaskWizard(task);
-                          }
-                        }}
-                        onClick={() => openCurrentTaskWizard(task)}
-                        className="flex w-full flex-col gap-2 p-3 text-left sm:flex-row sm:items-center sm:justify-between sm:gap-4"
+              <div
+                className="mt-4 max-h-[min(28rem,55vh)] overflow-y-auto overflow-x-hidden pr-1 [-webkit-overflow-scrolling:touch] scroll-smooth"
+                role="region"
+                aria-label="Current tasks (scroll for more)"
+              >
+                <ul className="space-y-3 pb-1">
+                  {tasks.map((task) => {
+                    const rowKey = String(task._id ?? task.id ?? "").trim();
+                    const activeIdx = getStatusIndex(task.statusInternal);
+                    const isRowActive = rowKey === String(activeOrderId ?? "").trim();
+                    const isExpanded =
+                      rowKey !== "" && rowKey === String(expandedTaskId ?? "").trim();
+                    return (
+                      <li
+                        key={rowKey}
+                        className={`overflow-hidden rounded-xl border transition-colors ${
+                          isRowActive ? "border-emerald-500 bg-emerald-50" : "border-slate-200/50 bg-white/20"
+                        }`}
                       >
-                        <div className="min-w-0 flex-1">
-                          <p className="text-sm font-semibold text-slate-900">{task.title}</p>
-                          <p className="mt-0.5 text-sm text-slate-600">
-                            {task.customer}
-                            {task.garment ? <span className="text-slate-400"> · {task.garment}</span> : null}
-                          </p>
-                          <p className="mt-1 text-xs text-slate-500">Due: {task.due || "—"}</p>
-                          {task.wizardSummary ? (
-                            <div className="mt-2 space-y-2 border-t border-slate-200/40 pt-2">
-                              {task.wizardSummary.designNote ? (
-                                <div>
-                                  <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">
-                                    Notes
-                                  </p>
-                                  <p className="mt-0.5 text-xs leading-snug text-slate-700">
-                                    {task.wizardSummary.designNote}
-                                  </p>
-                                </div>
-                              ) : null}
-                              {task.wizardSummary.occasion ? (
-                                <div>
-                                  <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">
-                                    Occasion
-                                  </p>
-                                  <p className="mt-0.5 text-xs text-slate-700">{task.wizardSummary.occasion}</p>
-                                </div>
-                              ) : null}
-                              {task.wizardSummary.urgency ? (
-                                <div>
-                                  <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">
-                                    Urgency
-                                  </p>
-                                  <p className="mt-0.5 text-xs text-slate-700">{task.wizardSummary.urgency}</p>
-                                </div>
-                              ) : null}
-                              {task.wizardSummary.specialInstructions ? (
-                                <div>
-                                  <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">
-                                    Special instructions
-                                  </p>
-                                  <p className="mt-0.5 text-xs text-slate-700">
-                                    {task.wizardSummary.specialInstructions}
-                                  </p>
-                                </div>
-                              ) : null}
-                            </div>
-                          ) : null}
-                        </div>
-                        <button
-                          type="button"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            openCurrentTaskWizard(task);
-                            setExpandedTaskId((id) => (id === rowKey ? null : rowKey));
+                        <div
+                          role="button"
+                          tabIndex={0}
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter" || e.key === " ") {
+                              e.preventDefault();
+                              focusCurrentTask(task, false);
+                            }
                           }}
-                          className="shrink-0 rounded-lg border border-slate-200/80 bg-white/80 px-3 py-1.5 text-xs font-semibold text-slate-800 shadow-sm transition hover:bg-white"
+                          onClick={() => focusCurrentTask(task, false)}
+                          className="flex w-full flex-col gap-2 p-3 text-left sm:flex-row sm:items-center sm:justify-between sm:gap-4"
                         >
-                          View
-                        </button>
-                      </div>
-                      {isExpanded ? (
-                        <div className="space-y-3 border-t border-slate-200/40 bg-white/40 px-3 py-3 sm:px-4">
-                          <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">Workflow</p>
-                          <ol className="space-y-2">
-                            {workflowStages.map((stage, i) => {
-                              const isDone = i < activeIdx;
-                              const isCurrent = i === activeIdx;
-                              return (
-                                <li key={stage.status} className="flex items-center gap-2 text-sm text-slate-700">
-                                  <span className="w-5 text-center" aria-hidden>
-                                    {isDone ? "✔" : isCurrent ? "➤" : "○"}
-                                  </span>
-                                  <span className={isCurrent ? "font-semibold text-emerald-800" : ""}>{stage.label}</span>
-                                </li>
-                              );
-                            })}
-                          </ol>
-                          <div className="pt-1">
-                            <button
-                              type="button"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                void handleMarkDone(String(rowKey));
-                              }}
-                              className="rounded-lg bg-gradient-to-r from-[#166534] to-[#15803d] px-3 py-2 text-xs font-semibold text-white shadow-sm transition hover:brightness-105"
-                            >
-                              Mark done
-                            </button>
+                          <div className="min-w-0 flex-1">
+                            <p className="text-sm font-semibold text-slate-900">{task.title}</p>
+                            <p className="mt-0.5 text-sm text-slate-600">
+                              {task.customer}
+                              {task.garment ? <span className="text-slate-400"> · {task.garment}</span> : null}
+                            </p>
+                            <p className="mt-1 text-xs text-slate-500">Due: {task.due || "—"}</p>
                           </div>
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              focusCurrentTask(task, true);
+                            }}
+                            className="shrink-0 rounded-lg border border-slate-200/80 bg-white/80 px-3 py-1.5 text-xs font-semibold text-slate-800 shadow-sm transition hover:bg-white"
+                          >
+                            View
+                          </button>
                         </div>
-                      ) : null}
-                    </li>
-                  );
-                })}
-              </ul>
+                        {isExpanded ? (
+                          <div className="space-y-3 border-t border-slate-200/40 bg-white/40 px-3 py-3 sm:px-4">
+                            <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">Workflow</p>
+                            <ol className="space-y-2">
+                              {workflowStages.map((stage, i) => {
+                                const isDone = i < activeIdx;
+                                const isCurrent = i === activeIdx;
+                                return (
+                                  <li key={stage.status} className="flex items-center gap-2 text-sm text-slate-700">
+                                    <span className="w-5 text-center" aria-hidden>
+                                      {isDone ? "✔" : isCurrent ? "➤" : "○"}
+                                    </span>
+                                    <span className={isCurrent ? "font-semibold text-emerald-800" : ""}>{stage.label}</span>
+                                  </li>
+                                );
+                              })}
+                            </ol>
+                            <div className="pt-1">
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  void handleMarkDone(rowKey);
+                                }}
+                                className="rounded-lg bg-gradient-to-r from-[#166534] to-[#15803d] px-3 py-2 text-xs font-semibold text-white shadow-sm transition hover:brightness-105"
+                              >
+                                Mark done
+                              </button>
+                            </div>
+                          </div>
+                        ) : null}
+                      </li>
+                    );
+                  })}
+                </ul>
+              </div>
             )}
           </motion.div>
 
@@ -576,7 +489,9 @@ export default function TdDashboardOverview({
                     />
                     <div className="min-w-0 flex-1">
                       <p className="truncate text-sm font-semibold text-slate-900">{order.customerName}</p>
-                      <p className="text-xs text-slate-500">New measurements</p>
+                      <p className="truncate text-xs text-slate-500">
+                        {order.garmentType ? order.garmentType : "New measurements"}
+                      </p>
                     </div>
                     <motion.button
                       type="button"

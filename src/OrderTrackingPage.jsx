@@ -81,8 +81,18 @@ function SewServeFooter() {
             />
           </a>
           <div className="flex flex-wrap gap-5 text-sm text-[#4B5563]">
-            <a href="#" className="transition hover:text-[#556B2F] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-[#BAC095]">Company</a>
-            <a href="#" className="transition hover:text-[#556B2F] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-[#BAC095]">Privacy</a>
+            <button
+              type="button"
+              className="cursor-pointer border-0 bg-transparent p-0 transition hover:text-[#556B2F] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-[#BAC095]"
+            >
+              Company
+            </button>
+            <button
+              type="button"
+              className="cursor-pointer border-0 bg-transparent p-0 transition hover:text-[#556B2F] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-[#BAC095]"
+            >
+              Privacy
+            </button>
             <a href="#contact" className="transition hover:text-[#556B2F] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-[#BAC095]">Support</a>
           </div>
           <div className="flex items-center gap-3">

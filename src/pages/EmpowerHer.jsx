@@ -88,44 +88,67 @@ export default function EmpowerHer() {
     <div className="emp-page relative isolate min-h-screen bg-transparent text-slate-900">
       <style>
         {`
-          @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Poppins:wght@600;700&display=swap');
+          @import url('https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,500;0,600;0,700;1,500&family=Inter:wght@400;500;600;700&family=Poppins:wght@500;600;700&display=swap');
 
           .emp-page {
-            font-family: 'Inter', sans-serif;
+            font-family: 'Inter', system-ui, sans-serif;
             overflow-x: hidden;
+            color: #0f172a;
           }
 
           .emp-page h1,
           .emp-page h2,
           .emp-page h3 {
-            font-family: 'Poppins', sans-serif;
+            font-family: 'Poppins', system-ui, sans-serif;
             font-weight: 600;
+            letter-spacing: -0.02em;
           }
 
           .emp-page p,
           .emp-page li {
-            font-family: 'Inter', sans-serif;
+            font-family: 'Inter', system-ui, sans-serif;
             font-weight: 500;
             font-size: 1rem;
           }
 
           .emp-page button {
-            font-family: 'Poppins', sans-serif;
+            font-family: 'Poppins', system-ui, sans-serif;
             font-weight: 600;
             font-size: 0.875rem;
             text-transform: none;
-            letter-spacing: normal;
+            letter-spacing: 0.01em;
           }
 
           .emp-label {
-            font-family: 'Poppins', sans-serif;
+            font-family: 'Poppins', system-ui, sans-serif;
             font-weight: 600;
             font-size: 0.875rem;
             text-transform: none;
             letter-spacing: normal;
           }
 
-          /* Same full-viewport animated wash as SewServeLandingPage */
+          .emp-section-kicker {
+            font-family: 'Inter', system-ui, sans-serif;
+            font-size: 0.7rem;
+            font-weight: 600;
+            letter-spacing: 0.22em;
+            text-transform: uppercase;
+            color: #0f766e;
+            margin-bottom: 0.5rem;
+          }
+
+          .emp-cta-panel .emp-section-kicker {
+            color: rgba(204, 251, 241, 0.92);
+          }
+
+          .emp-section-title {
+            font-family: 'Cormorant Garamond', 'Georgia', serif;
+            font-weight: 600;
+            letter-spacing: -0.03em;
+            line-height: 1.08;
+          }
+
+          /* Premium full-viewport wash — softer, editorial */
           .ss-page-bg-anim {
             position: fixed;
             inset: 0;
@@ -133,14 +156,14 @@ export default function EmpowerHer() {
             pointer-events: none;
             overflow: hidden;
             background:
-              radial-gradient(ellipse 100% 80% at 10% 0%, rgba(167, 243, 208, 0.5), transparent 55%),
-              radial-gradient(ellipse 90% 70% at 95% 15%, rgba(186, 230, 253, 0.52), transparent 52%),
-              radial-gradient(ellipse 85% 60% at 50% 100%, rgba(216, 180, 254, 0.38), transparent 55%),
-              radial-gradient(ellipse 60% 50% at 70% 55%, rgba(226, 232, 240, 0.45), transparent 50%),
-              linear-gradient(180deg, #eef2f7 0%, #e2e8f0 35%, #f1f5f9 70%, #f8fafc 100%);
-            background-size: 140% 140%;
-            animation: ss-bg-gradient-drift 52s ease-in-out infinite alternate;
-            filter: blur(28px) brightness(1.06);
+              radial-gradient(ellipse 120% 90% at 8% -10%, rgba(204, 251, 241, 0.55), transparent 50%),
+              radial-gradient(ellipse 100% 80% at 92% 5%, rgba(224, 231, 255, 0.45), transparent 48%),
+              radial-gradient(ellipse 90% 70% at 50% 105%, rgba(237, 233, 254, 0.35), transparent 52%),
+              radial-gradient(ellipse 55% 45% at 72% 48%, rgba(241, 245, 249, 0.85), transparent 55%),
+              linear-gradient(165deg, #f8fafc 0%, #f1f5f9 38%, #eef2ff 72%, #faf5ff 100%);
+            background-size: 150% 150%;
+            animation: ss-bg-gradient-drift 56s ease-in-out infinite alternate;
+            filter: blur(32px) brightness(1.04) saturate(1.02);
           }
 
           .ss-page-bg-anim::after {
@@ -149,7 +172,7 @@ export default function EmpowerHer() {
             inset: 0;
             z-index: 1;
             pointer-events: none;
-            background: radial-gradient(ellipse 95% 90% at 50% 48%, transparent 42%, rgba(15, 23, 42, 0.065) 100%);
+            background: radial-gradient(ellipse 92% 88% at 50% 45%, transparent 38%, rgba(15, 23, 42, 0.04) 100%);
           }
 
           @keyframes ss-bg-gradient-drift {
@@ -159,7 +182,7 @@ export default function EmpowerHer() {
           }
 
           .emp-hero-shell {
-            background: #ffffff;
+            background: linear-gradient(180deg, rgba(255, 255, 255, 0.92) 0%, rgba(248, 250, 252, 0.88) 100%);
           }
 
           .emp-hero-section {
@@ -179,29 +202,33 @@ export default function EmpowerHer() {
           }
 
           .emp-script {
-            font-family: 'Poppins', sans-serif;
-            font-size: 3.3rem;
-            line-height: 1;
+            font-family: 'Poppins', system-ui, sans-serif;
+            font-size: clamp(2rem, 4vw, 3.15rem);
+            line-height: 1.05;
             font-style: normal;
-            font-weight: 900;
-            color: #2f6e73;
-            letter-spacing: -0.01em;
+            font-weight: 800;
+            background: linear-gradient(120deg, #0f766e 0%, #0d9488 45%, #115e59 100%);
+            -webkit-background-clip: text;
+            background-clip: text;
+            color: transparent;
+            letter-spacing: -0.02em;
             display: inline-flex;
             align-items: center;
             gap: 0.55rem;
           }
 
           .emp-script-heart {
-            color: #5dc8bf;
+            color: #14b8a6;
             font-size: 0.92em;
+            filter: drop-shadow(0 2px 8px rgba(20, 184, 166, 0.35));
           }
 
           .emp-title {
-            font-family: 'Poppins', sans-serif;
-            margin-top: 0.85rem;
-            font-size: clamp(2.35rem, 3.9vw, 3.2rem);
+            font-family: 'Cormorant Garamond', 'Georgia', serif;
+            margin-top: 0.75rem;
+            font-size: clamp(2.5rem, 5vw, 3.75rem);
             line-height: 1.02;
-            letter-spacing: -0.02em;
+            letter-spacing: -0.03em;
             font-weight: 700;
             color: #0f172a;
           }
@@ -212,20 +239,25 @@ export default function EmpowerHer() {
           }
 
           .emp-title-accent {
-            font-family: 'Inter', sans-serif;
+            font-family: 'Cormorant Garamond', 'Georgia', serif;
             display: block;
-            margin-top: 0.22rem;
-            font-size: inherit;
-            font-weight: 700;
+            margin-top: 0.15rem;
+            font-size: 0.92em;
+            font-weight: 600;
             line-height: inherit;
-            color: #6a4da8;
+            font-style: italic;
+            background: linear-gradient(100deg, #5b21b6 0%, #7c3aed 40%, #0d9488 100%);
+            -webkit-background-clip: text;
+            background-clip: text;
+            color: transparent;
           }
 
           .emp-body {
-            margin-top: 1rem;
-            font-size: 1.02rem;
-            line-height: 1.62;
-            color: #374151;
+            margin-top: 1.15rem;
+            font-size: 1.05rem;
+            line-height: 1.72;
+            color: #475569;
+            max-width: 36rem;
           }
 
           .emp-point-list {
@@ -255,19 +287,25 @@ export default function EmpowerHer() {
           }
 
           .emp-glass-card {
-            border: 1px solid rgba(255, 255, 255, 0.35);
-            background: linear-gradient(160deg, rgba(255, 255, 255, 0.28) 0%, rgba(255, 255, 255, 0.08) 100%);
-            -webkit-backdrop-filter: blur(24px) saturate(165%);
-            backdrop-filter: blur(24px) saturate(165%);
+            border: 1px solid rgba(255, 255, 255, 0.55);
+            background: linear-gradient(165deg, rgba(255, 255, 255, 0.72) 0%, rgba(255, 255, 255, 0.38) 50%, rgba(248, 250, 252, 0.45) 100%);
+            -webkit-backdrop-filter: blur(28px) saturate(180%);
+            backdrop-filter: blur(28px) saturate(180%);
             box-shadow:
-              0 2px 20px -4px rgba(15, 23, 42, 0.05),
-              inset 0 1px 0 rgba(255, 255, 255, 0.35);
-            transition: background 0.2s ease, border-color 0.2s ease;
+              0 4px 24px -6px rgba(15, 23, 42, 0.08),
+              0 24px 48px -32px rgba(15, 23, 42, 0.12),
+              inset 0 1px 0 rgba(255, 255, 255, 0.75);
+            transition: transform 0.35s cubic-bezier(0.25, 0.1, 0.25, 1), box-shadow 0.35s ease, border-color 0.25s ease;
           }
 
           .emp-glass-card:hover {
-            border-color: rgba(255, 255, 255, 0.42);
-            background: linear-gradient(160deg, rgba(255, 255, 255, 0.32) 0%, rgba(255, 255, 255, 0.1) 100%);
+            border-color: rgba(255, 255, 255, 0.85);
+            background: linear-gradient(165deg, rgba(255, 255, 255, 0.88) 0%, rgba(255, 255, 255, 0.5) 100%);
+            box-shadow:
+              0 8px 32px -8px rgba(15, 23, 42, 0.12),
+              0 32px 64px -40px rgba(13, 148, 136, 0.15),
+              inset 0 1px 0 rgba(255, 255, 255, 0.9);
+            transform: translateY(-3px);
           }
 
           .emp-hero-visual {
@@ -277,19 +315,44 @@ export default function EmpowerHer() {
 
           .emp-hero-photo-ring {
             box-shadow:
-              0 28px 64px -24px rgba(15, 23, 42, 0.22),
-              0 0 0 1px rgba(255, 255, 255, 0.85),
-              inset 0 0 0 1px rgba(255, 255, 255, 0.35);
+              0 32px 80px -28px rgba(15, 23, 42, 0.28),
+              0 0 0 1px rgba(255, 255, 255, 0.95),
+              0 0 0 8px rgba(255, 255, 255, 0.35),
+              inset 0 0 0 1px rgba(255, 255, 255, 0.5);
+          }
+
+          .emp-btn-premium {
+            position: relative;
+            overflow: hidden;
+            box-shadow:
+              inset 0 1px 0 rgba(255, 255, 255, 0.35),
+              0 14px 36px -8px rgba(21, 94, 89, 0.45),
+              0 4px 12px -4px rgba(15, 23, 42, 0.12);
+          }
+
+          .emp-btn-premium::after {
+            content: "";
+            position: absolute;
+            inset: 0;
+            background: linear-gradient(105deg, transparent 0%, rgba(255, 255, 255, 0.2) 50%, transparent 100%);
+            transform: translateX(-100%);
+            transition: transform 0.6s ease;
+            pointer-events: none;
+          }
+
+          .emp-btn-premium:hover::after {
+            transform: translateX(100%);
           }
 
           .emp-cta-panel {
             position: relative;
             overflow: hidden;
+            border-top: 1px solid rgba(255, 255, 255, 0.12);
             background:
-              radial-gradient(ellipse 52% 46% at 18% 10%, rgba(187, 247, 242, 0.2), transparent 70%),
-              radial-gradient(ellipse 60% 54% at 52% 58%, rgba(44, 151, 164, 0.5), transparent 74%),
-              radial-gradient(ellipse 120% 95% at 50% 132%, rgba(6, 47, 66, 0.52), transparent 69%),
-              linear-gradient(112deg, #2ab1b0 0%, #1699a0 36%, #0d7b90 66%, #0a5f7d 100%);
+              radial-gradient(ellipse 70% 55% at 12% 0%, rgba(204, 251, 241, 0.35), transparent 60%),
+              radial-gradient(ellipse 55% 50% at 88% 20%, rgba(165, 243, 252, 0.25), transparent 55%),
+              radial-gradient(ellipse 100% 90% at 50% 120%, rgba(15, 23, 42, 0.45), transparent 55%),
+              linear-gradient(118deg, #134e4a 0%, #0f766e 28%, #155e75 58%, #164e63 100%);
           }
 
           .emp-cta-panel::before {
@@ -298,10 +361,10 @@ export default function EmpowerHer() {
             inset: 0;
             pointer-events: none;
             background:
-              radial-gradient(ellipse 38% 40% at 22% 22%, rgba(221, 255, 251, 0.2), transparent 72%),
-              radial-gradient(ellipse 44% 35% at 84% 16%, rgba(188, 242, 234, 0.17), transparent 74%),
-              radial-gradient(ellipse 75% 45% at 54% 82%, rgba(7, 80, 106, 0.32), transparent 76%);
-            mix-blend-mode: screen;
+              radial-gradient(ellipse 42% 38% at 24% 18%, rgba(255, 255, 255, 0.18), transparent 72%),
+              radial-gradient(ellipse 50% 40% at 82% 12%, rgba(236, 254, 255, 0.12), transparent 74%),
+              radial-gradient(ellipse 80% 48% at 52% 85%, rgba(6, 78, 59, 0.35), transparent 76%);
+            mix-blend-mode: soft-light;
             opacity: 0.95;
           }
 
@@ -310,7 +373,7 @@ export default function EmpowerHer() {
             position: absolute;
             inset: 0;
             pointer-events: none;
-            background: linear-gradient(180deg, rgba(255, 255, 255, 0.06) 0%, rgba(0, 33, 56, 0.2) 100%);
+            background: linear-gradient(180deg, rgba(255, 255, 255, 0.1) 0%, transparent 42%, rgba(0, 0, 0, 0.18) 100%);
           }
 
           .emp-cta-panel > div {
@@ -320,6 +383,12 @@ export default function EmpowerHer() {
 
           .emp-heart-outline {
             position: relative;
+            width: 220px;
+            height: 206px;
+          }
+
+          /* CTA band: explicit size so grid track matches (avoid scale() for layout) */
+          .emp-cta-panel .emp-heart-outline {
             width: 220px;
             height: 206px;
           }
@@ -340,6 +409,14 @@ export default function EmpowerHer() {
             margin: 0;
             line-height: 1.2;
             white-space: nowrap;
+          }
+
+          @media (min-width: 1024px) {
+            .emp-cta-panel .emp-heart-outline-content {
+              font-size: 0.88rem;
+              gap: 0.22rem;
+              width: 76%;
+            }
           }
 
           @media (max-width: 1023px) {
@@ -380,15 +457,15 @@ export default function EmpowerHer() {
         `}
       </style>
       <div className="ss-page-bg-anim" aria-hidden="true" />
-      <div className="relative z-10">
+      <div className="relative z-50">
         <LandingNavbar
           logoDisplaySrc={logoDisplaySrc}
           navLinks={navLinks}
           onSectionNavigate={handleSectionNavigate}
         />
       </div>
-      <section id="home" className="emp-hero-section relative z-10 w-full min-h-screen m-0 p-0 overflow-hidden">
-        <div className="relative isolate min-h-screen overflow-hidden border-b border-white/25 bg-white/[0.06] backdrop-blur-xl">
+      <section id="home" className="emp-hero-section relative z-0 w-full min-h-screen m-0 p-0 overflow-hidden">
+        <div className="relative isolate min-h-screen overflow-hidden border-b border-white/40 bg-white/[0.45] shadow-[inset_0_-1px_0_rgba(255,255,255,0.6)] backdrop-blur-2xl">
           <div
             className="pointer-events-none absolute -left-36 top-[12%] h-[min(26rem,88vw)] w-[min(26rem,88vw)] rounded-full bg-emerald-400/12 blur-[2.75rem]"
             aria-hidden="true"
@@ -437,13 +514,19 @@ export default function EmpowerHer() {
               </ul>
 
               <div className="emp-cta-row">
-                <button className="inline-flex items-center gap-2 rounded-xl bg-gradient-to-b from-[#4a7c59] to-[#3d5d48] px-6 py-2.5 text-[15px] font-semibold text-white transition hover:brightness-105">
+                <button
+                  type="button"
+                  className="emp-btn-premium inline-flex items-center gap-2 rounded-2xl bg-gradient-to-b from-[#3d6b4f] to-[#2d4f3c] px-7 py-3 text-[15px] font-semibold text-white transition duration-200 hover:brightness-110"
+                >
                   Join as Tailor Today
-                  <ArrowRight size={17} />
+                  <ArrowRight size={17} strokeWidth={2.25} />
                 </button>
-                <button className="inline-flex items-center gap-2 rounded-xl bg-transparent px-1 py-2.5 text-[15px] font-semibold text-[#3d5d48] transition hover:text-[#2f4a3a]">
+                <button
+                  type="button"
+                  className="inline-flex items-center gap-2 rounded-2xl border border-slate-200/90 bg-white/60 px-5 py-3 text-[15px] font-semibold text-[#1e3a2f] shadow-sm backdrop-blur-sm transition hover:border-teal-200/80 hover:bg-white/90"
+                >
                   Learn More
-                  <ArrowRight size={17} />
+                  <ArrowRight size={17} strokeWidth={2.25} />
                 </button>
               </div>
               </div>
@@ -470,13 +553,18 @@ export default function EmpowerHer() {
       </section>
 
       <div className="relative z-10 w-full mx-0 px-0">
-        <section id="about" className="w-full mx-0 px-0 py-16">
-          <div className="mb-8 flex items-center justify-center gap-4 px-6 text-center">
-            <span className="h-[2px] w-16 rounded-full bg-[#8ad3c9]/80" />
-            <h2 className="font-['Poppins',sans-serif] text-3xl font-semibold text-[#1f4259]">Why This Platform is for You</h2>
-            <span className="h-[2px] w-16 rounded-full bg-[#8ad3c9]/80" />
+        <section id="about" className="w-full mx-0 px-0 py-20 lg:py-24">
+          <div className="mx-auto max-w-6xl px-6 text-center">
+            <p className="emp-section-kicker">Why join</p>
+            <div className="mb-10 flex flex-wrap items-center justify-center gap-5">
+              <span className="hidden h-px w-12 bg-gradient-to-r from-transparent to-teal-400/60 sm:block sm:w-20" />
+              <h2 className="emp-section-title text-[clamp(1.85rem,4vw,2.75rem)] text-[#0f172a]">
+                Why This Platform is for You
+              </h2>
+              <span className="hidden h-px w-12 bg-gradient-to-l from-transparent to-teal-400/60 sm:block sm:w-20" />
+            </div>
           </div>
-          <div className="grid w-full gap-8 px-6 sm:grid-cols-2 lg:grid-cols-4">
+          <div className="mx-auto grid w-full max-w-6xl gap-6 px-6 sm:grid-cols-2 lg:grid-cols-4 lg:gap-7">
             {featureCards.map((card, index) => (
               <motion.article
                 key={card.title}
@@ -484,25 +572,30 @@ export default function EmpowerHer() {
                 whileInView={{ opacity: 1, y: 0 }}
                 viewport={{ once: true, amount: 0.4 }}
                 transition={{ delay: index * 0.08, duration: 0.45 }}
-                className="emp-glass-card rounded-3xl px-6 py-8 text-center"
+                className="emp-glass-card rounded-[1.35rem] px-6 py-9 text-center"
               >
-                <div className="mx-auto mb-4 grid h-16 w-16 place-content-center rounded-full bg-gradient-to-r from-[#66c3bd] to-[#4aa59f]">
-                  <card.icon size={24} className="text-white" />
+                <div className="mx-auto mb-5 grid h-[4.25rem] w-[4.25rem] place-content-center rounded-2xl bg-gradient-to-br from-teal-500/90 to-emerald-700/90 shadow-lg shadow-teal-900/15 ring-1 ring-white/40">
+                  <card.icon size={26} className="text-white" strokeWidth={2} />
                 </div>
-                <h3 className="font-['Poppins',sans-serif] text-lg font-semibold leading-tight text-[#1f4259]">{card.title}</h3>
-                <p className="mt-3 font-['Inter',sans-serif] text-sm font-medium leading-7 text-[#2c4d63]">{card.description}</p>
+                <h3 className="font-['Poppins',sans-serif] text-lg font-semibold leading-snug text-[#0f172a]">{card.title}</h3>
+                <p className="mt-3 font-['Inter',sans-serif] text-[0.9375rem] font-medium leading-relaxed text-slate-600">
+                  {card.description}
+                </p>
               </motion.article>
             ))}
           </div>
         </section>
 
-        <section id="how-it-works" className="w-full mx-0 px-0 py-12">
-          <div className="mb-6 flex items-center justify-center gap-4 px-6 text-center">
-            <span className="h-[1.5px] w-24 rounded-full bg-[#94c7cf]/70" />
-            <h2 className="font-['Inter',sans-serif] text-[46px] font-semibold text-[#1f4259] sm:text-4xl">How It Works</h2>
-            <span className="h-[1.5px] w-24 rounded-full bg-[#94c7cf]/70" />
+        <section id="how-it-works" className="w-full mx-0 px-0 py-16 lg:py-20">
+          <div className="mx-auto max-w-6xl px-6 text-center">
+            <p className="emp-section-kicker">Simple steps</p>
+            <div className="mb-10 flex flex-wrap items-center justify-center gap-5">
+              <span className="hidden h-px w-16 bg-gradient-to-r from-transparent to-slate-300 sm:block sm:w-24" />
+              <h2 className="emp-section-title text-[clamp(2rem,4.5vw,3.25rem)] text-[#0f172a]">How It Works</h2>
+              <span className="hidden h-px w-16 bg-gradient-to-l from-transparent to-slate-300 sm:block sm:w-24" />
+            </div>
           </div>
-          <div className="grid w-full gap-4 px-6 md:grid-cols-3">
+          <div className="mx-auto grid w-full max-w-6xl gap-6 px-6 md:grid-cols-3 md:gap-7">
             {workSteps.map((step, index) => (
               <motion.div
                 key={step.title}
@@ -510,31 +603,31 @@ export default function EmpowerHer() {
                 whileInView={{ opacity: 1, scale: 1 }}
                 viewport={{ once: true, amount: 0.4 }}
                 transition={{ delay: index * 0.12, duration: 0.4 }}
-                className="emp-glass-card relative rounded-2xl px-5 py-4"
+                className="emp-glass-card relative rounded-[1.25rem] px-6 py-6"
               >
-                <div className="mb-2 flex items-center gap-3">
-                  <div className="grid h-10 w-10 place-content-center rounded-xl bg-gradient-to-r from-[#39a592] to-[#2b8f75] text-white shadow-sm">
+                <div className="mb-3 flex items-center gap-4">
+                  <div className="grid h-12 w-12 shrink-0 place-content-center rounded-xl bg-gradient-to-br from-teal-600 to-emerald-800 text-white shadow-md ring-1 ring-white/30">
                     {index === 1 ? (
-                      <step.icon size={18} className="text-white" />
+                      <step.icon size={20} className="text-white" strokeWidth={2.25} />
                     ) : (
-                      <span className="font-['Poppins',sans-serif] text-[30px] font-bold leading-none">{index + 1}</span>
+                      <span className="font-['Poppins',sans-serif] text-xl font-bold leading-none">{index + 1}</span>
                     )}
                   </div>
-                  <h3 className="font-['Poppins',sans-serif] text-[34px] font-semibold leading-tight text-[#1f4259] sm:text-2xl">
+                  <h3 className="font-['Poppins',sans-serif] text-xl font-semibold leading-tight text-[#0f172a] sm:text-[1.35rem]">
                     {step.title}
                   </h3>
                 </div>
-                <div className="my-2 h-px w-full bg-[#9cc7d1]/65" />
-                <p className="text-[16px] leading-8 text-[#29445a] sm:text-base">{step.description}</p>
+                <div className="my-3 h-px w-full bg-gradient-to-r from-transparent via-slate-200 to-transparent" />
+                <p className="text-[0.95rem] leading-relaxed text-slate-600 sm:text-base">{step.description}</p>
               </motion.div>
             ))}
           </div>
         </section>
 
-        <section className="w-full mx-0 px-0 py-14">
-          <div className="emp-glass-card mx-4 rounded-[28px] px-4 py-6 sm:mx-6 sm:px-5 lg:px-7">
-            <div className="grid items-center gap-7 lg:grid-cols-[320px_1fr_320px]">
-              <div className="mx-auto h-[230px] w-[230px] overflow-hidden rounded-full border border-white/70 shadow-[0_18px_45px_-28px_rgba(15,23,42,0.45)] sm:h-[300px] sm:w-[300px]">
+        <section className="w-full mx-0 px-0 py-16 lg:py-24">
+          <div className="emp-glass-card mx-4 rounded-[2rem] px-5 py-8 shadow-xl sm:mx-auto sm:max-w-6xl sm:px-8 lg:px-10 lg:py-10">
+            <div className="grid items-center gap-10 lg:grid-cols-[minmax(0,280px)_1fr_minmax(0,300px)] lg:gap-12">
+              <div className="mx-auto h-[230px] w-[230px] overflow-hidden rounded-full border-[3px] border-white/90 shadow-[0_24px_56px_-28px_rgba(15,23,42,0.35)] ring-1 ring-slate-200/50 sm:h-[280px] sm:w-[280px] lg:h-[300px] lg:w-[300px]">
                 <img
                   src={storyImage}
                   alt="SewServe partner tailor"
@@ -542,29 +635,39 @@ export default function EmpowerHer() {
                 />
               </div>
 
-              <div className="text-[#1f4259]">
-                <p className="-mb-4 leading-none text-[#62c3bc]" style={{ fontSize: "4.5rem" }}>❝</p>
-                <h3 className="mt-0 font-['Poppins',sans-serif] text-[34px] font-semibold leading-[1.05] text-[#1f4259] sm:text-[40px] lg:text-[56px]">Inspiring Stories</h3>
-                <div className="mt-3 h-px w-full bg-[#9ec4cc]/70" />
-                <p className="mt-4 max-w-[620px] text-[17px] font-medium leading-8 text-[#23445b] sm:text-[18px] lg:text-[20px] lg:leading-9">
-                  "I started with one machine and small dreams. Today, I make 20+ orders every month and support my
-                  family with pride."
+              <div className="text-[#0f172a]">
+                <p className="-mb-2 font-['Cormorant_Garamond',serif] leading-none text-teal-600/90" style={{ fontSize: "4rem" }}>
+                  ❝
                 </p>
-                <p className="mt-5 text-[22px] font-semibold leading-tight text-[#23445b] sm:text-[22px] lg:text-[30px]">— Pushpa Sharma</p>
-                <p className="text-[17px] font-medium leading-tight text-[#2f5670] lg:text-[22px]">SewServe Partner Tailor</p>
+                <p className="emp-section-kicker text-left">Stories</p>
+                <h3 className="emp-section-title mt-1 text-[clamp(2rem,4vw,3.5rem)] text-[#0f172a]">Inspiring Stories</h3>
+                <div className="mt-4 h-px w-full max-w-md bg-gradient-to-r from-teal-400/50 via-slate-200 to-transparent" />
+                <p className="mt-5 max-w-[34rem] text-[1.05rem] font-medium leading-relaxed text-slate-600 sm:text-[1.125rem] lg:leading-8">
+                  &ldquo;I started with one machine and small dreams. Today, I make 20+ orders every month and support my
+                  family with pride.&rdquo;
+                </p>
+                <p className="mt-6 font-serif text-2xl font-semibold italic text-[#134e4a] sm:text-[1.75rem]" style={{ fontFamily: "'Cormorant Garamond', Georgia, serif" }}>
+                  — Pushpa Sharma
+                </p>
+                <p className="mt-1 text-sm font-semibold uppercase tracking-wider text-slate-500">SewServe Partner Tailor</p>
               </div>
 
-              <div className="space-y-3">
+              <div className="space-y-4">
                 {stats.map((item, index) => {
                   const Icon = [UserPlus, Scissors, TrendingUp][index];
                   return (
-                    <div key={item.label} className="flex items-center gap-4 border-b border-[#9ec4cc]/55 pb-3 last:border-b-0 last:pb-0">
-                      <div className="grid h-16 w-16 place-content-center rounded-full bg-gradient-to-br from-[#d7eff0] to-[#c5e7e7] text-[#21707a]">
-                        <Icon size={30} strokeWidth={2.1} />
+                    <div
+                      key={item.label}
+                      className="flex items-center gap-4 border-b border-slate-200/80 pb-4 last:border-b-0 last:pb-0"
+                    >
+                      <div className="grid h-14 w-14 shrink-0 place-content-center rounded-2xl bg-gradient-to-br from-teal-50 to-cyan-100 text-teal-800 shadow-inner ring-1 ring-white/80">
+                        <Icon size={26} strokeWidth={2.1} />
                       </div>
                       <div>
-                        <p className="font-['Poppins',sans-serif] text-[36px] font-semibold leading-tight text-[#1f4259] sm:text-[42px] lg:text-[56px]">{item.value}</p>
-                        <p className="text-[18px] font-medium leading-tight text-[#254d66] sm:text-[19px] lg:text-[26px]">{item.label}</p>
+                        <p className="text-[2.25rem] font-semibold leading-none text-[#0f172a] sm:text-[2.5rem] lg:text-[2.75rem]" style={{ fontFamily: "'Cormorant Garamond', Georgia, serif" }}>
+                          {item.value}
+                        </p>
+                        <p className="mt-1 text-[0.95rem] font-medium text-slate-600 sm:text-base">{item.label}</p>
                       </div>
                     </div>
                   );
@@ -574,29 +677,35 @@ export default function EmpowerHer() {
           </div>
         </section>
 
-        <section id="contact" className="emp-cta-panel w-full mx-0 px-0 py-10 text-white">
-          <div className="grid w-full items-center gap-8 px-6 md:grid-cols-[220px_1fr] lg:grid-cols-[260px_1fr_220px]">
-            <div className="mx-auto w-full max-w-[240px] overflow-hidden rounded-3xl border border-white/25 bg-white/10 p-2 shadow-[0_20px_45px_-25px_rgba(2,32,36,0.65)]">
+        <section id="contact" className="emp-cta-panel w-full mx-0 px-0 py-6 text-white lg:py-8">
+          <div className="mx-auto grid w-full max-w-6xl items-center gap-6 px-6 md:grid-cols-[minmax(0,240px)_1fr] md:gap-8 lg:grid-cols-[minmax(0,220px)_minmax(0,1fr)_236px] lg:gap-x-10 lg:gap-y-4">
+            <div className="mx-auto w-full max-w-[240px] overflow-hidden rounded-[1.35rem] border border-white/30 bg-white/15 p-2 shadow-[0_28px_64px_-24px_rgba(0,0,0,0.45)] backdrop-blur-md lg:mx-0">
               <img
                 src={storyImage}
                 alt="Tailor illustration"
-                className="h-[160px] w-full rounded-2xl object-cover object-center"
+                className="h-[152px] w-full rounded-2xl object-cover object-center ring-1 ring-white/20 sm:h-[160px] lg:h-[164px]"
               />
             </div>
-            <div>
-              <h3 className="font-['Poppins',sans-serif] text-[56px] font-semibold leading-tight text-white sm:text-[44px]">
+            <div className="relative z-[3] min-w-0 text-center md:text-left lg:pr-2">
+              <p className="emp-section-kicker">Partner with us</p>
+              <h3 className="emp-section-title max-w-full text-[clamp(1.45rem,1rem+2.1vw,2.35rem)] font-semibold leading-[1.12] tracking-tight text-white lg:whitespace-nowrap xl:text-[clamp(1.55rem,1rem+1.65vw,2.55rem)]">
                 Start Your Journey Today!
               </h3>
-              <p className="mt-3 max-w-[640px] text-[20px] font-medium leading-9 text-white/90 sm:text-[18px]">
+              <p className="mx-auto mt-3 max-w-xl text-[1.05rem] font-medium leading-relaxed text-white/85 sm:mt-3.5 sm:text-[1.125rem] md:mx-0">
                 Your talent can change your life. We are here to support you every step of the way.
               </p>
-              <button className="mt-5 inline-flex items-center gap-2 rounded-xl bg-white/90 px-6 py-3 text-sm font-bold text-[#1f4259] transition hover:bg-white">
-                Become a Partner Tailor
-                <ArrowRight size={17} />
-              </button>
+              <div className="mt-5 flex justify-center md:justify-start">
+                <button
+                  type="button"
+                  className="emp-btn-premium inline-flex items-center gap-2 rounded-2xl bg-white px-8 py-3.5 text-[15px] font-bold text-[#0f2937] shadow-lg transition hover:bg-teal-50"
+                >
+                  Become a Partner Tailor
+                  <ArrowRight size={18} strokeWidth={2.25} />
+                </button>
+              </div>
             </div>
-            <div className="grid place-content-center">
-              <div className="emp-heart-outline">
+            <div className="relative z-0 flex w-full max-w-[220px] justify-center justify-self-center md:max-w-none md:justify-center lg:max-w-none lg:justify-end lg:justify-self-end">
+              <div className="emp-heart-outline shrink-0">
                 <svg className="absolute inset-0 h-full w-full" viewBox="0 0 220 206" aria-hidden="true">
                   <path
                     d="M110 192C105 183 89 164 71 149C36 121 14 94 14 62C14 34 35 14 62 14C82 14 98 23 110 39C122 23 138 14 158 14C185 14 206 34 206 62C206 94 184 121 149 149C131 164 115 183 110 192Z"

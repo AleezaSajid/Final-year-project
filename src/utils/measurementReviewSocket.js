@@ -114,7 +114,13 @@ export async function emitWizardMeasurementReview(wizardData, authUser) {
   } catch (e) {
     console.warn("[review emit] could not persist full wizard state on order", e);
   }
-  const tailorId = String(resolveTailorIdForCustomerChat(authUser) || dashboardDefaultTailorId);
+  const assigned =
+    full && typeof full.assignedTailorShopId === "string" && full.assignedTailorShopId.trim()
+      ? full.assignedTailorShopId.trim()
+      : "";
+  const tailorId = String(
+    assigned || resolveTailorIdForCustomerChat(authUser) || dashboardDefaultTailorId
+  );
   const socketPayload = buildMeasurementReviewSocketPayload(orderId, tailorId, full);
   console.log("[measurement:review emit] wizardData.image:", socketPayload?.wizardData?.image);
   socket.emit("measurement:review", socketPayload);

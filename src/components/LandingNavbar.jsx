@@ -247,7 +247,7 @@ export default function LandingNavbar({
   const tokenPresent = Boolean(readAuthToken());
 
   return (
-    <header className="ss-glass-surface sticky top-0 z-50 border-b border-white/35 shadow-[0_8px_32px_-8px_rgba(15,23,42,0.08)]">
+    <header className="ss-glass-surface sticky top-0 z-[100] border-b border-white/35 shadow-[0_8px_32px_-8px_rgba(15,23,42,0.08)]">
       <style>
         {`
           /* Shared nav text styles (underline is one sliding element in nav) */
@@ -375,7 +375,7 @@ export default function LandingNavbar({
                 id="landing-dashboard-menu"
                 role="menu"
                 aria-labelledby="landing-dashboard-trigger"
-                className={`absolute left-0 top-full z-[60] mt-2 flex min-w-[180px] flex-col gap-1 rounded-[13px] bg-white/90 p-2 shadow-[0_10px_30px_rgba(0,0,0,0.08)] backdrop-blur-[10px] transition-[opacity,transform] duration-200 ease-out ${
+                className={`absolute left-0 top-full z-[110] mt-2 flex min-w-[180px] flex-col gap-1 rounded-[13px] bg-white/90 p-2 shadow-[0_10px_30px_rgba(0,0,0,0.08)] backdrop-blur-[10px] transition-[opacity,transform] duration-200 ease-out ${
                   dashboardMenuOpen
                     ? "pointer-events-auto translate-y-0 opacity-100"
                     : "pointer-events-none -translate-y-1 opacity-0"
@@ -455,7 +455,7 @@ export default function LandingNavbar({
               id="landing-login-menu"
               role="menu"
               aria-labelledby="landing-login-trigger"
-              className={`absolute right-0 top-full z-[60] mt-2 flex min-w-[180px] flex-col gap-1 rounded-[13px] bg-white/90 p-2 shadow-[0_10px_30px_rgba(0,0,0,0.08)] backdrop-blur-[10px] transition-[opacity,transform] duration-200 ease-out ${
+              className={`absolute right-0 top-full z-[110] mt-2 flex min-w-[180px] flex-col gap-1 rounded-[13px] bg-white/90 p-2 shadow-[0_10px_30px_rgba(0,0,0,0.08)] backdrop-blur-[10px] transition-[opacity,transform] duration-200 ease-out ${
                 loginMenuOpen
                   ? "pointer-events-auto translate-y-0 opacity-100"
                   : "pointer-events-none -translate-y-1 opacity-0"

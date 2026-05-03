@@ -83,7 +83,7 @@ const features = [
     bannerLabel: "Local Tailors",
     description: "Connect with verified professionals in your area for reliable, high-quality service.",
     icon: ShieldCheck,
-    route: "/features/local-tailors",
+    route: "/browse-tailors",
   },
 ];
 

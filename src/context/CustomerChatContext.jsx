@@ -58,10 +58,10 @@ export function CustomerChatProvider({ children }) {
     return normalizeChatId(raw) || "CU-001";
   }, [orderRoomCustomerId, user]);
 
-  const tailorIdForChat = useMemo(
-    () => normalizeChatId(resolveTailorIdForCustomerChat(user)) || "T-A1",
-    [user, orderLinkedIdsVersion]
-  );
+  const tailorIdForChat = useMemo(() => {
+    void orderLinkedIdsVersion;
+    return normalizeChatId(resolveTailorIdForCustomerChat(user)) || "T-A1";
+  }, [user, orderLinkedIdsVersion]);
 
   const conversationId = useMemo(
     () => getConversationId(tailorIdForChat, customerId),

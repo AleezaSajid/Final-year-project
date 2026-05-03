@@ -17,10 +17,12 @@ import {
   readProfilesFromStorage,
   resolveOrderWorkflowState,
   tailorId,
+  TAILOR_CURRENT_TASKS_VISIBLE_MAX,
   TAILOR_PROFILE_STORAGE_KEY,
   WORKFLOW_NON_COMPLETED_STATUSES,
   workflowStages,
 } from "../constants";
+import { getPriorityScore, isTailorActiveTask } from "../../utils/workflowEngine.js";
 
 function isPlainOrderObject(v) {
   return v != null && typeof v === "object" && !Array.isArray(v);
@@ -77,6 +79,11 @@ function toStoreOrder(raw) {
   return normalizeOrder(raw);
 }
 
+function orderIsActiveCurrentTask(order) {
+  const w = resolveOrderWorkflowState(order);
+  return isTailorActiveTask(order) && w.internalStatus !== "completed";
+}
+
 export function useTailorDashboard() {
   const { user } = useAuth();
   const navigate = useNavigate();
@@ -125,6 +132,8 @@ export function useTailorDashboard() {
   const [reviewModalOrder, setReviewModalOrder] = useState(null);
   /** Latest `wizardData` from `measurement:reviewed` (includes normalized `image`). */
   const [reviewCardData, setReviewCardData] = useState(null);
+  /** Dedupe when server emits to both tailor room + order room (same socket may be in both). */
+  const measurementReviewDedupeRef = useRef("");
 
   useEffect(() => {
     isChatOpenRef.current = isChatOpen;
@@ -221,16 +230,39 @@ export function useTailorDashboard() {
       console.log("[CLIENT] Received review data:", data);
       console.log("[CLIENT] wizardData.image:", data?.wizardData?.image);
 
-      if (!data || data.orderId == null) return;
-      console.log("[Tailor Sync] measurement:reviewed", data.orderId);
+      if (!data || typeof data !== "object") return;
+
+      const oidRaw =
+        data.orderId != null && String(data.orderId).trim() !== ""
+          ? String(data.orderId).trim()
+          : data.fullOrder?.id != null
+            ? String(data.fullOrder.id).trim()
+            : data.fullOrder?._id != null
+              ? String(data.fullOrder._id).trim()
+              : "";
+      if (!oidRaw) {
+        console.warn("[Tailor Sync] measurement:reviewed ignored — no orderId", data);
+        return;
+      }
+
+      const dedupeKey = `${oidRaw}:${data.timestamp ?? ""}`;
+      if (measurementReviewDedupeRef.current === dedupeKey) {
+        return;
+      }
+      measurementReviewDedupeRef.current = dedupeKey;
+
+      console.log("[Tailor Sync] measurement:reviewed", oidRaw);
       const wd = data.wizardData;
-      if (!wd || typeof wd !== "object" || Array.isArray(wd)) return;
+      if (!wd || typeof wd !== "object" || Array.isArray(wd)) {
+        console.warn("[Tailor Sync] measurement:reviewed ignored — bad wizardData");
+        return;
+      }
 
       if (data?.wizardData) {
         setReviewCardData(data.wizardData);
       }
 
-      const id = String(data.orderId);
+      const id = String(oidRaw);
 
       if (data?.wizardImageDeferred) {
         void (async () => {
@@ -297,8 +329,10 @@ export function useTailorDashboard() {
         if (row.tailorId && String(row.tailorId) !== String(tailorId)) {
           return prev;
         }
-        setReviewModalOrder(row);
-        setReviewModalOpen(true);
+        queueMicrotask(() => {
+          setReviewModalOrder(row);
+          setReviewModalOpen(true);
+        });
         if (i === -1) {
           return [...prev, row];
         }
@@ -665,15 +699,19 @@ export function useTailorDashboard() {
     [tailorOrders]
   );
 
+  /** Same top orders as “Current Tasks”, limited to statuses that still need measurement/wizard review. */
   const measurementsCandidates = useMemo(() => {
-    const activeTask = (o) =>
-      ["measurements_verified", "processing", "in_progress", "stitching", "quality_check"].includes(
-        resolveOrderWorkflowState(o).internalStatus
-      );
-    return newOrders.length
-      ? newOrders.slice(0, 3)
-      : tailorOrders.filter((o) => activeTask(o)).slice(0, 3);
-  }, [newOrders, tailorOrders]);
+    const list = Array.isArray(orders) ? orders : [];
+    const needsReview = (o) => {
+      const s = resolveOrderWorkflowState(o).internalStatus;
+      return s === "pending" || s === "order_placed" || s === "measurements_verified";
+    };
+    const topCurrent = [...list]
+      .filter(orderIsActiveCurrentTask)
+      .sort((a, b) => getPriorityScore(a) - getPriorityScore(b))
+      .slice(0, TAILOR_CURRENT_TASKS_VISIBLE_MAX);
+    return topCurrent.filter(needsReview);
+  }, [orders]);
 
   const donutGradient = useMemo(() => {
     const sum = Math.max(1, displayStats.inProgress + displayStats.pending + displayStats.completed);

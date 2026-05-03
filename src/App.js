@@ -12,17 +12,21 @@ import LastReviewPage from "./LastReviewPage";
 import CustomerReviewPage from "./CustomerReviewPage";
 import MeasurementWizard from "./MeasurementWizard";
 import OrderTracking from "./OrderTracking";
-import LocalTailors from "./LocalTailors";
 import WorkspaceSelect from "./WorkspaceSelect";
 import EmpowerHer from "./pages/EmpowerHer";
+import BrowseTailors from "./pages/BrowseTailors";
+import TailorPublicProfile from "./pages/TailorPublicProfile";
+import MapPage from "./pages/map/MapPage";
 import { RoleProvider } from "./context/RoleContext";
 import { CustomerChatProvider } from "./context/CustomerChatContext.jsx";
+import { MapOrderAlertProvider } from "./context/MapOrderAlertContext.jsx";
 import { PageBackground } from "./components/PageBackground.jsx";
 
 function App() {
   return (
     <RoleProvider>
       <Router>
+      <MapOrderAlertProvider>
       <CustomerChatProvider>
       <Routes>
         <Route path="/" element={<SewServeLandingPage />} />
@@ -42,8 +46,10 @@ function App() {
         <Route path="/customer/review/:orderId" element={<CustomerReviewPage />} />
         <Route path="/features/measurement-wizard" element={<MeasurementWizard />} />
         <Route path="/features/order-tracking" element={<OrderTracking />} />
-        <Route path="/features/local-tailors" element={<LocalTailors />} />
+        <Route path="/tailors/:tailorId" element={<TailorPublicProfile />} />
+        <Route path="/browse-tailors" element={<BrowseTailors />} />
         <Route path="/empower-her" element={<EmpowerHer />} />
+        <Route path="/map" element={<MapPage />} />
         <Route path="/measurements/new" element={<MeasurementWizard />} />
         <Route
           path="/measurements/style"
@@ -56,6 +62,7 @@ function App() {
         />
       </Routes>
       </CustomerChatProvider>
+      </MapOrderAlertProvider>
       </Router>
     </RoleProvider>
   );

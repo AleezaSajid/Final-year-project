@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
-import { useNavigate } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router-dom";
 import { Check, ChevronLeft, ChevronRight, Upload } from "lucide-react";
 import WizardNavbar from "./components/WizardNavbar";
 import { saveWizardDraft } from "./api/wizardDraftApi";
@@ -339,6 +339,11 @@ function buildInitialStateFromStorage() {
     }
   }
 
+  let assignedTailorShopId = "";
+  if (saved && typeof saved.assignedTailorShopId === "string" && saved.assignedTailorShopId.trim()) {
+    assignedTailorShopId = saved.assignedTailorShopId.trim();
+  }
+
   return {
     activeStep,
     customerInfo,
@@ -351,6 +356,7 @@ function buildInitialStateFromStorage() {
     draftVersion,
     styleOptions,
     designBrief,
+    assignedTailorShopId,
   };
 }
 
@@ -923,6 +929,7 @@ function ReviewStep({
 
 export default function MeasurementWizard() {
   const navigate = useNavigate();
+  const location = useLocation();
   const { user } = useAuth();
   const [activeStep, setActiveStep] = useState(initialWizardFromStorage.activeStep);
   const [customerInfo, setCustomerInfo] = useState(initialWizardFromStorage.customerInfo);
@@ -941,11 +948,16 @@ export default function MeasurementWizard() {
   const [designBrief, setDesignBrief] = useState(initialWizardFromStorage.designBrief);
   const [data, setData] = useState(initialWizardFromStorage.data);
   const [draftVersion, setDraftVersion] = useState(initialWizardFromStorage.draftVersion);
+  const [assignedTailorShopId, setAssignedTailorShopId] = useState(
+    initialWizardFromStorage.assignedTailorShopId ?? ""
+  );
+  const [browseTailorBanner, setBrowseTailorBanner] = useState(null);
   const [autoSaved, setAutoSaved] = useState(false);
   const [error, setError] = useState("");
   const [fieldInsight, setFieldInsight] = useState("");
   const [isThinking, setIsThinking] = useState(false);
   const skipScrollOnMountRef = useRef(true);
+  const browseLocationKeyHandledRef = useRef(null);
   const referenceFileInputRef = useRef(null);
   const lastPersistedSnapshotRef = useRef(
     JSON.stringify({
@@ -959,6 +971,7 @@ export default function MeasurementWizard() {
       styleOptions: initialWizardFromStorage.styleOptions,
       designBrief: initialWizardFromStorage.designBrief,
       data: initialWizardFromStorage.data,
+      assignedTailorShopId: initialWizardFromStorage.assignedTailorShopId ?? "",
     })
   );
 
@@ -988,6 +1001,8 @@ export default function MeasurementWizard() {
     setDesignBrief({ ...initialDesignBrief });
     setData({ ...initialWizardData });
     setDraftVersion(0);
+    setAssignedTailorShopId("");
+    setBrowseTailorBanner(null);
     lastPersistedSnapshotRef.current = JSON.stringify({
       activeStep: 3,
       customerInfo: { ...initialCustomerInfo },
@@ -999,11 +1014,78 @@ export default function MeasurementWizard() {
       styleOptions: { ...initialStyleOptions },
       designBrief: { ...initialDesignBrief },
       data: { ...initialWizardData },
+      assignedTailorShopId: "",
     });
     setError("");
     setFieldInsight(getAdaptiveHint(3));
     setIsThinking(false);
   }, []);
+
+  useEffect(() => {
+    const raw = location.state;
+    const bt = raw?.browseTailor;
+    if (!bt || typeof bt !== "object") return;
+    const locKey = location.key;
+    if (browseLocationKeyHandledRef.current === locKey) return;
+    browseLocationKeyHandledRef.current = locKey;
+
+    const fresh = Boolean(raw?.startWizardFresh);
+
+    const shopId = String(bt.tailorShopId ?? "").trim();
+    const tName = typeof bt.name === "string" ? bt.name : "Tailor";
+    const tSpec = typeof bt.specialty === "string" ? bt.specialty : "";
+    const tCity = typeof bt.city === "string" ? bt.city : "";
+    const noteLine = `[Request via Browse — tailor: ${tName}${tSpec ? ` · ${tSpec}` : ""}${tCity ? ` · ${tCity}` : ""}]`;
+
+    setAssignedTailorShopId(shopId);
+    setBrowseTailorBanner({ name: tName, specialty: tSpec, city: tCity });
+
+    if (fresh) {
+      clearLinkedWizardOrderId();
+      try {
+        localStorage.removeItem(STORAGE_KEY);
+      } catch {
+        /* ignore */
+      }
+      setActiveStep(1);
+      setCustomerInfo({ ...initialCustomerInfo });
+      setSelectedGarmentType("");
+      setCustomGarmentType("");
+      setReferenceImage(null);
+      setSelectedNeck("v-neck");
+      setMeasurements({ ...initialMeasurements });
+      setStyleOptions({ ...initialStyleOptions });
+      setDesignBrief({ ...initialDesignBrief, designNotes: noteLine });
+      setData({ ...initialWizardData });
+      setDraftVersion(0);
+      lastPersistedSnapshotRef.current = JSON.stringify({
+        activeStep: 1,
+        customerInfo: { ...initialCustomerInfo },
+        selectedGarmentType: "",
+        customGarmentType: "",
+        referenceImage: null,
+        selectedNeck: "v-neck",
+        measurements: { ...initialMeasurements },
+        styleOptions: { ...initialStyleOptions },
+        designBrief: { ...initialDesignBrief, designNotes: noteLine },
+        data: { ...initialWizardData },
+        assignedTailorShopId: shopId,
+      });
+      setError("");
+      setFieldInsight(getAdaptiveHint(1));
+    } else {
+      setDesignBrief((prev) => {
+        const existing = typeof prev.designNotes === "string" ? prev.designNotes : "";
+        if (existing.includes(tName) && existing.includes("Request via Browse")) return prev;
+        return {
+          ...prev,
+          designNotes: existing.trim() ? `${noteLine}\n\n${existing}` : noteLine,
+        };
+      });
+    }
+
+    navigate(".", { replace: true, state: null });
+  }, [location.state, location.key, navigate]);
 
   useEffect(() => {
     const snapshot = JSON.stringify({
@@ -1017,6 +1099,7 @@ export default function MeasurementWizard() {
       styleOptions,
       designBrief,
       data,
+      assignedTailorShopId,
     });
     if (snapshot === lastPersistedSnapshotRef.current) return;
 
@@ -1032,6 +1115,7 @@ export default function MeasurementWizard() {
         styleOptions,
         designBrief,
         data,
+        assignedTailorShopId,
       });
       setDraftVersion((prev) => {
         const next = prev + 1;
@@ -1047,6 +1131,7 @@ export default function MeasurementWizard() {
           designBrief,
           data,
           draftVersion: next,
+          assignedTailorShopId,
         };
         try {
           localStorage.setItem(STORAGE_KEY, JSON.stringify(payload));
@@ -1069,6 +1154,7 @@ export default function MeasurementWizard() {
     styleOptions,
     designBrief,
     data,
+    assignedTailorShopId,
   ]);
 
   useEffect(() => {
@@ -1108,6 +1194,7 @@ export default function MeasurementWizard() {
           designBrief,
           data,
           draftVersion,
+          assignedTailorShopId,
         },
         user
       );
@@ -1126,6 +1213,7 @@ export default function MeasurementWizard() {
     designBrief,
     data,
     draftVersion,
+    assignedTailorShopId,
   ]);
 
   useEffect(() => {
@@ -1187,6 +1275,7 @@ export default function MeasurementWizard() {
           designBrief,
           data,
           draftVersion,
+          assignedTailorShopId,
         };
         const result = await emitWizardMeasurementReview(snapshot, user);
         if (!result?.orderId) {
@@ -1195,6 +1284,8 @@ export default function MeasurementWizard() {
         window.dispatchEvent(new CustomEvent("sewserve:orders-refresh"));
         resetWizardProgress();
         navigate("/customer/dashboard");
+        const order = { id: result.orderId };
+        navigate("/map?orderId=" + order.id);
       } catch (e) {
         setError(e instanceof Error ? e.message : "Could not complete setup. Please try again.");
       }
@@ -1723,6 +1814,24 @@ export default function MeasurementWizard() {
               </div>
             </div>
           </div>
+
+          {browseTailorBanner ? (
+            <div
+              className="mx-auto mb-5 max-w-3xl rounded-2xl border border-emerald-200/80 bg-emerald-50/90 px-4 py-3 text-center text-sm text-emerald-950 shadow-sm sm:text-left"
+              role="status"
+            >
+              <p className="font-semibold">Ordering for {browseTailorBanner.name}</p>
+              {(browseTailorBanner.specialty || browseTailorBanner.city) && (
+                <p className="mt-1 text-emerald-900/85">
+                  {[browseTailorBanner.specialty, browseTailorBanner.city].filter(Boolean).join(" · ")}
+                </p>
+              )}
+              <p className="mt-1 text-xs text-emerald-800/75">
+                Your answers in this wizard (measurements, style, reference images, and notes) are attached to this
+                request for the tailor.
+              </p>
+            </div>
+          ) : null}
 
           <div className="grid grid-cols-1 gap-5 lg:grid-cols-3 lg:gap-6 lg:items-stretch">
             <aside className="ss-glass-card order-2 rounded-3xl p-6 lg:order-1 lg:col-span-1">
