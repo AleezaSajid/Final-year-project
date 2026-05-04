@@ -10,6 +10,7 @@ import {
   Mail,
   AlertTriangle,
   ListOrdered,
+  CircleHelp,
   X,
 } from "lucide-react";
 
@@ -137,6 +138,10 @@ function buildPinterestStyleSearchUrl(order) {
   return `https://www.pinterest.com/search/pins/?q=${encodeURIComponent(query)}`;
 }
 
+/** Glass panel — matches marketing nav glass feel */
+const GLASS_CARD =
+  "overflow-hidden rounded-2xl border border-white/40 bg-white/45 shadow-[0_8px_32px_-12px_rgba(15,23,42,0.14)] backdrop-blur-xl";
+
 function StyleInspirationCard({ latestOrder }) {
   const openPinterest = () => {
     const url = buildPinterestStyleSearchUrl(latestOrder ?? null);
@@ -144,19 +149,16 @@ function StyleInspirationCard({ latestOrder }) {
   };
 
   return (
-    <div
-      className="overflow-hidden rounded-apple-card border border-gray-200/90 bg-white/95 p-5 shadow-sm backdrop-blur-sm sm:p-6"
-      style={{ boxShadow: "0 4px 20px -6px rgba(15, 23, 42, 0.08)" }}
-    >
-      <header>
-        <h3 className="text-[15px] font-bold leading-tight tracking-tight" style={{ color: C.heading }}>
+    <div className={`flex h-full min-h-0 flex-col p-3 sm:p-4 ${GLASS_CARD}`}>
+      <header className="shrink-0">
+        <h3 className="text-sm font-bold leading-tight tracking-tight" style={{ color: C.heading }}>
           Style Guide &amp; Tips
         </h3>
-        <p className="mt-1 text-sm leading-relaxed text-slate-500">Get inspired for your next outfit</p>
+        <p className="mt-0.5 text-xs leading-snug text-slate-500">Get inspired for your next outfit</p>
       </header>
 
-      <article className="mx-auto mt-5 max-w-md overflow-hidden rounded-xl border border-slate-200/75 bg-gradient-to-b from-white to-slate-50/60 shadow-sm shadow-slate-900/[0.04]">
-        <div className="relative aspect-[4/3] w-full overflow-hidden bg-slate-100">
+      <article className="mx-auto mt-2.5 w-full max-w-md shrink-0 overflow-hidden rounded-lg border border-slate-200/75 bg-gradient-to-b from-white to-slate-50/60 shadow-sm shadow-slate-900/[0.04]">
+        <div className="relative h-24 w-full overflow-hidden bg-slate-100 sm:h-28">
           <img
             src={WEDDING_CLASSIC_INSPIRATION.src}
             alt=""
@@ -166,10 +168,10 @@ function StyleInspirationCard({ latestOrder }) {
             }}
           />
         </div>
-        <div className="flex flex-col p-3 pt-2.5 sm:p-4 sm:pt-3">
-          <h4 className="text-[13px] font-semibold leading-snug text-slate-900">{WEDDING_CLASSIC_INSPIRATION.title}</h4>
+        <div className="flex flex-col px-2.5 py-2 sm:px-3">
+          <h4 className="text-xs font-semibold leading-snug text-slate-900">{WEDDING_CLASSIC_INSPIRATION.title}</h4>
           {WEDDING_CLASSIC_INSPIRATION.description ? (
-            <p className="mt-1 text-[11px] leading-snug text-slate-500">{WEDDING_CLASSIC_INSPIRATION.description}</p>
+            <p className="mt-0.5 line-clamp-2 text-[10px] leading-snug text-slate-500">{WEDDING_CLASSIC_INSPIRATION.description}</p>
           ) : null}
         </div>
       </article>
@@ -177,10 +179,10 @@ function StyleInspirationCard({ latestOrder }) {
       <button
         type="button"
         onClick={openPinterest}
-        className="mt-5 flex w-full items-center justify-center gap-2 rounded-xl border border-emerald-800/15 bg-gradient-to-b from-white to-emerald-50/40 px-4 py-3 text-sm font-semibold text-emerald-900 shadow-sm transition hover:border-emerald-800/25 hover:brightness-[1.02] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-600/35 focus-visible:ring-offset-2"
+        className="mt-auto flex w-full shrink-0 items-center justify-center gap-1.5 rounded-lg border border-emerald-800/15 bg-gradient-to-b from-white to-emerald-50/40 px-3 py-2 text-xs font-semibold text-emerald-900 shadow-sm transition hover:border-emerald-800/25 hover:brightness-[1.02] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-600/35 focus-visible:ring-offset-2"
       >
         Explore More Styles
-        <ExternalLink className="h-4 w-4 shrink-0 opacity-80" aria-hidden />
+        <ExternalLink className="h-3.5 w-3.5 shrink-0 opacity-80" aria-hidden />
         <span className="sr-only">Opens Pinterest in a new tab</span>
       </button>
     </div>
@@ -228,7 +230,7 @@ function StatusPill({ variant }) {
   );
 }
 
-/** Three-column status cards — icon row, copy row, tinted footer + pill (mock layout) */
+/** Three-column status cards — icon row, copy row, tinted footer + pill */
 function StatusSummaryCard({
   icon: Icon,
   iconBgClass,
@@ -241,11 +243,8 @@ function StatusSummaryCard({
   footerTintClass,
 }) {
   return (
-    <div
-      className="flex flex-col overflow-hidden rounded-apple-card border border-gray-200/90 bg-white"
-      style={{ boxShadow: "0 4px 24px -6px rgba(15, 23, 42, 0.1)" }}
-    >
-      <div className="flex flex-col items-center bg-white px-4 pt-7 pb-2">
+    <div className={`flex flex-col ${GLASS_CARD}`}>
+      <div className="flex flex-col items-center bg-white/30 px-4 pt-7 pb-2">
         <div className={`flex h-[52px] w-[52px] items-center justify-center rounded-full ${iconBgClass}`}>
           <Icon className={`h-7 w-7 ${iconClass}`} strokeWidth={2} aria-hidden />
         </div>
@@ -280,10 +279,10 @@ function ProfileRows({ rows }) {
   return (
     <dl className="divide-y divide-slate-100/90">
       {rows.map((row) => (
-        <div key={row.label} className="flex items-start justify-between gap-4 py-2.5 first:pt-1">
-          <dt className="shrink-0 text-[13px] font-medium tracking-wide text-slate-500">{row.label}</dt>
+        <div key={row.label} className="flex items-start justify-between gap-3 py-1.5 first:pt-0">
+          <dt className="shrink-0 text-[11px] font-medium tracking-wide text-slate-500">{row.label}</dt>
           <dd
-            className="min-w-0 flex-1 text-right text-[13px] font-semibold leading-snug break-words text-slate-800"
+            className="min-w-0 flex-1 text-right text-[11px] font-semibold leading-snug break-words text-slate-800"
             style={{ color: C.heading }}
           >
             {formatProfileValue(row.value, row.unit)}
@@ -299,7 +298,7 @@ function ProfileRows({ rows }) {
  */
 function MeasurementProfileAccordion({ profileFromOrder, ordersLoading, ordersLength }) {
   const allowWizardFallback = !ordersLoading && ordersLength === 0;
-  const [openId, setOpenId] = useState(/** @type {"measurement" | "styleOptions" | "notes" | null} */ ("measurement"));
+  const [openId, setOpenId] = useState(/** @type {"measurement" | "styleOptions" | "notes" | null} */ (null));
   const [wizardProfile, setWizardProfile] = useState(() => buildDashboardProfileRows(readWizardStateFromStorage()));
 
   useEffect(() => {
@@ -342,13 +341,13 @@ function MeasurementProfileAccordion({ profileFromOrder, ordersLoading, ordersLe
   ];
 
   return (
-    <div className="flex w-full flex-col gap-2.5">
+    <div className="flex w-full flex-col gap-1.5">
       {sections.map(({ id, title, rows }) => {
         const isOpen = openId === id;
         return (
           <div
             key={id}
-            className="overflow-hidden rounded-xl border border-slate-200/70 bg-gradient-to-b from-white to-slate-50/40 shadow-[0_1px_0_rgba(255,255,255,0.8)_inset]"
+            className="overflow-hidden rounded-lg border border-slate-200/70 bg-gradient-to-b from-white to-slate-50/40 shadow-[0_1px_0_rgba(255,255,255,0.8)_inset]"
           >
             <button
               type="button"
@@ -356,11 +355,11 @@ function MeasurementProfileAccordion({ profileFromOrder, ordersLoading, ordersLe
               aria-expanded={isOpen}
               aria-controls={`measure-panel-${id}`}
               onClick={() => toggle(id)}
-              className="flex w-full items-center justify-between gap-3 px-4 py-3.5 text-left transition-colors hover:bg-white/70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-600/35 focus-visible:ring-offset-1"
+              className="flex w-full items-center justify-between gap-2 px-3 py-2 text-left transition-colors hover:bg-white/70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-600/35 focus-visible:ring-offset-1"
             >
-              <span className="text-[15px] font-bold tracking-tight text-slate-900">{title}</span>
+              <span className="text-sm font-semibold tracking-tight text-slate-900">{title}</span>
               <ChevronDown
-                className={`h-4 w-4 shrink-0 text-slate-400 transition-transform duration-300 ease-[cubic-bezier(0.22,1,0.36,1)] ${
+                className={`h-3.5 w-3.5 shrink-0 text-slate-400 transition-transform duration-300 ease-[cubic-bezier(0.22,1,0.36,1)] ${
                   isOpen ? "rotate-180" : ""
                 }`}
                 strokeWidth={2}
@@ -376,7 +375,7 @@ function MeasurementProfileAccordion({ profileFromOrder, ordersLoading, ordersLe
                   id={`measure-panel-${id}`}
                   role="region"
                   aria-labelledby={`measure-accordion-${id}`}
-                  className="border-t border-slate-100/90 px-4 pb-4 pt-0.5"
+                  className="border-t border-slate-100/90 px-3 pb-2 pt-0"
                 >
                   <ProfileRows rows={rows} />
                 </div>
@@ -451,7 +450,7 @@ function formatRawOrderStatus(order) {
 function HelpSupportCard({ orders, onTrackOrder }) {
   const [contactOpen, setContactOpen] = useState(false);
   const [reportOpen, setReportOpen] = useState(false);
-  const [faqOpenId, setFaqOpenId] = useState(/** @type {string | null} */ (null));
+  const [faqModalOpen, setFaqModalOpen] = useState(false);
   const [reportOrderKey, setReportOrderKey] = useState("");
   const [reportText, setReportText] = useState("");
 
@@ -459,16 +458,17 @@ function HelpSupportCard({ orders, onTrackOrder }) {
   const latestRow = latestOrder ? mapApiOrderToRecentRow(latestOrder) : null;
 
   useEffect(() => {
-    if (!contactOpen && !reportOpen) return undefined;
+    if (!contactOpen && !reportOpen && !faqModalOpen) return undefined;
     const onKey = (e) => {
       if (e.key === "Escape") {
         setContactOpen(false);
         setReportOpen(false);
+        setFaqModalOpen(false);
       }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [contactOpen, reportOpen]);
+  }, [contactOpen, reportOpen, faqModalOpen]);
 
   const openReportModal = () => {
     const key = orderIdentity(latestOrder) || orderIdentity(orders[0]) || "";
@@ -501,123 +501,79 @@ function HelpSupportCard({ orders, onTrackOrder }) {
     window.location.href = `mailto:${SUPPORT_EMAIL}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
   };
 
-  const toggleFaq = (id) => {
-    setFaqOpenId((cur) => (cur === id ? null : id));
-  };
-
   const hasOrders = orders.length > 0;
 
   return (
     <>
-      <div
-        className="flex h-full flex-col overflow-hidden rounded-apple-card border border-gray-200/90 bg-white/95 p-5 text-left shadow-sm backdrop-blur-sm sm:p-6"
-        style={{ boxShadow: "0 4px 20px -6px rgba(15, 23, 42, 0.08)" }}
-      >
-        <div className="flex items-start gap-3">
-          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-sky-100 text-sky-700">
-            <LifeBuoy className="h-5 w-5" strokeWidth={2} aria-hidden />
+      <div className={`flex h-full min-h-0 flex-col p-3 text-left sm:p-4 ${GLASS_CARD}`}>
+        <div className="flex shrink-0 items-start gap-2">
+          <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-sky-100/90 text-sky-700">
+            <LifeBuoy className="h-4 w-4" strokeWidth={2} aria-hidden />
           </div>
           <header className="min-w-0 flex-1">
-            <h3 className="text-[15px] font-bold leading-tight tracking-tight" style={{ color: C.heading }}>
+            <h3 className="text-sm font-bold leading-tight tracking-tight" style={{ color: C.heading }}>
               Help &amp; Support
             </h3>
-            <p className="mt-1 text-[12px] leading-snug text-slate-500">Need help with your order?</p>
+            <p className="mt-0.5 text-[11px] leading-snug text-slate-500">Need help with your order?</p>
           </header>
         </div>
 
-        <div className="mt-4 rounded-xl border border-slate-200/80 bg-gradient-to-b from-white to-slate-50/50 px-3.5 py-3 shadow-sm shadow-slate-900/[0.03]">
+        <div className="mt-2 shrink-0 rounded-lg border border-slate-200/80 bg-gradient-to-b from-white to-slate-50/50 px-2.5 py-2 shadow-sm shadow-slate-900/[0.03]">
           {latestOrder && latestRow ? (
-            <dl className="space-y-2 text-[12px]">
-              <div className="flex flex-wrap items-baseline justify-between gap-2">
+            <dl className="space-y-1 text-[11px]">
+              <div className="flex flex-wrap items-baseline justify-between gap-1.5">
                 <dt className="font-medium text-slate-500">Garment</dt>
                 <dd className="text-right font-semibold text-slate-800">{latestRow.item}</dd>
               </div>
-              <div className="flex flex-wrap items-center justify-between gap-2">
+              <div className="flex flex-wrap items-center justify-between gap-1.5">
                 <dt className="font-medium text-slate-500">Order status</dt>
-                <dd className="flex flex-wrap items-center justify-end gap-2">
+                <dd className="flex flex-wrap items-center justify-end gap-1.5">
                   <StatusPill variant={latestRow.variant} />
-                  <span className="text-[11px] text-slate-400">({formatRawOrderStatus(latestOrder)})</span>
+                  <span className="text-[10px] text-slate-400">({formatRawOrderStatus(latestOrder)})</span>
                 </dd>
               </div>
             </dl>
           ) : (
-            <p className="text-[12px] leading-relaxed text-slate-600">
+            <p className="text-[11px] leading-snug text-slate-600">
               No recent orders yet. Need help getting started?
             </p>
           )}
         </div>
 
-        <div className="mt-4 flex flex-col gap-2">
+        <div className="mt-auto flex flex-col gap-1.5 pt-2">
           <button
             type="button"
             onClick={() => setContactOpen(true)}
-            className="flex w-full items-center justify-center gap-2 rounded-xl border border-slate-200/90 bg-white px-3 py-2.5 text-xs font-semibold text-slate-800 shadow-sm transition hover:border-emerald-800/20 hover:bg-emerald-50/30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-600/35 focus-visible:ring-offset-2"
+            className="flex w-full items-center justify-center gap-1.5 rounded-lg border border-slate-200/90 bg-white px-2.5 py-2 text-[11px] font-semibold text-slate-800 shadow-sm transition hover:border-emerald-800/20 hover:bg-emerald-50/30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-600/35 focus-visible:ring-offset-2"
           >
-            <Mail className="h-3.5 w-3.5 shrink-0 text-slate-500" aria-hidden />
+            <Mail className="h-3 w-3 shrink-0 text-slate-500" aria-hidden />
             Contact Support
           </button>
           <button
             type="button"
             disabled={!hasOrders}
             onClick={openReportModal}
-            className="flex w-full items-center justify-center gap-2 rounded-xl border border-slate-200/90 bg-white px-3 py-2.5 text-xs font-semibold text-slate-800 shadow-sm transition hover:border-amber-800/20 hover:bg-amber-50/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-600/35 focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-45"
+            className="flex w-full items-center justify-center gap-1.5 rounded-lg border border-slate-200/90 bg-white px-2.5 py-2 text-[11px] font-semibold text-slate-800 shadow-sm transition hover:border-amber-800/20 hover:bg-amber-50/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-600/35 focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-45"
           >
-            <AlertTriangle className="h-3.5 w-3.5 shrink-0 text-amber-600/90" aria-hidden />
+            <AlertTriangle className="h-3 w-3 shrink-0 text-amber-600/90" aria-hidden />
             Report Issue
           </button>
           <button
             type="button"
             onClick={onTrackOrder}
-            className="flex w-full items-center justify-center gap-2 rounded-xl border border-slate-200/90 bg-white px-3 py-2.5 text-xs font-semibold text-slate-800 shadow-sm transition hover:border-sky-300/80 hover:bg-sky-50/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-500/35 focus-visible:ring-offset-2"
+            className="flex w-full items-center justify-center gap-1.5 rounded-lg border border-slate-200/90 bg-white px-2.5 py-2 text-[11px] font-semibold text-slate-800 shadow-sm transition hover:border-sky-300/80 hover:bg-sky-50/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-500/35 focus-visible:ring-offset-2"
           >
-            <ListOrdered className="h-3.5 w-3.5 shrink-0 text-sky-600" aria-hidden />
+            <ListOrdered className="h-3 w-3 shrink-0 text-sky-600" aria-hidden />
             Track Order
           </button>
-        </div>
-
-        <div className="mt-4 border-t border-slate-100/90 pt-3">
-          <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">FAQ</p>
-          <div className="mt-2 flex flex-col gap-1.5">
-            {SUPPORT_FAQ.map(({ id, question, answer }) => {
-              const open = faqOpenId === id;
-              return (
-                <div
-                  key={id}
-                  className="overflow-hidden rounded-lg border border-slate-200/70 bg-white/80 shadow-sm shadow-slate-900/[0.02]"
-                >
-                  <button
-                    type="button"
-                    id={`faq-trigger-${id}`}
-                    aria-expanded={open}
-                    aria-controls={`faq-panel-${id}`}
-                    onClick={() => toggleFaq(id)}
-                    className="flex w-full items-center justify-between gap-2 px-3 py-2.5 text-left text-[12px] font-semibold text-slate-800 transition hover:bg-slate-50/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-600/30 focus-visible:ring-inset"
-                  >
-                    <span className="min-w-0">{question}</span>
-                    <ChevronDown
-                      className={`h-3.5 w-3.5 shrink-0 text-slate-400 transition-transform duration-200 ${open ? "rotate-180" : ""}`}
-                      aria-hidden
-                    />
-                  </button>
-                  <div
-                    className="grid transition-[grid-template-rows] duration-200 ease-out motion-reduce:transition-none"
-                    style={{ gridTemplateRows: open ? "1fr" : "0fr" }}
-                  >
-                    <div className="min-h-0 overflow-hidden">
-                      <div
-                        id={`faq-panel-${id}`}
-                        role="region"
-                        aria-labelledby={`faq-trigger-${id}`}
-                        className="border-t border-slate-100/90 px-3 pb-2.5 pt-1 text-[11px] leading-relaxed text-slate-600"
-                      >
-                        {answer}
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
+          <button
+            type="button"
+            onClick={() => setFaqModalOpen(true)}
+            className="flex w-full items-center justify-center gap-1.5 rounded-lg border border-slate-200/90 bg-white/90 px-2.5 py-2 text-[11px] font-semibold text-slate-800 shadow-sm transition hover:border-slate-300 hover:bg-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-600/35 focus-visible:ring-offset-2"
+          >
+            <CircleHelp className="h-3 w-3 shrink-0 text-slate-500" aria-hidden />
+            Common questions
+          </button>
         </div>
       </div>
 
@@ -748,6 +704,46 @@ function HelpSupportCard({ orders, onTrackOrder }) {
               >
                 Submit
               </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {faqModalOpen ? (
+        <div
+          className="fixed inset-0 z-[100] flex items-end justify-center bg-slate-900/40 p-4 backdrop-blur-[2px] sm:items-center"
+          role="presentation"
+          onClick={() => setFaqModalOpen(false)}
+        >
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="support-faq-title"
+            className="max-h-[85vh] w-full max-w-md overflow-hidden rounded-2xl border border-slate-200/90 bg-white shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-start justify-between gap-3 border-b border-slate-100 px-5 py-4">
+              <h4 id="support-faq-title" className="text-base font-bold text-slate-900">
+                Common questions
+              </h4>
+              <button
+                type="button"
+                onClick={() => setFaqModalOpen(false)}
+                className="rounded-lg p-1 text-slate-400 transition hover:bg-slate-100 hover:text-slate-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-600/35"
+                aria-label="Close"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+            <div className="max-h-[min(60vh,28rem)] overflow-y-auto px-5 py-4">
+              <ul className="space-y-4">
+                {SUPPORT_FAQ.map(({ id, question, answer }) => (
+                  <li key={id} className="border-b border-slate-100 pb-4 last:border-0 last:pb-0">
+                    <p className="text-sm font-semibold text-slate-900">{question}</p>
+                    <p className="mt-1.5 text-sm leading-relaxed text-slate-600">{answer}</p>
+                  </li>
+                ))}
+              </ul>
             </div>
           </div>
         </div>
@@ -913,7 +909,7 @@ export default function CustomerDashboard() {
       <div className="relative z-10 font-['Inter',system-ui,sans-serif] text-slate-600">
         <main className="w-full">
           <div className="mx-auto max-w-7xl px-4 py-[72px] sm:px-6 lg:px-8 lg:py-20">
-            {/* Status cards — tinted footers per mock */}
+            {/* Row 1 — three status cards */}
             <div className="grid grid-cols-1 gap-5 sm:grid-cols-3 lg:gap-6">
               <StatusSummaryCard
                 icon={Truck}
@@ -950,14 +946,12 @@ export default function CustomerDashboard() {
               />
             </div>
 
-            <div className="mt-10 grid grid-cols-1 gap-8 lg:grid-cols-12 lg:gap-10">
-              {/* Recent Orders — exact mock table */}
-              <section
-                id="customer-dashboard-recent-orders"
-                tabIndex={-1}
-                className="scroll-mt-24 rounded-apple-card border border-gray-200/90 bg-white p-5 shadow-sm outline-none ring-emerald-600/0 transition-shadow duration-500 focus-visible:ring-2 focus-visible:ring-emerald-600/30 sm:p-6 lg:col-span-7"
-                style={{ boxShadow: "0 4px 24px -6px rgba(15, 23, 42, 0.08)" }}
-              >
+            {/* Row 2 — Recent orders full width */}
+            <section
+              id="customer-dashboard-recent-orders"
+              tabIndex={-1}
+              className={`scroll-mt-24 mt-8 p-5 outline-none ring-emerald-600/0 transition-shadow duration-500 focus-visible:ring-2 focus-visible:ring-emerald-600/30 sm:p-6 lg:mt-10 ${GLASS_CARD}`}
+            >
                 <h2 className="text-apple-h3 font-semibold" style={{ color: C.heading }}>
                   Recent Orders
                 </h2>
@@ -1027,55 +1021,54 @@ export default function CustomerDashboard() {
                   View All Orders
                   <ChevronDown className="h-4 w-4" aria-hidden />
                 </button>
+            </section>
+
+            {/* Row 3 — equal-height cards (grid stretch + h-full flex columns) */}
+            <div className="mt-8 grid grid-cols-1 items-stretch gap-5 md:grid-cols-3 lg:mt-10">
+              <section
+                className={`flex h-full min-h-0 flex-col p-3 sm:p-4 ${GLASS_CARD}`}
+                aria-label="Design and measurement profile"
+              >
+                <h2 className="shrink-0 text-base font-semibold tracking-tight sm:text-lg" style={{ color: C.heading }}>
+                  Your Design &amp; Measurement
+                </h2>
+
+                <p className="mb-0 mt-1 shrink-0 text-[11px] text-slate-600">
+                  Viewing:{" "}
+                  {activeOrder
+                    ? (typeof activeOrder.garmentType === "string" && activeOrder.garmentType.trim()
+                        ? activeOrder.garmentType
+                        : profileContextGarmentLabel(activeOrder))
+                    : "No order selected"}
+                </p>
+
+                <div className="mt-2 min-h-0 flex-1 overflow-y-auto">
+                  <MeasurementProfileAccordion
+                    key={profileFromOrder ? orderIdentity(activeOrder) || "order" : "wizard"}
+                    profileFromOrder={profileFromOrder}
+                    ordersLoading={ordersLoading}
+                    ordersLength={orders.length}
+                  />
+                </div>
+
+                <div className="mt-3 flex shrink-0 justify-end border-t border-white/30 pt-3">
+                  <button
+                    type="button"
+                    onClick={() => navigate("/features/measurement-wizard")}
+                    className="rounded-lg px-3 py-2 text-xs font-semibold text-white shadow-md transition-all duration-200 ease-out hover:brightness-105 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-600/50 focus-visible:ring-offset-2"
+                    style={{ backgroundColor: C.green }}
+                  >
+                    Update Measurements
+                  </button>
+                </div>
               </section>
 
-              {/* Right column */}
-              <div className="flex flex-col gap-5 lg:col-span-5">
-                <section
-                  className="w-full rounded-apple-card border-2 border-sky-100 bg-white/90 p-5 shadow-sm backdrop-blur-sm sm:p-6"
-                  style={{ boxShadow: "0 4px 24px -6px rgba(15, 23, 42, 0.08)" }}
-                  aria-label="Design and measurement profile"
-                >
-                  <h2 className="text-apple-h3 font-semibold tracking-tight" style={{ color: C.heading }}>
-                    Your Design &amp; Measurement Profile
-                  </h2>
+              <div className="h-full min-h-0 w-full">
+                <StyleInspirationCard latestOrder={activeOrder} />
+              </div>
 
-                  <p className="mb-2 mt-2 text-xs text-gray-500">
-                    Viewing:{" "}
-                    {activeOrder
-                      ? (typeof activeOrder.garmentType === "string" && activeOrder.garmentType.trim()
-                          ? activeOrder.garmentType
-                          : profileContextGarmentLabel(activeOrder))
-                      : "No order selected"}
-                  </p>
-
-                  <div className="mt-5">
-                    <MeasurementProfileAccordion
-                      key={profileFromOrder ? orderIdentity(activeOrder) || "order" : "wizard"}
-                      profileFromOrder={profileFromOrder}
-                      ordersLoading={ordersLoading}
-                      ordersLength={orders.length}
-                    />
-                  </div>
-
-                  <div className="mt-6 flex justify-end border-t border-slate-100/90 pt-5">
-                    <button
-                      type="button"
-                      onClick={() => navigate("/features/measurement-wizard")}
-                      className="rounded-apple px-[18px] py-2.5 text-sm font-semibold text-white shadow-md transition-all duration-200 ease-out hover:brightness-105 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-600/50 focus-visible:ring-offset-2"
-                      style={{ backgroundColor: C.green }}
-                    >
-                      Update Measurements
-                    </button>
-                  </div>
-                </section>
-
-                {/* Side-by-side small cards — mock layout */}
-                <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-                  <StyleInspirationCard latestOrder={activeOrder} />
-
-                  <HelpSupportCard orders={orders} onTrackOrder={scrollToRecentOrders} />
-                </div>
+              <div className="h-full min-h-0 w-full">
+                <HelpSupportCard orders={orders} onTrackOrder={scrollToRecentOrders} />
               </div>
             </div>
           </div>

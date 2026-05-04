@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { ChevronDown, Menu, Scissors, User, X } from "lucide-react";
 import { getUserRole } from "../utils/userRole";
@@ -29,16 +29,28 @@ export default function LandingNavbar({
   onDashboardNavigate,
   /** When true, "Track Orders" sits in the center nav after Dashboard (customer dashboard mock). */
   trackOrdersInNavCenter = false,
+  /**
+   * `landingGlass` (default) — fixed glassmorphism bar, airy blur + slight tint; tightens on scroll; layout spacer included.
+   * `glass` — legacy static frosted bar (sticky), no scroll-driven change.
+   * `solid` — opaque white bar, no blur.
+   */
+  navSurface = "landingGlass",
 }) {
   const navigate = useNavigate();
   const location = useLocation();
   const [mobileOpen, setMobileOpen] = useState(false);
+  /** `landingGlass`: true after scroll past threshold (slightly stronger frost + shadow). */
+  const [navScrolled, setNavScrolled] = useState(false);
+  /** `landingGlass`: reserves space under fixed header so content is not covered. */
+  const [navSpacerPx, setNavSpacerPx] = useState(72);
   const isDashboardActive = ["/customer/dashboard", "/tailor/dashboard", "/dashboard"].includes(location.pathname);
   const isTrackOrdersActive = location.pathname === "/orders";
   const [loginMenuOpen, setLoginMenuOpen] = useState(false);
   const [dashboardMenuOpen, setDashboardMenuOpen] = useState(false);
   const loginDropdownRef = useRef(null);
   const dashboardDropdownRef = useRef(null);
+  /** Full chrome height (nav + mobile sheet) for layout spacer when bar is `fixed`. */
+  const headerShellRef = useRef(null);
   const navRef = useRef(null);
   const itemRefs = useRef({});
   const hoverKeyRef = useRef(null);
@@ -173,6 +185,32 @@ export default function LandingNavbar({
     };
   }, []);
 
+  const isLandingGlass = navSurface === "landingGlass";
+  useEffect(() => {
+    if (!isLandingGlass || typeof window === "undefined") return undefined;
+    const THRESHOLD = 20;
+    const onScroll = () => {
+      setNavScrolled(window.scrollY > THRESHOLD);
+    };
+    onScroll();
+    window.addEventListener("scroll", onScroll, { passive: true });
+    return () => window.removeEventListener("scroll", onScroll);
+  }, [isLandingGlass]);
+
+  useLayoutEffect(() => {
+    if (!isLandingGlass) return undefined;
+    const el = headerShellRef.current;
+    if (!el || typeof ResizeObserver === "undefined") return undefined;
+    const measure = () => {
+      const h = Math.ceil(el.getBoundingClientRect().height);
+      setNavSpacerPx(Number.isFinite(h) && h > 0 ? h : 72);
+    };
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [isLandingGlass, mobileOpen, loginMenuOpen, dashboardMenuOpen]);
+
   const handleCloseMobileMenu = () => setMobileOpen(false);
 
   const goCustomerLogin = () => {
@@ -245,11 +283,99 @@ export default function LandingNavbar({
   );
 
   const tokenPresent = Boolean(readAuthToken());
+  const isSolidNav = navSurface === "solid";
+  const headerClass = isSolidNav
+    ? "ss-landing-nav-header--solid sticky top-0 z-[200] border-b border-slate-200/90 shadow-sm"
+    : isLandingGlass
+      ? `ss-landing-nav-glass fixed inset-x-0 top-0 z-[200] w-full max-w-none border-b border-transparent${navScrolled ? " ss-landing-nav-glass--scrolled" : ""}`
+      : "ss-glass-surface sticky top-0 z-[100] border-b border-white/35 shadow-[0_8px_32px_-8px_rgba(15,23,42,0.08)]";
+  const mobileMenuClass = isSolidNav
+    ? "ss-landing-nav-mobile--solid border-t border-slate-200/80 px-4 py-4 md:hidden"
+    : isLandingGlass
+      ? `ss-landing-nav-glass-mobile border-t border-white/20 px-4 py-4 md:hidden${navScrolled ? " ss-landing-nav-glass-mobile--scrolled" : ""}`
+      : "ss-glass-surface border-t border-white/25 px-4 py-4 md:hidden";
+  const mobileToggleHoverClass = isSolidNav ? "hover:bg-slate-100" : "hover:bg-white/15";
 
-  return (
-    <header className="ss-glass-surface sticky top-0 z-[100] border-b border-white/35 shadow-[0_8px_32px_-8px_rgba(15,23,42,0.08)]">
+  const spacerStyle = useMemo(
+    () => ({ height: Math.max(navSpacerPx, 64) }),
+    [navSpacerPx]
+  );
+
+  const headerNode = (
+    <header
+      ref={headerShellRef}
+      className={headerClass}
+      data-nav-scrolled={isLandingGlass ? (navScrolled ? "true" : "false") : undefined}
+    >
       <style>
         {`
+          /* Landing — airy glass: low white fill, blur does the work; scroll adds a touch more frost + shadow */
+          .ss-landing-nav-glass {
+            padding-top: env(safe-area-inset-top, 0px);
+            background-color: rgba(255, 255, 255, 0.18);
+            background-image: linear-gradient(
+              180deg,
+              rgba(255, 255, 255, 0.28) 0%,
+              rgba(255, 255, 255, 0.1) 100%
+            );
+            -webkit-backdrop-filter: blur(20px) saturate(185%);
+            backdrop-filter: blur(20px) saturate(185%);
+            box-shadow: 0 1px 1px rgba(15, 23, 42, 0.03);
+            transition:
+              background-color 0.3s ease-in-out,
+              background-image 0.3s ease-in-out,
+              box-shadow 0.3s ease-in-out,
+              border-color 0.3s ease-in-out,
+              -webkit-backdrop-filter 0.3s ease-in-out,
+              backdrop-filter 0.3s ease-in-out;
+          }
+          .ss-landing-nav-glass--scrolled {
+            background-color: rgba(255, 255, 255, 0.38);
+            background-image: linear-gradient(
+              180deg,
+              rgba(255, 255, 255, 0.48) 0%,
+              rgba(255, 255, 255, 0.26) 100%
+            );
+            -webkit-backdrop-filter: blur(26px) saturate(200%);
+            backdrop-filter: blur(26px) saturate(200%);
+            box-shadow:
+              0 1px 0 rgba(255, 255, 255, 0.4) inset,
+              0 10px 32px -8px rgba(15, 23, 42, 0.12),
+              0 2px 8px -2px rgba(15, 23, 42, 0.06);
+            border-bottom-color: rgba(255, 255, 255, 0.45);
+          }
+          .ss-landing-nav-glass-mobile {
+            background-color: rgba(255, 255, 255, 0.22);
+            background-image: linear-gradient(180deg, rgba(255, 255, 255, 0.32) 0%, rgba(255, 255, 255, 0.14) 100%);
+            -webkit-backdrop-filter: blur(22px) saturate(185%);
+            backdrop-filter: blur(22px) saturate(185%);
+            transition:
+              background-color 0.3s ease-in-out,
+              background-image 0.3s ease-in-out,
+              -webkit-backdrop-filter 0.3s ease-in-out,
+              backdrop-filter 0.3s ease-in-out;
+          }
+          .ss-landing-nav-glass-mobile--scrolled {
+            background-color: rgba(255, 255, 255, 0.42);
+            background-image: linear-gradient(180deg, rgba(255, 255, 255, 0.52) 0%, rgba(255, 255, 255, 0.3) 100%);
+            -webkit-backdrop-filter: blur(28px) saturate(200%);
+            backdrop-filter: blur(28px) saturate(200%);
+          }
+          /* Opaque marketing header — wins over global .ss-glass-surface and fixed page wash */
+          .ss-landing-nav-header--solid {
+            position: sticky;
+            top: 0;
+            background-color: #ffffff !important;
+            background-image: none !important;
+            -webkit-backdrop-filter: none !important;
+            backdrop-filter: none !important;
+            box-shadow: 0 1px 0 rgba(15, 23, 42, 0.06), 0 4px 14px -6px rgba(15, 23, 42, 0.08) !important;
+          }
+          .ss-landing-nav-mobile--solid {
+            background-color: #ffffff !important;
+            -webkit-backdrop-filter: none !important;
+            backdrop-filter: none !important;
+          }
           /* Shared nav text styles (underline is one sliding element in nav) */
           .ss-landing-nav-link {
             transition: color 0.2s ease;
@@ -494,7 +620,7 @@ export default function LandingNavbar({
 
         <button
           type="button"
-          className="inline-flex items-center justify-center rounded-lg p-2 text-slate-600 transition hover:bg-white/15 md:hidden focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-600/30 focus-visible:ring-offset-2"
+          className={`inline-flex items-center justify-center rounded-lg p-2 text-slate-600 transition md:hidden focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-600/30 focus-visible:ring-offset-2 ${mobileToggleHoverClass}`}
           onClick={() => setMobileOpen((prev) => !prev)}
           aria-label="Toggle navigation menu"
           aria-controls="mobile-menu"
@@ -505,7 +631,7 @@ export default function LandingNavbar({
       </nav>
 
       {mobileOpen && (
-        <div id="mobile-menu" className="ss-glass-surface border-t border-white/25 px-4 py-4 md:hidden">
+        <div id="mobile-menu" className={mobileMenuClass}>
           <div className="flex flex-col gap-1">
             {navLinks.map((link) => (
               <button
@@ -603,5 +729,14 @@ export default function LandingNavbar({
         </div>
       )}
     </header>
+  );
+
+  return isLandingGlass ? (
+    <>
+      {headerNode}
+      <div aria-hidden className="pointer-events-none w-full shrink-0" style={spacerStyle} />
+    </>
+  ) : (
+    headerNode
   );
 }

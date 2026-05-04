@@ -420,13 +420,14 @@ export default function SewServeLandingPage() {
 
       <div className="ss-page-bg-anim" aria-hidden="true" />
 
-      <div className="relative z-10 min-h-screen font-['Inter',sans-serif]">
-        <LandingNavbar
-          logoDisplaySrc={logoDisplaySrc}
-          navLinks={navLinks}
-          onSectionNavigate={handleSectionNavigate}
-        />
+      {/* Nav outside z-10 wrapper so it stacks above the fixed page wash; glassmorphism + scroll elevation */}
+      <LandingNavbar
+        logoDisplaySrc={logoDisplaySrc}
+        navLinks={navLinks}
+        onSectionNavigate={handleSectionNavigate}
+      />
 
+      <div className="relative z-10 min-h-screen font-['Inter',sans-serif]">
         {/* Hero: full-bleed background + wave; content max-width centered */}
         <div className="relative isolate overflow-hidden border-b border-white/25 bg-white/[0.06] backdrop-blur-xl">
           {/* Mid-depth ambient blobs — studio tint behind hero columns */}
