@@ -8,6 +8,10 @@ import { buildViewModelFromFullWizardData } from "../../utils/wizardDataToReview
 import { ensureSocketThen, socket } from "../../socket";
 import { getConversationId, normalizeChatId } from "../../chatUtils";
 import {
+  resolveTailorIdWhenViewingAsTailor,
+  syncTailorSessionFromTailorUser,
+} from "../../utils/chatIdentity.js";
+import {
   API_BASE_URL,
   DEFAULT_CUSTOMER_ID,
   GARMENT_REGEX,
@@ -16,7 +20,6 @@ import {
   normalizeStatus,
   readProfilesFromStorage,
   resolveOrderWorkflowState,
-  tailorId,
   TAILOR_CURRENT_TASKS_VISIBLE_MAX,
   TAILOR_PROFILE_STORAGE_KEY,
   WORKFLOW_NON_COMPLETED_STATUSES,
@@ -87,9 +90,14 @@ function orderIsActiveCurrentTask(order) {
 export function useTailorDashboard() {
   const { user } = useAuth();
   const navigate = useNavigate();
+  const activeTailorShopId = useMemo(() => resolveTailorIdWhenViewingAsTailor(user), [user]);
   const [profiles, setProfiles] = useState(readProfilesFromStorage);
 
   const [orders, setOrders] = useState(() => []);
+
+  useEffect(() => {
+    syncTailorSessionFromTailorUser(user);
+  }, [user]);
 
   const [activeOrderId, _setActiveOrderId] = useState("");
 
@@ -136,6 +144,14 @@ export function useTailorDashboard() {
   const measurementReviewDedupeRef = useRef("");
 
   useEffect(() => {
+    setOrders([]);
+    _setActiveOrderId("");
+    setReviewModalOpen(false);
+    setReviewModalOrder(null);
+    setReviewCardData(null);
+  }, [activeTailorShopId]);
+
+  useEffect(() => {
     isChatOpenRef.current = isChatOpen;
   }, [isChatOpen]);
 
@@ -145,7 +161,7 @@ export function useTailorDashboard() {
 
   const fetchOrders = useCallback(async () => {
     try {
-      const url = `${API_BASE_URL}/orders?tailorId=${encodeURIComponent(tailorId)}`;
+      const url = `${API_BASE_URL}/orders?tailorId=${encodeURIComponent(activeTailorShopId)}`;
       const res = await fetch(url);
       const data = await res.json();
       if (!Array.isArray(data)) return null;
@@ -157,7 +173,7 @@ export function useTailorDashboard() {
       console.error("Error fetching orders", err);
       return null;
     }
-  }, [tailorId]);
+  }, [activeTailorShopId]);
 
   useEffect(() => {
     void fetchOrders();
@@ -178,8 +194,8 @@ export function useTailorDashboard() {
     socket.connect();
 
     const joinRoom = () => {
-      console.log("[TailorDashboard] join_user:", tailorId);
-      socket.emit("join_user", { userId: tailorId });
+      console.log("[TailorDashboard] join_user:", activeTailorShopId);
+      socket.emit("join_user", { userId: activeTailorShopId });
     };
     const handleNewNotification = (payload) => {
       if (payload?.type !== "new_message") return;
@@ -196,14 +212,14 @@ export function useTailorDashboard() {
       const raw = payload?.fullOrder || payload?.order;
       if (!raw || typeof raw !== "object") return;
       console.log("[Tailor Sync] measurement:updated", raw.id ?? raw._id ?? "");
-      setOrders((prev) => upsertOrdersMerged(prev, raw, tailorId));
+      setOrders((prev) => upsertOrdersMerged(prev, raw, activeTailorShopId));
     };
 
     const onOrderNew = (payload) => {
       const raw = payload?.fullOrder || payload?.order;
       if (!raw || typeof raw !== "object") return;
       console.log("[Tailor Sync] order:new", raw.id ?? raw._id ?? "");
-      setOrders((prev) => upsertOrdersMerged(prev, raw, tailorId));
+      setOrders((prev) => upsertOrdersMerged(prev, raw, activeTailorShopId));
     };
 
     const onOrderStatusUpdatedRelay = (data) => {
@@ -211,7 +227,7 @@ export function useTailorDashboard() {
       const raw = data.fullOrder;
       if (raw && typeof raw === "object") {
         console.log("[Tailor Sync] order:statusUpdated fullOrder", raw.id ?? raw._id ?? "");
-        setOrders((prev) => upsertOrdersMerged(prev, raw, tailorId));
+        setOrders((prev) => upsertOrdersMerged(prev, raw, activeTailorShopId));
         return;
       }
       if (data.orderId == null) return;
@@ -289,7 +305,7 @@ export function useTailorDashboard() {
           clientOrderId: prevRow.clientOrderId,
           createdAt: prevRow.createdAt,
         });
-        const tail = data.tailorId != null ? String(data.tailorId) : tailorId;
+        const tail = data.tailorId != null ? String(data.tailorId) : activeTailorShopId;
         const patch = {
           id,
           _id: id,
@@ -326,7 +342,7 @@ export function useTailorDashboard() {
                 createdAt: prevRow.createdAt ?? merged.createdAt,
               }
         );
-        if (row.tailorId && String(row.tailorId) !== String(tailorId)) {
+        if (row.tailorId && String(row.tailorId) !== String(activeTailorShopId)) {
           return prev;
         }
         queueMicrotask(() => {
@@ -358,7 +374,7 @@ export function useTailorDashboard() {
       socket.off("order:new", onOrderNew);
       socket.off("order:statusUpdated", onOrderStatusUpdatedRelay);
     };
-  }, [fetchOrders, tailorId]);
+  }, [fetchOrders, activeTailorShopId]);
 
   useEffect(() => {
     console.log("[TailorDashboard] isChatOpen:", isChatOpen);
@@ -382,8 +398,8 @@ export function useTailorDashboard() {
   }, []);
 
   const tailorOrders = useMemo(
-    () => orders.filter((order) => String(order.tailorId ?? "").trim() === String(tailorId).trim()),
-    [orders]
+    () => orders.filter((order) => String(order.tailorId ?? "").trim() === String(activeTailorShopId).trim()),
+    [orders, activeTailorShopId]
   );
 
   const activeOrder = useMemo(() => {
@@ -396,13 +412,13 @@ export function useTailorDashboard() {
   }, [activeOrder, tailorOrders, setActiveOrderId]);
 
   useEffect(() => {
-    const current = profiles[tailorId] || {};
+    const current = profiles[activeTailorShopId] || {};
     setProfileForm({
       name: current.name || "",
       skills: current.skills || "",
       experience: String(current.experience || "").replace(" years", ""),
     });
-  }, [profiles]);
+  }, [profiles, activeTailorShopId]);
 
   const stats = useMemo(() => {
     const total = tailorOrders.length;
@@ -463,10 +479,10 @@ export function useTailorDashboard() {
     () =>
       orders.filter(
         (order) =>
-          String(order.tailorId ?? "").trim() === String(tailorId).trim() &&
+          String(order.tailorId ?? "").trim() === String(activeTailorShopId).trim() &&
           resolveOrderWorkflowState(order).internalStatus !== "completed"
       ),
-    [orders]
+    [orders, activeTailorShopId]
   );
 
   const newOrders = useMemo(() => {
@@ -572,7 +588,7 @@ export function useTailorDashboard() {
     }
     const targetCustomerId = normalizeChatId(order.customerId) || DEFAULT_CUSTOMER_ID;
 
-    const conversationId = getConversationId(tailorId, targetCustomerId);
+    const conversationId = getConversationId(activeTailorShopId, targetCustomerId);
 
     setActiveChatCustomer({
       id: targetCustomerId,
@@ -591,7 +607,7 @@ export function useTailorDashboard() {
       return;
     }
     const fallbackCustomerId = normalizeChatId(activeChatCustomer.id) || DEFAULT_CUSTOMER_ID;
-    setActiveConversationId(getConversationId(tailorId, fallbackCustomerId));
+    setActiveConversationId(getConversationId(activeTailorShopId, fallbackCustomerId));
     setActiveChatCustomer((prev) => ({
       id: fallbackCustomerId,
       name: prev.name || "Customer",
@@ -619,7 +635,7 @@ export function useTailorDashboard() {
         body: JSON.stringify({
           customerName: newOrder.customerName.trim(),
           customerId: `C-${Date.now()}`,
-          tailorId,
+          tailorId: activeTailorShopId,
           garmentType: newOrder.garmentType.trim(),
           measurements: {},
           dueDate: newOrder.dueDate || null,
@@ -650,14 +666,14 @@ export function useTailorDashboard() {
     const parsedExperience = Number(profileForm.experience);
     setProfiles((prev) => ({
       ...prev,
-      [tailorId]: {
-        ...(prev[tailorId] || {}),
-        name: trimmedName || prev[tailorId]?.name || "",
-        skills: trimmedSkills || prev[tailorId]?.skills || "",
+      [activeTailorShopId]: {
+        ...(prev[activeTailorShopId] || {}),
+        name: trimmedName || prev[activeTailorShopId]?.name || "",
+        skills: trimmedSkills || prev[activeTailorShopId]?.skills || "",
         experience:
           Number.isFinite(parsedExperience) && parsedExperience >= 0
             ? `${parsedExperience} years`
-            : prev[tailorId]?.experience || "",
+            : prev[activeTailorShopId]?.experience || "",
       },
     }));
     setNotifications((prev) => ["Tailor profile updated successfully.", ...prev]);
@@ -666,10 +682,12 @@ export function useTailorDashboard() {
   const notificationText = (note) => (typeof note === "string" ? note : note?.text || "");
 
   const welcomeName = useMemo(() => {
-    const raw = profiles[tailorId]?.name || "Michael";
+    const fromProfile = profiles[activeTailorShopId]?.name;
+    const fromUser = user?.fullName;
+    const raw = (fromProfile && String(fromProfile).trim()) || (fromUser && String(fromUser).trim()) || "Tailor";
     const first = String(raw).trim().split(/\s+/)[0];
     return first || raw;
-  }, [profiles]);
+  }, [profiles, activeTailorShopId, user]);
 
   const currentTaskLines = useMemo(() => {
     const lines = [];
@@ -768,6 +786,7 @@ export function useTailorDashboard() {
 
   return {
     navigate,
+    activeTailorShopId,
     profiles,
     /** Live list from GET /orders + socket merges (source for Current Tasks). */
     orders,

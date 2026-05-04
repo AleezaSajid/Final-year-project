@@ -6,6 +6,7 @@ import { LandingStylePageBackground } from "../components/LandingStylePageBackgr
 import { useSewServeLogoProcessedSrc } from "../hooks/useSewServeLogoProcessedSrc";
 import TailorCard from "../components/TailorCard";
 import SendRequestModal from "../components/SendRequestModal";
+import { fetchPublicTailors } from "../api/tailorsPublicApi";
 import {
   BROWSE_TAILORS,
   RATING_OPTIONS,
@@ -86,11 +87,28 @@ export default function BrowseTailors() {
   const [sortBy, setSortBy] = useState("rating");
   const [filterMenu, setFilterMenu] = useState(null);
   const [requestFor, setRequestFor] = useState(null);
+  const [tailorDataset, setTailorDataset] = useState(BROWSE_TAILORS);
   const popoverRef = useRef(null);
   const urlHydrated = useRef(false);
 
   useEffect(() => {
     document.title = "Browse Tailors | SewServe";
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const { tailors, ok } = await fetchPublicTailors();
+      if (cancelled) return;
+      if (ok && Array.isArray(tailors) && tailors.length > 0) {
+        setTailorDataset(tailors);
+      } else {
+        setTailorDataset(BROWSE_TAILORS);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   // Hydrate filter state from the URL once, then keep the query string in sync with filters.
@@ -184,10 +202,10 @@ export default function BrowseTailors() {
 
   const filtered = useMemo(
     () =>
-      BROWSE_TAILORS.filter((t) =>
+      tailorDataset.filter((t) =>
         matchesFilters(t, { search, rating, price, delivery, experienceBar, categoryUi })
       ),
-    [search, rating, price, delivery, experienceBar, categoryUi]
+    [tailorDataset, search, rating, price, delivery, experienceBar, categoryUi]
   );
 
   const sortedTailors = useMemo(() => {

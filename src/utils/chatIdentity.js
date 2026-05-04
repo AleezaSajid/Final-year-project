@@ -36,12 +36,14 @@ export function resolveCustomerIdForChat(user) {
  */
 export function resolveTailorIdWhenViewingAsTailor(user) {
   if (user && typeof user === "object") {
-    const id = user.tailorId ?? user.id ?? user._id;
-    if (id != null && String(id).trim() !== "") return String(id).trim();
+    const shop = user.tailorShopId != null ? String(user.tailorShopId).trim() : "";
+    if (shop && looksLikeTailorShopId(shop)) return shop;
+    const tid = user.tailorId != null ? String(user.tailorId).trim() : "";
+    if (tid && looksLikeTailorShopId(tid)) return tid;
   }
   try {
     const stored = localStorage.getItem(TAILOR_SESSION_STORAGE_KEY);
-    if (stored && stored.trim()) return stored.trim();
+    if (stored && stored.trim() && looksLikeTailorShopId(stored)) return stored.trim();
   } catch {
     /* ignore */
   }
@@ -52,7 +54,7 @@ export function resolveTailorIdWhenViewingAsTailor(user) {
  * Reject values that are clearly not a tailor shop id (e.g. numeric user ids written by mistake).
  * Prevents "3" as tailor + "3" as customer -> broken room "3-3".
  */
-function looksLikeTailorShopId(value) {
+export function looksLikeTailorShopId(value) {
   const s = String(value ?? "").trim();
   if (!s) return false;
   if (/^T-[A-Z0-9-]+$/i.test(s)) return true;

@@ -5,7 +5,7 @@
 
 import { garmentDisplayFromWizardPayload } from "./customerRecentOrdersStorage.js";
 import { resolveCustomerIdForChat, resolveTailorIdForCustomerChat } from "./chatIdentity.js";
-import { tailorId as dashboardDefaultTailorId, workflowStages } from "../tailorDashboard/constants.js";
+import { DEFAULT_TAILOR_SHOP_ID, workflowStages } from "../tailorDashboard/constants.js";
 
 const FIT_TYPE_OPTIONS = [
   { id: "slim", label: "Slim Fit" },
@@ -179,7 +179,7 @@ export function buildMeasurementOrderPayload(input) {
         ? tailorShopIdOverride.trim()
         : null) ||
       resolveTailorIdForCustomerChat(authUser) ||
-      dashboardDefaultTailorId,
+      DEFAULT_TAILOR_SHOP_ID,
     dueDate,
   };
 }

@@ -12,7 +12,8 @@ import { AnimatePresence } from "framer-motion";
 import { useLocation } from "react-router-dom";
 import { ensureSocketThen, socket } from "../socket";
 import OrderPopup from "../tailorDashboard/components/OrderPopup";
-import { tailorId } from "../tailorDashboard/constants";
+import { useAuth } from "../context/AuthContext.jsx";
+import { resolveTailorIdWhenViewingAsTailor } from "../utils/chatIdentity.js";
 
 const MapOrderAlertContext = createContext(null);
 
@@ -32,6 +33,8 @@ function shouldShowMapOrderPopup(pathname) {
 }
 
 export function MapOrderAlertProvider({ children }) {
+  const { user } = useAuth();
+  const mapInterestTailorId = useMemo(() => resolveTailorIdWhenViewingAsTailor(user), [user]);
   const location = useLocation();
   const [incomingOrder, setIncomingOrder] = useState(null);
   const incomingRef = useRef(null);
@@ -56,10 +59,10 @@ export function MapOrderAlertProvider({ children }) {
     if (!o?.orderId) return;
     const oid = String(o.orderId).trim();
     ensureSocketThen(() => {
-      socket.emit("interest", { orderId: oid, tailorId });
+      socket.emit("interest", { orderId: oid, tailorId: mapInterestTailorId });
     });
     dismissIncomingOrder();
-  }, [dismissIncomingOrder, tailorId]);
+  }, [dismissIncomingOrder, mapInterestTailorId]);
 
   useEffect(() => {
     const onConnect = () => {

@@ -9,7 +9,8 @@ import {
 export const SHARED_ORDER_STORAGE_KEY = "sewserve_orders";
 export const TAILOR_PROFILE_STORAGE_KEY = "sewserve_tailor_profiles";
 export const GARMENT_REGEX = /^[A-Za-z ]+$/;
-export const tailorId = "T-A1";
+/** Demo / legacy fallback when an order document has no `tailorId`. Real dashboards use `resolveTailorIdWhenViewingAsTailor`. */
+export const DEFAULT_TAILOR_SHOP_ID = "T-A1";
 /** Same cap for “Current Tasks” and “Measurements to Review” (priority-sorted). */
 export const TAILOR_CURRENT_TASKS_VISIBLE_MAX = 2;
 export const DEFAULT_CUSTOMER_ID = "CU-001";
@@ -194,7 +195,7 @@ export const normalizeOrder = (order) => {
     createdAt: order.createdAt || order.date || new Date().toISOString(),
     dueDate: order.dueDate || order.date || new Date().toISOString().slice(0, 10),
     workflowStep: workflowIndex,
-    tailorId: order.tailorId || tailorId,
+    tailorId: order.tailorId || DEFAULT_TAILOR_SHOP_ID,
     price: Number(order.price || 0),
     orderImages: Array.isArray(order.orderImages) ? order.orderImages : [],
     measurements:

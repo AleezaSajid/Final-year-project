@@ -183,7 +183,7 @@ const HeroImg = styled.img`
 const Card = styled.div.attrs({ className: "ss-auth-form-card" })`
   padding: 1.02rem 1rem 0.86rem;
   width: 100%;
-  max-width: 412px;
+  max-width: 440px;
   margin-left: auto;
 
   @media (max-width: 980px) {
@@ -439,6 +439,13 @@ export default function TailorSignUpPage() {
   const navigate = useNavigate();
   const logoDisplaySrc = useSewServeLogoProcessedSrc(LOGO_SRC);
   const [name, setName] = useState("");
+  const [shopName, setShopName] = useState("");
+  const [city, setCity] = useState("");
+  const [specialty, setSpecialty] = useState("");
+  const [experienceYears, setExperienceYears] = useState("");
+  const [priceStart, setPriceStart] = useState("");
+  const [deliveryDays, setDeliveryDays] = useState("");
+  const [bio, setBio] = useState("");
   const [phone, setPhone] = useState("");
   const [email, setEmail] = useState("");
   const [address, setAddress] = useState("");
@@ -461,11 +468,25 @@ export default function TailorSignUpPage() {
       setError("Passwords do not match.");
       return;
     }
+    if (!shopName.trim() || !city.trim() || !specialty.trim()) {
+      setError("Shop name, city, and specialty are required for your public listing.");
+      return;
+    }
     setLoading(true);
     try {
+      const ey = parseInt(String(experienceYears).trim(), 10);
+      const ps = parseInt(String(priceStart).trim(), 10);
+      const dd = parseInt(String(deliveryDays).trim(), 10);
       await register({
         role: "tailor",
         name: name.trim(),
+        shopName: shopName.trim(),
+        city: city.trim(),
+        specialty: specialty.trim(),
+        experienceYears: Number.isFinite(ey) ? ey : 0,
+        priceStart: Number.isFinite(ps) && ps > 0 ? ps : 1500,
+        deliveryDays: Number.isFinite(dd) && dd > 0 ? dd : 7,
+        bio: bio.trim(),
         phone: phone.trim(),
         email: email.trim(),
         address: address.trim(),
@@ -491,7 +512,9 @@ export default function TailorSignUpPage() {
             </LogoHomeLink>
           </LogoRow>
           <PageTitle>Tailor Account</PageTitle>
-          <Subtitle>Create your tailor account to manage orders and services.</Subtitle>
+          <Subtitle>
+            Create your account. Shop details below appear on Browse Tailors after you sign up (when the API is available).
+          </Subtitle>
         </HeaderBlock>
 
         <TwoCol>
@@ -524,6 +547,92 @@ export default function TailorSignUpPage() {
                   value={name}
                   onChange={(ev) => setName(ev.target.value)}
                   required
+                />
+              </Field>
+
+              <Field>
+                <InputNoIcon
+                  type="text"
+                  name="shopName"
+                  autoComplete="organization"
+                  placeholder="Shop / business name (shown on Browse)"
+                  value={shopName}
+                  onChange={(ev) => setShopName(ev.target.value)}
+                  required
+                />
+              </Field>
+
+              <Field>
+                <InputNoIcon
+                  type="text"
+                  name="city"
+                  autoComplete="address-level2"
+                  placeholder="City"
+                  value={city}
+                  onChange={(ev) => setCity(ev.target.value)}
+                  required
+                />
+              </Field>
+
+              <Field>
+                <InputNoIcon
+                  type="text"
+                  name="specialty"
+                  autoComplete="off"
+                  placeholder="Main specialty (e.g. Bridal & Formal)"
+                  value={specialty}
+                  onChange={(ev) => setSpecialty(ev.target.value)}
+                  required
+                />
+              </Field>
+
+              <Field>
+                <InputNoIcon
+                  type="number"
+                  name="experienceYears"
+                  autoComplete="off"
+                  inputMode="numeric"
+                  min={0}
+                  placeholder="Years of experience (optional, default 0)"
+                  value={experienceYears}
+                  onChange={(ev) => setExperienceYears(ev.target.value)}
+                />
+              </Field>
+
+              <Field>
+                <InputNoIcon
+                  type="number"
+                  name="priceStart"
+                  autoComplete="off"
+                  inputMode="numeric"
+                  min={0}
+                  placeholder="Starting price PKR (optional, default 1500)"
+                  value={priceStart}
+                  onChange={(ev) => setPriceStart(ev.target.value)}
+                />
+              </Field>
+
+              <Field>
+                <InputNoIcon
+                  type="number"
+                  name="deliveryDays"
+                  autoComplete="off"
+                  inputMode="numeric"
+                  min={1}
+                  placeholder="Typical delivery days (optional, default 7)"
+                  value={deliveryDays}
+                  onChange={(ev) => setDeliveryDays(ev.target.value)}
+                />
+              </Field>
+
+              <Field>
+                <TextAreaField
+                  name="bio"
+                  autoComplete="off"
+                  placeholder="Short bio for your public profile (optional)"
+                  rows={3}
+                  value={bio}
+                  onChange={(ev) => setBio(ev.target.value)}
                 />
               </Field>
 

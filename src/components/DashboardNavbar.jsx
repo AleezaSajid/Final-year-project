@@ -4,6 +4,7 @@ import { motion } from "framer-motion";
 import { Bell, LogOut, Menu, MessageCircle, UserRound, X } from "lucide-react";
 import { SewServeBrandImg } from "./SewServeBrandImg.jsx";
 import { clearUserRole } from "../utils/userRole";
+import { TAILOR_SESSION_STORAGE_KEY } from "../utils/chatIdentity.js";
 import { useCustomerChat } from "../context/CustomerChatContext.jsx";
 import { useTailorDashboardChat } from "../context/TailorDashboardChatContext.jsx";
 
@@ -86,6 +87,11 @@ export default function DashboardNavbar() {
   const handleLogout = () => {
     localStorage.removeItem("sewserve_auth_token");
     sessionStorage.removeItem("sewserve_auth_token");
+    try {
+      localStorage.removeItem(TAILOR_SESSION_STORAGE_KEY);
+    } catch {
+      /* ignore */
+    }
     clearUserRole();
     navigate("/");
     handleCloseMobileMenu();

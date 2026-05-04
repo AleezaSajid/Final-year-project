@@ -4,6 +4,7 @@ const http = require('http');
 const { Server } = require('socket.io');
 const mongoose = require('mongoose');
 const User = require('./models/User');
+const TailorProfile = require('./models/TailorProfile');
 const Message = require('./models/Message');
 const Order = require('./models/Order');
 
@@ -67,16 +68,55 @@ app.get('/test', (req, res) => {
     res.send('TEST WORKING');
   });
 
+const DEFAULT_TAILOR_IMAGE =
+  'https://images.unsplash.com/photo-1594938298603-c8148c4dae35?w=600&h=450&fit=crop&q=80';
+
+function mapTailorProfileToPublicRow(doc, idx = 0) {
+  const d = doc && typeof doc.toObject === 'function' ? doc.toObject() : doc;
+  if (!d) return null;
+  const priceStart = Math.max(0, Number(d.priceStart) || 0);
+  return {
+    id: String(d._id),
+    tailorShopId: d.tailorShopId,
+    name: d.shopName || d.displayName || 'Tailor',
+    city: d.city,
+    specialty: d.specialty,
+    rating: Math.min(5, Math.max(0, Number(d.rating) || 4.7)),
+    experienceYears: Math.max(0, Number(d.experienceYears) || 0),
+    distanceKm: Number((2 + (idx % 8) * 0.35).toFixed(1)),
+    availability: d.availability === 'busy' ? 'busy' : 'available',
+    priceLabel: `Starting from PKR ${Math.round(priceStart).toLocaleString('en-PK')}`,
+    priceStart,
+    deliveryDays: Math.max(1, Number(d.deliveryDays) || 7),
+    imageUrl: (d.imageUrl && String(d.imageUrl).trim()) || DEFAULT_TAILOR_IMAGE,
+    bio: d.bio || '',
+    skillsNotes: d.skillsNotes || '',
+  };
+}
+
 async function registerUser(req, res) {
   const body = req.body || {};
   const fullName = body.fullName || body.name;
   const { email, password } = body;
+  const role = body.role === 'tailor' ? 'tailor' : 'customer';
 
   if (!fullName || !email || !password) {
     return res.status(400).json({
       error: 'Full name, email, and password are required.',
       message: 'Full name, email, and password are required.',
     });
+  }
+
+  if (role === 'tailor') {
+    const shopName = String(body.shopName || '').trim();
+    const city = String(body.city || '').trim();
+    const specialty = String(body.specialty || '').trim();
+    if (!shopName || !city || !specialty) {
+      return res.status(400).json({
+        error: 'Shop name, city, and main specialty are required for tailor accounts.',
+        message: 'Shop name, city, and main specialty are required for tailor accounts.',
+      });
+    }
   }
 
   try {
@@ -92,15 +132,62 @@ async function registerUser(req, res) {
       fullName: String(fullName).trim(),
       email: normalizedEmail,
       password,
+      role,
+      phone: String(body.phone || '').trim(),
+      address: String(body.address || '').trim(),
+      experience: String(body.experience || '').trim(),
     });
+
+    let tailorShopId = null;
+    if (role === 'tailor') {
+      tailorShopId = `T-U${created.id}`;
+      const shopName = String(body.shopName || '').trim();
+      const city = String(body.city || '').trim();
+      const specialty = String(body.specialty || '').trim();
+      const experienceYears = Math.max(0, parseInt(String(body.experienceYears || '0'), 10) || 0);
+      const priceStart = Math.max(0, parseInt(String(body.priceStart || '1500'), 10) || 1500);
+      const deliveryDays = Math.max(1, parseInt(String(body.deliveryDays || '7'), 10) || 7);
+      try {
+        await TailorProfile.create({
+          userId: created.id,
+          email: normalizedEmail,
+          tailorShopId,
+          shopName,
+          displayName: String(fullName).trim(),
+          city,
+          address: String(body.address || '').trim(),
+          specialty,
+          bio: String(body.bio || '').trim(),
+          skillsNotes: String(body.experience || '').trim(),
+          experienceYears,
+          priceStart,
+          deliveryDays,
+          imageUrl: String(body.imageUrl || '').trim() || DEFAULT_TAILOR_IMAGE,
+          rating: 4.7,
+          availability: 'available',
+          published: true,
+        });
+      } catch (profileErr) {
+        console.error('TAILOR PROFILE CREATE ERROR', profileErr);
+        await User.deleteOne({ _id: created._id });
+        return res.status(500).json({
+          error: 'Could not create tailor profile.',
+          message: 'Could not create tailor profile. Please try again.',
+        });
+      }
+    }
+
+    const userOut = {
+      id: created.id,
+      fullName: created.fullName,
+      email: created.email,
+      role: created.role || 'customer',
+    };
+    if (tailorShopId) userOut.tailorShopId = tailorShopId;
 
     return res.status(201).json({
       message: 'Account created successfully.',
-      user: {
-        id: created.id,
-        fullName: created.fullName,
-        email: created.email,
-      },
+      user: userOut,
     });
   } catch (error) {
     console.error('SIGNUP ERROR', error);
@@ -129,6 +216,12 @@ async function loginUser(req, res) {
       return res.status(401).json({ error: 'Invalid password.', message: 'Invalid password.' });
     }
 
+    let tailorShopId = null;
+    if (user.role === 'tailor') {
+      const tp = await TailorProfile.findOne({ userId: user.id }).select('tailorShopId').lean();
+      if (tp && tp.tailorShopId) tailorShopId = String(tp.tailorShopId).trim();
+    }
+
     return res.status(200).json({
       message: 'Login successful!',
       token: 'dummy-token-123',
@@ -136,6 +229,8 @@ async function loginUser(req, res) {
         id: user.id,
         fullName: user.fullName,
         email: user.email,
+        role: user.role || 'customer',
+        ...(tailorShopId ? { tailorShopId } : {}),
       },
     });
   } catch (error) {
@@ -153,6 +248,43 @@ app.get('/api/me', (req, res) => {
 
 app.post('/api/logout', (req, res) => {
   res.json({ ok: true });
+});
+
+/** Public listing for Browse Tailors (no auth). */
+app.get('/api/tailors/public', async (req, res) => {
+  try {
+    const docs = await TailorProfile.find({ published: true }).sort({ createdAt: -1 }).exec();
+    const tailors = docs.map((d, i) => mapTailorProfileToPublicRow(d, i)).filter(Boolean);
+    return res.json({ tailors, source: 'api' });
+  } catch (e) {
+    console.error('GET /api/tailors/public', e);
+    return res.status(500).json({ tailors: [], error: 'Unable to load tailors.' });
+  }
+});
+
+/** Single tailor for public profile: Mongo _id or tailorShopId (e.g. T-U3). */
+app.get('/api/tailors/public/:idOrShopId', async (req, res) => {
+  const raw = req.params.idOrShopId != null ? String(req.params.idOrShopId).trim() : '';
+  if (!raw) {
+    return res.status(400).json({ error: 'Invalid id' });
+  }
+  try {
+    let doc = null;
+    if (mongoose.Types.ObjectId.isValid(raw)) {
+      doc = await TailorProfile.findById(raw).exec();
+    }
+    if (!doc) {
+      doc = await TailorProfile.findOne({ tailorShopId: raw }).exec();
+    }
+    if (!doc || !doc.published) {
+      return res.status(404).json({ error: 'Tailor not found' });
+    }
+    const tailor = mapTailorProfileToPublicRow(doc, 0);
+    return res.json({ tailor });
+  } catch (e) {
+    console.error('GET /api/tailors/public/:id', e);
+    return res.status(500).json({ error: 'Unable to load tailor' });
+  }
 });
 
 const normalizeOrderStatus = (status = '') => {

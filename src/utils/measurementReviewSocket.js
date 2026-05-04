@@ -1,6 +1,6 @@
 import { socket } from "../socket.js";
 import { resolveTailorIdForCustomerChat } from "./chatIdentity.js";
-import { tailorId as dashboardDefaultTailorId } from "../tailorDashboard/constants.js";
+import { DEFAULT_TAILOR_SHOP_ID } from "../tailorDashboard/constants.js";
 import { patchOrderWizardFields } from "../api/ordersApi.js";
 import { getLinkedWizardOrderId, syncWizardOrderToServer } from "./measurementWizardOrderSync.js";
 
@@ -119,7 +119,7 @@ export async function emitWizardMeasurementReview(wizardData, authUser) {
       ? full.assignedTailorShopId.trim()
       : "";
   const tailorId = String(
-    assigned || resolveTailorIdForCustomerChat(authUser) || dashboardDefaultTailorId
+    assigned || resolveTailorIdForCustomerChat(authUser) || DEFAULT_TAILOR_SHOP_ID
   );
   const socketPayload = buildMeasurementReviewSocketPayload(orderId, tailorId, full);
   console.log("[measurement:review emit] wizardData.image:", socketPayload?.wizardData?.image);

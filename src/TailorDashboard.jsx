@@ -5,7 +5,7 @@ import ChatWindow from "./ChatWindow";
 import TdDashboardOverview from "./tailorDashboard/components/TdDashboardOverview";
 import WizardOrderReviewModal from "./tailorDashboard/components/WizardOrderReviewModal";
 import { TailorDashboardChatContext } from "./context/TailorDashboardChatContext.jsx";
-import { DEFAULT_CUSTOMER_ID, tailorId } from "./tailorDashboard/constants";
+import { DEFAULT_CUSTOMER_ID } from "./tailorDashboard/constants";
 import { useTailorDashboard } from "./tailorDashboard/hooks/useTailorDashboard";
 
 export default function TailorDashboard() {
@@ -16,10 +16,16 @@ export default function TailorDashboard() {
       openChatFromActiveOrder: dash.openChatFromActiveOrder,
       activeChatCustomer: dash.activeChatCustomer,
       activeConversationId: dash.activeConversationId,
-      senderId: tailorId,
+      senderId: dash.activeTailorShopId,
       unreadChatCount: dash.unreadChatCount,
     }),
-    [dash.openChatFromActiveOrder, dash.activeChatCustomer, dash.activeConversationId, dash.unreadChatCount]
+    [
+      dash.openChatFromActiveOrder,
+      dash.activeChatCustomer,
+      dash.activeConversationId,
+      dash.activeTailorShopId,
+      dash.unreadChatCount,
+    ]
   );
 
   return (
@@ -33,7 +39,7 @@ export default function TailorDashboard() {
         <ChatWindow
           isOpen={dash.isChatOpen}
           onClose={() => dash.setIsChatOpen(false)}
-          senderId={tailorId}
+          senderId={dash.activeTailorShopId}
           receiverId={dash.activeChatCustomer.id || DEFAULT_CUSTOMER_ID}
           receiverName={dash.activeChatCustomer.name || "Customer"}
           conversationId={dash.activeConversationId}

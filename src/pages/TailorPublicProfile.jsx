@@ -5,6 +5,7 @@ import LandingNavbar from "../components/LandingNavbar";
 import { LandingStylePageBackground } from "../components/LandingStylePageBackground";
 import { useSewServeLogoProcessedSrc } from "../hooks/useSewServeLogoProcessedSrc";
 import SendRequestModal from "../components/SendRequestModal";
+import { fetchPublicTailorById } from "../api/tailorsPublicApi";
 import { getTailorById } from "../data/browseTailorsMock";
 
 const LOGO_SRC = `${process.env.PUBLIC_URL || ""}/images/hero/sewserve-logo.png`;
@@ -20,8 +21,24 @@ export default function TailorPublicProfile() {
   const { tailorId } = useParams();
   const navigate = useNavigate();
   const logoDisplaySrc = useSewServeLogoProcessedSrc(LOGO_SRC);
-  const tailor = getTailorById(tailorId);
+  const [tailor, setTailor] = useState(null);
+  const [resolved, setResolved] = useState(false);
   const [requestOpen, setRequestOpen] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    setResolved(false);
+    setTailor(null);
+    (async () => {
+      const { tailor: apiTailor } = await fetchPublicTailorById(tailorId);
+      if (cancelled) return;
+      setTailor(apiTailor || getTailorById(tailorId));
+      setResolved(true);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [tailorId]);
 
   useEffect(() => {
     document.title = tailor ? `${tailor.name} | SewServe` : "Tailor | SewServe";
@@ -42,6 +59,17 @@ export default function TailorPublicProfile() {
   const handleSectionNavigate = (sectionId) => {
     navigate("/", { state: { scrollTo: sectionId } });
   };
+
+  if (!resolved) {
+    return (
+      <div className="relative isolate min-h-screen bg-transparent text-slate-600 antialiased">
+        <LandingStylePageBackground />
+        <div className="relative z-10 mx-auto max-w-lg px-6 py-24 text-center font-['Inter',sans-serif]">
+          <p className="text-lg font-semibold text-slate-900">Loading profile…</p>
+        </div>
+      </div>
+    );
+  }
 
   if (!tailor) {
     return (
@@ -160,8 +188,14 @@ export default function TailorPublicProfile() {
                 </div>
 
                 <p className="mt-8 text-sm leading-relaxed text-slate-600">
-                  This is a preview profile for <strong>{tailor.name}</strong>. When your backend is connected, this page can show
-                  portfolios, reviews, and live availability.
+                  {tailor.bio && String(tailor.bio).trim() ? (
+                    <>{String(tailor.bio).trim()}</>
+                  ) : (
+                    <>
+                      This is a preview profile for <strong>{tailor.name}</strong>. When your backend is connected, this page can
+                      show portfolios, reviews, and live availability.
+                    </>
+                  )}
                 </p>
 
                 <div className="mt-8 flex flex-wrap gap-3">
