@@ -21,6 +21,7 @@ import { socket } from "./socket.js";
 import DashboardNavbar from "./components/DashboardNavbar.jsx";
 import { LandingStylePageBackground } from "./components/LandingStylePageBackground.jsx";
 import { useAuth } from "./context/AuthContext.jsx";
+import { useCustomerChat } from "./context/CustomerChatContext.jsx";
 import { resolveCustomerIdForChat, TAILOR_SESSION_STORAGE_KEY } from "./utils/chatIdentity.js";
 import {
   MEASUREMENT_WIZARD_STORAGE_KEY,
@@ -752,6 +753,89 @@ function HelpSupportCard({ orders, onTrackOrder }) {
   );
 }
 
+function countDistinctTailorChatsFromOrders(orders) {
+  const ids = new Set();
+  if (!Array.isArray(orders)) return 0;
+  for (const o of orders) {
+    const t =
+      o?.tailorId ??
+      o?.tailorShopId ??
+      o?.assignedTailorId ??
+      o?.assignedTailor ??
+      (o?.tailor && typeof o.tailor === "object" && (o.tailor._id ?? o.tailor.id)) ??
+      o?.orderPayload?.tailorId;
+    if (t != null && String(t).trim() !== "") ids.add(String(t).trim());
+  }
+  return ids.size;
+}
+
+function CustomerDashboardChatCard({ orders }) {
+  const { openCustomerChat, unreadChatCount, lastChatPreview } = useCustomerChat();
+
+  const activeChatsCount = useMemo(() => {
+    const n = countDistinctTailorChatsFromOrders(orders);
+    if (n > 0) return n;
+    if (orders.length > 0) return 1;
+    return 0;
+  }, [orders]);
+
+  const hasActiveChats = activeChatsCount > 0;
+  const unreadLabel = unreadChatCount > 99 ? "99+" : String(unreadChatCount);
+
+  const previewText = lastChatPreview?.text?.trim()
+    ? lastChatPreview.text
+    : hasActiveChats
+      ? "No messages yet — open chat to reach your tailor."
+      : null;
+
+  return (
+    <button
+      type="button"
+      onClick={() => openCustomerChat()}
+      className={`group flex min-h-0 w-full min-w-0 flex-1 flex-col p-5 text-left outline-none transition duration-300 ease-out hover:scale-[1.02] focus-visible:ring-2 focus-visible:ring-emerald-600/45 focus-visible:ring-offset-2 sm:p-6 ${GLASS_CARD}`}
+    >
+      <div className="flex shrink-0 items-start justify-between gap-2">
+        <div>
+          <h2 className="text-apple-h3 font-semibold tracking-tight text-slate-900">
+            <span className="mr-1.5" aria-hidden>
+              💬
+            </span>
+            Chat
+          </h2>
+          <p className="mt-1 text-sm font-medium text-emerald-900/80">Message your tailor</p>
+        </div>
+        {unreadChatCount > 0 ? (
+          <span
+            className="flex h-7 min-w-[1.75rem] shrink-0 items-center justify-center rounded-full bg-red-500 px-2 text-xs font-bold tabular-nums text-white shadow-md ring-2 ring-white/90"
+            aria-label={`${unreadLabel} unread messages`}
+          >
+            {unreadLabel}
+          </span>
+        ) : null}
+      </div>
+
+      <div className="mt-4 min-h-0 flex-1">
+        {hasActiveChats ? (
+          <>
+            <p className="text-sm font-semibold text-slate-800">
+              {activeChatsCount === 1 ? "1 active chat" : `${activeChatsCount} active chats`}
+            </p>
+            {previewText ? (
+              <p className="mt-2 line-clamp-1 text-sm leading-snug text-slate-600">{previewText}</p>
+            ) : null}
+          </>
+        ) : (
+          <p className="text-sm leading-relaxed text-slate-600">No active chats yet</p>
+        )}
+      </div>
+
+      <span className="mt-auto inline-flex w-full shrink-0 items-center justify-center gap-2 rounded-xl border border-emerald-800/25 bg-gradient-to-b from-[#3d6b4a] to-[#2f5a42] px-4 py-3 text-sm font-semibold text-white shadow-md shadow-emerald-900/20 transition duration-300 group-hover:brightness-105">
+        Open Chat
+      </span>
+    </button>
+  );
+}
+
 export default function CustomerDashboard() {
   const navigate = useNavigate();
   const { user } = useAuth();
@@ -762,6 +846,17 @@ export default function CustomerDashboard() {
   const [ordersError, setOrdersError] = useState("");
 
   const recentRows = useMemo(() => mapOrdersToRecentRows(orders), [orders]);
+
+  const statusCounts = useMemo(() => {
+    const counts = { inTransit: 0, delivered: 0, alteration: 0 };
+    for (const o of orders) {
+      const v = mapApiOrderToRecentRow(o).variant;
+      if (v === "inTransit") counts.inTransit += 1;
+      else if (v === "delivered") counts.delivered += 1;
+      else if (v === "alteration") counts.alteration += 1;
+    }
+    return counts;
+  }, [orders]);
 
   const activeOrder = useMemo(() => {
     if (!orders.length) return null;
@@ -917,8 +1012,18 @@ export default function CustomerDashboard() {
                 iconClass="text-sky-600"
                 title="Out for Delivery"
                 titleClassName=""
-                description="Your order is on the way."
-                badgeLabel="In Transit"
+                description={
+                  ordersLoading
+                    ? "Loading your orders…"
+                    : statusCounts.inTransit > 0
+                      ? `${statusCounts.inTransit} order${statusCounts.inTransit === 1 ? "" : "s"} in transit.`
+                      : "No orders currently in transit."
+                }
+                badgeLabel={
+                  ordersLoading
+                    ? "—"
+                    : `${statusCounts.inTransit} In Transit`
+                }
                 badgeStyle={{ backgroundColor: C.green }}
                 footerTintClass="bg-emerald-50/90"
               />
@@ -928,8 +1033,18 @@ export default function CustomerDashboard() {
                 iconClass="text-amber-600"
                 title="Delivered"
                 titleClassName="!text-[#d4a017]"
-                description="Your order has been delivered."
-                badgeLabel="Completed"
+                description={
+                  ordersLoading
+                    ? "Loading your orders…"
+                    : statusCounts.delivered > 0
+                      ? `${statusCounts.delivered} delivered order${statusCounts.delivered === 1 ? "" : "s"}.`
+                      : "No delivered orders yet."
+                }
+                badgeLabel={
+                  ordersLoading
+                    ? "—"
+                    : `${statusCounts.delivered} Completed`
+                }
                 badgeStyle={{ backgroundColor: C.green }}
                 footerTintClass="bg-amber-50/80"
               />
@@ -939,39 +1054,84 @@ export default function CustomerDashboard() {
                 iconClass="text-[#1e3a5f]"
                 title="Alteration"
                 titleClassName="!text-[#1e3a5f]"
-                description="Your garment is being adjusted or refitted to your measurements."
-                badgeLabel="Alteration"
+                description={
+                  ordersLoading
+                    ? "Loading your orders…"
+                    : statusCounts.alteration > 0
+                      ? `${statusCounts.alteration} order${statusCounts.alteration === 1 ? "" : "s"} needs alteration.`
+                      : "No orders flagged for alteration."
+                }
+                badgeLabel={
+                  ordersLoading
+                    ? "—"
+                    : `${statusCounts.alteration} Alteration`
+                }
                 badgeStyle={{ backgroundColor: C.green }}
                 footerTintClass="bg-slate-100/80"
               />
             </div>
 
-            {/* Row 2 — Recent orders full width */}
-            <section
-              id="customer-dashboard-recent-orders"
-              tabIndex={-1}
-              className={`scroll-mt-24 mt-8 p-5 outline-none ring-emerald-600/0 transition-shadow duration-500 focus-visible:ring-2 focus-visible:ring-emerald-600/30 sm:p-6 lg:mt-10 ${GLASS_CARD}`}
-            >
-                <h2 className="text-apple-h3 font-semibold" style={{ color: C.heading }}>
+            {/* Row 2 — Recent Orders + Chat (stack on mobile, side-by-side from lg; equal height) */}
+            <div className="mt-8 grid grid-cols-1 gap-5 lg:mt-10 lg:grid-cols-12 lg:items-stretch lg:gap-6">
+              <section
+                id="customer-dashboard-recent-orders"
+                tabIndex={-1}
+                className={`scroll-mt-24 flex min-h-0 w-full flex-col p-5 outline-none ring-emerald-600/0 transition-shadow duration-500 focus-visible:ring-2 focus-visible:ring-emerald-600/30 sm:p-6 lg:col-span-8 ${GLASS_CARD}`}
+              >
+                <style>
+                  {`
+                    .recent-orders-scroll {
+                      scrollbar-width: thin;
+                      scrollbar-color: rgba(61, 107, 74, 0.45) transparent;
+                    }
+                    .recent-orders-scroll::-webkit-scrollbar {
+                      width: 8px;
+                    }
+                    .recent-orders-scroll::-webkit-scrollbar-track {
+                      background: transparent;
+                    }
+                    .recent-orders-scroll::-webkit-scrollbar-thumb {
+                      background-color: rgba(61, 107, 74, 0.4);
+                      border-radius: 9999px;
+                      border: 2px solid transparent;
+                      background-clip: padding-box;
+                    }
+                    .recent-orders-scroll::-webkit-scrollbar-thumb:hover {
+                      background-color: rgba(61, 107, 74, 0.55);
+                    }
+                  `}
+                </style>
+                <h2 className="shrink-0 text-apple-h3 font-semibold" style={{ color: C.heading }}>
                   Recent Orders
                 </h2>
                 {ordersError ? (
-                  <p className="mt-3 text-sm text-amber-800/90" role="alert">
+                  <p className="mt-3 shrink-0 text-sm text-amber-800/90" role="alert">
                     {ordersError}
                   </p>
                 ) : null}
-                <div className="mt-5 overflow-x-auto">
-                  <table className="w-full min-w-[640px] text-left text-sm">
-                    <thead>
-                      <tr className="border-b border-gray-200">
-                        <th className="pb-3 pr-4 text-xs font-semibold uppercase tracking-wide text-slate-400">Order ID</th>
-                        <th className="pb-3 pr-4 text-xs font-semibold uppercase tracking-wide text-slate-400">Item</th>
-                        <th className="pb-3 pr-4 text-xs font-semibold uppercase tracking-wide text-slate-400">Status</th>
-                        <th className="pb-3 pr-4 text-xs font-semibold uppercase tracking-wide text-slate-400">Date created</th>
-                        <th className="pb-3 text-xs font-semibold uppercase tracking-wide text-slate-400">Action</th>
+                <div
+                  className="recent-orders-scroll relative mt-4 max-h-[160px] overflow-x-hidden overflow-y-auto overscroll-y-contain scroll-smooth rounded-xl border border-slate-200/50 bg-white/35 py-2 pl-3 pr-2 sm:mt-5 sm:py-3 sm:pl-4 after:pointer-events-none after:absolute after:inset-x-0 after:bottom-0 after:z-[5] after:h-7 after:bg-gradient-to-t after:from-white/90 after:from-40% after:to-transparent"
+                  aria-label="Recent orders list, scroll for more"
+                >
+                  <table className="w-full table-fixed text-left text-sm">
+                    <thead className="sticky top-0 z-10 border-b border-gray-200/90 bg-white/95 shadow-[0_1px_0_rgba(15,23,42,0.06)] backdrop-blur-sm">
+                      <tr>
+                        <th className="w-[19%] pb-3 pr-2 text-xs font-semibold uppercase tracking-wide text-slate-400 sm:pr-3">
+                          Order ID
+                        </th>
+                        <th className="w-[26%] pb-3 pr-2 text-xs font-semibold uppercase tracking-wide text-slate-400 sm:pr-3">
+                          Item
+                        </th>
+                        <th className="w-[22%] pb-3 pr-2 text-xs font-semibold uppercase tracking-wide text-slate-400 sm:pr-3">
+                          Status
+                        </th>
+                        <th className="w-[18%] pb-3 pr-2 text-xs font-semibold uppercase tracking-wide text-slate-400 sm:pr-3">
+                          Date
+                        </th>
+                        <th className="w-[15%] pb-3 text-xs font-semibold uppercase tracking-wide text-slate-400">Action</th>
                       </tr>
                     </thead>
-                    <tbody>
+                    <tbody className="divide-y divide-slate-100/90">
                       {ordersLoading ? (
                         <tr>
                           <td colSpan={5} className="py-8 text-center text-sm text-slate-500">
@@ -980,31 +1140,53 @@ export default function CustomerDashboard() {
                         </tr>
                       ) : recentRows.length === 0 ? (
                         <tr>
-                          <td colSpan={5} className="py-8 text-center text-sm text-slate-500">
+                          <td colSpan={5} className="px-1 py-8 text-center text-sm leading-relaxed text-slate-500">
                             No orders yet. Complete the measurement wizard to create your first order.
                           </td>
                         </tr>
                       ) : (
-                        orders.map((order) => {
+                        orders.slice(0, 10).map((order) => {
                           const row = mapApiOrderToRecentRow(order);
                           return (
-                            <tr key={row.rawId || row.orderId || orderIdentity(order)} className="border-b border-gray-100 last:border-0">
-                              <td className="py-3.5 pr-4 font-medium" style={{ color: C.heading }}>
-                                {row.orderId}
+                            <tr key={row.rawId || row.orderId || orderIdentity(order)} className="align-top">
+                              <td
+                                className="py-3 pr-2 font-medium sm:py-3.5 sm:pr-3"
+                                style={{ color: C.heading }}
+                                title={row.orderId}
+                              >
+                                <span className="line-clamp-2 break-all sm:line-clamp-1">{row.orderId}</span>
                               </td>
-                              <td className="py-3.5 pr-4 text-slate-700">{row.item}</td>
-                              <td className="py-3.5 pr-4">
+                              <td className="py-3 pr-2 text-slate-700 sm:py-3.5 sm:pr-3" title={row.item}>
+                                <span className="line-clamp-2 break-words">{row.item}</span>
+                              </td>
+                              <td className="py-3 pr-2 sm:py-3.5 sm:pr-3">
                                 <StatusPill variant={row.variant} />
                               </td>
-                              <td className="py-3.5 pr-4 text-slate-600">{row.delivery}</td>
-                              <td className="py-3.5">
-                                <button
-                                  type="button"
-                                  onClick={() => setActiveOrderId(orderIdentity(order))}
-                                  className="text-sm font-medium text-emerald-700 underline hover:opacity-80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-600/30 focus-visible:ring-offset-1"
-                                >
-                                  View Details
-                                </button>
+                              <td
+                                className="py-3 pr-2 text-slate-600 sm:py-3.5 sm:pr-3"
+                                title={row.delivery}
+                              >
+                                <span className="line-clamp-2 break-words sm:line-clamp-1">{row.delivery}</span>
+                              </td>
+                              <td className="py-3 sm:py-3.5">
+                                <div className="flex flex-col items-start gap-1.5">
+                                  <button
+                                    type="button"
+                                    onClick={() => setActiveOrderId(orderIdentity(order))}
+                                    className="text-left text-sm font-medium text-emerald-700 underline decoration-emerald-700/30 underline-offset-2 hover:opacity-80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-600/30 focus-visible:ring-offset-1"
+                                  >
+                                    View Details
+                                  </button>
+                                  {row.variant === "delivered" ? (
+                                    <button
+                                      type="button"
+                                      onClick={() => navigate(`/customer/review/${encodeURIComponent(orderIdentity(order))}`)}
+                                      className="text-left text-sm font-medium text-blue-700 underline decoration-blue-700/30 underline-offset-2 hover:opacity-80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-400/40 focus-visible:ring-offset-1"
+                                    >
+                                      Leave Review
+                                    </button>
+                                  ) : null}
+                                </div>
                               </td>
                             </tr>
                           );
@@ -1016,12 +1198,17 @@ export default function CustomerDashboard() {
                 <button
                   type="button"
                   onClick={() => navigate("/orders")}
-                  className="mt-5 inline-flex items-center gap-1.5 text-sm font-semibold text-blue-600 transition hover:text-blue-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-400/40 focus-visible:ring-offset-2"
+                  className="mt-5 inline-flex shrink-0 items-center gap-1.5 text-sm font-semibold text-blue-600 transition hover:text-blue-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-400/40 focus-visible:ring-offset-2"
                 >
                   View All Orders
                   <ChevronDown className="h-4 w-4" aria-hidden />
                 </button>
-            </section>
+              </section>
+
+              <div className="flex h-full min-h-0 w-full min-w-0 flex-col lg:col-span-4">
+                <CustomerDashboardChatCard orders={orders} />
+              </div>
+            </div>
 
             {/* Row 3 — equal-height cards (grid stretch + h-full flex columns) */}
             <div className="mt-8 grid grid-cols-1 items-stretch gap-5 md:grid-cols-3 lg:mt-10">

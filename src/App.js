@@ -1,6 +1,7 @@
 import { BrowserRouter as Router, Routes, Route, Navigate } from "react-router-dom";
 import SewServeLandingPage from "./SewServeLandingPage";
 import OrderTrackingPage from "./OrderTrackingPage";
+import OrdersPage from "./OrdersPage";
 import LoginPage from "./LoginPage";
 import TailorLoginPage from "./TailorLoginPage";
 import SignUpPage from "./SignUpPage";
@@ -30,7 +31,8 @@ function App() {
       <CustomerChatProvider>
       <Routes>
         <Route path="/" element={<SewServeLandingPage />} />
-        <Route path="/orders" element={<OrderTrackingPage />} />
+        <Route path="/orders" element={<OrdersPage />} />
+        <Route path="/track-orders" element={<OrderTrackingPage />} />
         <Route path="/select-workspace" element={<WorkspaceSelect />} />
         <Route path="/workspace" element={<WorkspaceSelect />} />
         <Route path="/login" element={<LoginPage />} />

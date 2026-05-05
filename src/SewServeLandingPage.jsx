@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { motion } from "framer-motion";
 import { useLocation, useNavigate } from "react-router-dom";
 import {
@@ -76,7 +76,7 @@ const features = [
     bannerLabel: "Order Tracking",
     description: "Stay updated from tailoring in progress to final delivery with live status updates.",
     icon: MapPinned,
-    route: "/orders#order-tracking",
+    route: "/track-orders#order-tracking",
   },
   {
     title: "Trusted Local Tailors",
@@ -87,7 +87,9 @@ const features = [
   },
 ];
 
-const testimonials = [
+const TESTIMONIALS_STORAGE_KEY = "sewserve_testimonials";
+
+const staticTestimonials = [
   {
     name: "Ayesha Khan",
     feedback: "SewServe made tailoring so easy. My measurements were saved perfectly and the fit was exactly what I wanted.",
@@ -119,6 +121,53 @@ export default function SewServeLandingPage() {
   const location = useLocation();
   const logoDisplaySrc = useSewServeLogoProcessedSrc(LOGO_SRC);
   const [newsletterEmail, setNewsletterEmail] = useState("");
+  const [storedTestimonials, setStoredTestimonials] = useState([]);
+
+  useEffect(() => {
+    const readStored = () => {
+      try {
+        const raw = localStorage.getItem(TESTIMONIALS_STORAGE_KEY);
+        const parsed = raw ? JSON.parse(raw) : [];
+        setStoredTestimonials(Array.isArray(parsed) ? parsed : []);
+      } catch {
+        setStoredTestimonials([]);
+      }
+    };
+    readStored();
+    const onStorage = (e) => {
+      if (e?.key === TESTIMONIALS_STORAGE_KEY) readStored();
+    };
+    const onUpdated = () => readStored();
+    window.addEventListener("storage", onStorage);
+    window.addEventListener("sewserve:testimonials-updated", onUpdated);
+    return () => {
+      window.removeEventListener("storage", onStorage);
+      window.removeEventListener("sewserve:testimonials-updated", onUpdated);
+    };
+  }, []);
+
+  const testimonials = useMemo(() => {
+    const fromStorage = (Array.isArray(storedTestimonials) ? storedTestimonials : [])
+      .filter((t) => t && typeof t === "object")
+      .map((t) => ({
+        name: typeof t.name === "string" && t.name.trim() ? t.name.trim() : "Customer",
+        feedback: typeof t.feedback === "string" ? t.feedback : "",
+        avatar: typeof t.avatar === "string" && t.avatar ? t.avatar : "https://i.pravatar.cc/64?img=12",
+      }))
+      .filter((t) => t.feedback.trim());
+
+    const merged = [...fromStorage, ...staticTestimonials];
+    const seen = new Set();
+    const deduped = [];
+    for (const t of merged) {
+      const key = `${t.name}::${t.feedback}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      deduped.push(t);
+      if (deduped.length >= 3) break; // keep the 3-card layout
+    }
+    return deduped;
+  }, [storedTestimonials]);
 
   useEffect(() => {
     document.title = "SewServe | Smart Tailoring Platform";

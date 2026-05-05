@@ -26,8 +26,8 @@ function isTailorDashboardChatRoute(pathname) {
   return pathname === "/dashboard" || pathname === "/tailor/dashboard";
 }
 
-/** Order tracking UI — {@link OrderTrackingPage} (`/orders`), scroll to #order-tracking section */
-const ORDER_TRACKING_PAGE_PATH = "/orders#order-tracking";
+/** Marketing order tracking — {@link OrderTrackingPage} (`/track-orders`), scroll to #order-tracking */
+const ORDER_TRACKING_PAGE_PATH = "/track-orders#order-tracking";
 
 const navLinks = [
   { label: "Dashboard", to: null, match: "dashboard" },
@@ -100,7 +100,8 @@ export default function DashboardNavbar() {
   const linkIsActive = useMemo(() => {
     return (link) => {
       if (link.match === "dashboard") return isDashboardRoute(location.pathname);
-      if (link.match === "orders") return location.pathname === "/orders";
+      if (link.match === "orders")
+        return location.pathname === "/track-orders" || location.pathname === "/orders";
       if (link.match === "profile") return location.pathname === "/profile";
       return false;
     };
@@ -118,6 +119,8 @@ export default function DashboardNavbar() {
     chatUnreadForRoute === 1
       ? "1 unread message"
       : `${chatUnreadForRoute > 99 ? "99+" : chatUnreadForRoute} unread messages`;
+
+  const hideNavbarChat = location.pathname === "/customer/dashboard";
 
   return (
     <header className="ss-glass-surface sticky top-0 z-50 border-b border-white/35 font-['Inter',system-ui,sans-serif]">
@@ -216,35 +219,37 @@ export default function DashboardNavbar() {
 
         <div className="relative z-20 ml-auto flex shrink-0 items-center gap-2">
           <div className="hidden items-center gap-2 md:flex">
-            <motion.div className="relative" whileHover={{ scale: 1.04 }} whileTap={{ scale: 0.96 }}>
-              <motion.button
-                type="button"
-                onClick={handleNavbarChatClick}
-                className={`relative inline-flex h-10 w-10 items-center justify-center rounded-xl border border-white/50 bg-white/35 shadow-sm backdrop-blur-sm transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#3b6b52]/30 ${
-                  isTailorChatRoute || isCustomerChat
-                    ? "text-[#2d5a3d] hover:bg-emerald-50/50 hover:text-[#1a3d2a]"
-                    : "text-slate-600 hover:bg-white/55 hover:text-[#1e293b]"
-                }`}
-                aria-label={
-                  isTailorChatRoute
-                    ? `Open chat with customer${showChatUnreadBadge ? `, ${chatUnreadAria}` : ""}`
-                    : isCustomerChat
-                      ? `Open chat with your tailor${showChatUnreadBadge ? `, ${chatUnreadAria}` : ""}`
-                      : "Open workspace messages"
-                }
-                transition={{ type: "spring", stiffness: 420, damping: 28 }}
-              >
-                <MessageCircle className="h-[1.125rem] w-[1.125rem] text-inherit" strokeWidth={2} aria-hidden />
-              </motion.button>
-              {showChatUnreadBadge ? (
-                <span
-                  className="pointer-events-none absolute -right-0.5 -top-0.5 z-10 flex h-5 min-w-[1.25rem] items-center justify-center rounded-full border-2 border-white bg-red-500 px-1 text-[10px] font-bold tabular-nums leading-none text-white shadow-sm ring-2 ring-white"
-                  aria-hidden
+            {!hideNavbarChat ? (
+              <motion.div className="relative" whileHover={{ scale: 1.04 }} whileTap={{ scale: 0.96 }}>
+                <motion.button
+                  type="button"
+                  onClick={handleNavbarChatClick}
+                  className={`relative inline-flex h-10 w-10 items-center justify-center rounded-xl border border-white/50 bg-white/35 shadow-sm backdrop-blur-sm transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#3b6b52]/30 ${
+                    isTailorChatRoute || isCustomerChat
+                      ? "text-[#2d5a3d] hover:bg-emerald-50/50 hover:text-[#1a3d2a]"
+                      : "text-slate-600 hover:bg-white/55 hover:text-[#1e293b]"
+                  }`}
+                  aria-label={
+                    isTailorChatRoute
+                      ? `Open chat with customer${showChatUnreadBadge ? `, ${chatUnreadAria}` : ""}`
+                      : isCustomerChat
+                        ? `Open chat with your tailor${showChatUnreadBadge ? `, ${chatUnreadAria}` : ""}`
+                        : "Open workspace messages"
+                  }
+                  transition={{ type: "spring", stiffness: 420, damping: 28 }}
                 >
-                  {chatBadgeText}
-                </span>
-              ) : null}
-            </motion.div>
+                  <MessageCircle className="h-[1.125rem] w-[1.125rem] text-inherit" strokeWidth={2} aria-hidden />
+                </motion.button>
+                {showChatUnreadBadge ? (
+                  <span
+                    className="pointer-events-none absolute -right-0.5 -top-0.5 z-10 flex h-5 min-w-[1.25rem] items-center justify-center rounded-full border-2 border-white bg-red-500 px-1 text-[10px] font-bold tabular-nums leading-none text-white shadow-sm ring-2 ring-white"
+                    aria-hidden
+                  >
+                    {chatBadgeText}
+                  </span>
+                ) : null}
+              </motion.div>
+            ) : null}
             <motion.button
               type="button"
               onClick={() => {
@@ -357,23 +362,25 @@ export default function DashboardNavbar() {
             </Link>
           </div>
           <div className="mt-auto space-y-2 border-t border-white/25 pt-4">
-            <button
-              type="button"
-              onClick={handleNavbarChatClick}
-              className="relative flex w-full items-center justify-center gap-2 rounded-xl border border-white/45 bg-white/35 py-2.5 text-sm font-semibold text-slate-800 shadow-sm backdrop-blur-sm transition hover:bg-emerald-50/40"
-              aria-label={showChatUnreadBadge ? `Messages, ${chatUnreadAria}` : "Open messages"}
-            >
-              <MessageCircle className="h-4 w-4 shrink-0 text-[#2d5a3d]" strokeWidth={2} aria-hidden />
-              <span className="text-[#1a3d2a]">Messages</span>
-              {showChatUnreadBadge ? (
-                <span
-                  className="pointer-events-none absolute right-3 top-2 z-10 flex h-5 min-w-[1.25rem] items-center justify-center rounded-full border-2 border-white bg-red-500 px-1 text-[10px] font-bold tabular-nums leading-none text-white shadow-sm ring-2 ring-white"
-                  aria-hidden
-                >
-                  {chatBadgeText}
-                </span>
-              ) : null}
-            </button>
+            {!hideNavbarChat ? (
+              <button
+                type="button"
+                onClick={handleNavbarChatClick}
+                className="relative flex w-full items-center justify-center gap-2 rounded-xl border border-white/45 bg-white/35 py-2.5 text-sm font-semibold text-slate-800 shadow-sm backdrop-blur-sm transition hover:bg-emerald-50/40"
+                aria-label={showChatUnreadBadge ? `Messages, ${chatUnreadAria}` : "Open messages"}
+              >
+                <MessageCircle className="h-4 w-4 shrink-0 text-[#2d5a3d]" strokeWidth={2} aria-hidden />
+                <span className="text-[#1a3d2a]">Messages</span>
+                {showChatUnreadBadge ? (
+                  <span
+                    className="pointer-events-none absolute right-3 top-2 z-10 flex h-5 min-w-[1.25rem] items-center justify-center rounded-full border-2 border-white bg-red-500 px-1 text-[10px] font-bold tabular-nums leading-none text-white shadow-sm ring-2 ring-white"
+                    aria-hidden
+                  >
+                    {chatBadgeText}
+                  </span>
+                ) : null}
+              </button>
+            ) : null}
             <button
               type="button"
               onClick={() => {

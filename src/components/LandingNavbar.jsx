@@ -44,7 +44,7 @@ export default function LandingNavbar({
   /** `landingGlass`: reserves space under fixed header so content is not covered. */
   const [navSpacerPx, setNavSpacerPx] = useState(72);
   const isDashboardActive = ["/customer/dashboard", "/tailor/dashboard", "/dashboard"].includes(location.pathname);
-  const isTrackOrdersActive = location.pathname === "/orders";
+  const isTrackOrdersActive = location.pathname === "/track-orders";
   const [loginMenuOpen, setLoginMenuOpen] = useState(false);
   const [dashboardMenuOpen, setDashboardMenuOpen] = useState(false);
   const loginDropdownRef = useRef(null);
@@ -515,7 +515,7 @@ export default function LandingNavbar({
             <button
               ref={setItemRef("track")}
               type="button"
-              onClick={() => navigate("/orders")}
+              onClick={() => navigate("/track-orders")}
               aria-label="Track orders"
               onMouseEnter={() => onNavItemEnter("track")}
               onFocus={() => onNavItemFocus("track")}
@@ -542,7 +542,7 @@ export default function LandingNavbar({
             <button
               ref={setItemRef("track")}
               type="button"
-              onClick={() => navigate("/orders")}
+              onClick={() => navigate("/track-orders")}
               aria-label="Track orders"
               onMouseEnter={() => onNavItemEnter("track")}
               onFocus={() => onNavItemFocus("track")}
@@ -683,7 +683,7 @@ export default function LandingNavbar({
             <button
               type="button"
               onClick={() => {
-                navigate("/orders");
+                navigate("/track-orders");
                 handleCloseMobileMenu();
               }}
               aria-label="Track orders from mobile menu"
