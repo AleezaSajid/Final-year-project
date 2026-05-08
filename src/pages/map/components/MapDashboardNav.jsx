@@ -14,8 +14,8 @@ const linkClass = ({ isActive }) =>
  */
 export default function MapDashboardNav() {
   return (
-    <header className="ss-glass-surface sticky top-0 z-50 border-b border-white/35 shadow-[0_8px_32px_-8px_rgba(15,23,42,0.08)]">
-      <div className="mx-auto flex max-w-7xl items-center justify-between gap-4 px-4 py-3 sm:px-6 lg:px-8">
+    <header className="ss-glass-surface sticky top-0 z-50 border-b border-white/35 shadow-[0_6px_26px_-10px_rgba(15,23,42,0.07)]">
+      <div className="mx-auto flex max-w-6xl items-center justify-between gap-4 px-4 py-3 sm:px-6 lg:px-8">
         <Link to="/" className="flex min-w-0 items-center gap-2.5">
           <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-[#4a7c59] to-[#355542] text-white shadow-md shadow-emerald-900/20">
             <Scissors className="h-5 w-5" aria-hidden />
@@ -30,21 +30,9 @@ export default function MapDashboardNav() {
           <NavLink to="/" end className={linkClass}>
             Home
           </NavLink>
-          <a
-            href="#map-how"
-            className="rounded-xl px-3 py-2 text-sm font-medium text-slate-600 transition hover:bg-white/50 hover:text-slate-900"
-          >
-            How It Works
-          </a>
           <NavLink to="/orders" className={linkClass}>
             Orders
           </NavLink>
-          <span
-            className="rounded-xl px-3 py-2 text-sm font-medium text-slate-400 cursor-not-allowed"
-            title="Coming soon"
-          >
-            Messages
-          </span>
           <NavLink to="/profile" className={linkClass}>
             Profile
           </NavLink>

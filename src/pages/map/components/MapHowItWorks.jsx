@@ -35,7 +35,7 @@ const steps = [
 
 export default function MapHowItWorks() {
   return (
-    <aside className="ss-glass-card rounded-apple-card p-5 shadow-lg shadow-slate-900/5 sm:p-6">
+    <aside className="ss-glass-card rounded-apple-card p-5 shadow-sm shadow-slate-900/5 sm:p-6">
       <h2 className="flex items-center gap-2 text-lg font-bold text-ink">
         <CheckCircle2 className="h-5 w-5 text-emerald-700" aria-hidden />
         How It Works

@@ -3,6 +3,9 @@ const cors = require('cors');
 const http = require('http');
 const { Server } = require('socket.io');
 const mongoose = require('mongoose');
+const multer = require('multer');
+const path = require('path');
+const fs = require('fs');
 const User = require('./models/User');
 const TailorProfile = require('./models/TailorProfile');
 const Message = require('./models/Message');
@@ -52,6 +55,25 @@ app.use(
 );
 app.use(express.json());
 
+const uploadsDir = path.join(__dirname, 'uploads');
+try {
+  fs.mkdirSync(uploadsDir, { recursive: true });
+} catch {
+  // ignore
+}
+
+app.use('/uploads', express.static(uploadsDir));
+
+const upload = multer({
+  storage: multer.diskStorage({
+    destination: (req, file, cb) => cb(null, uploadsDir),
+    filename: (req, file, cb) => {
+      const safe = String(file.originalname || 'upload').replace(/[^\w.\-]+/g, '_');
+      cb(null, `${Date.now()}-${safe}`);
+    },
+  }),
+});
+
 mongoose
   .connect('mongodb://127.0.0.1:27017/sewserve')
   .then(() => {
@@ -68,13 +90,19 @@ app.get('/test', (req, res) => {
     res.send('TEST WORKING');
   });
 
-const DEFAULT_TAILOR_IMAGE =
-  'https://images.unsplash.com/photo-1594938298603-c8148c4dae35?w=600&h=450&fit=crop&q=80';
+// NOTE: Do not inject a static default image here.
+// The frontend will generate unique UI Avatars when `imageUrl` is missing.
 
 function mapTailorProfileToPublicRow(doc, idx = 0) {
   const d = doc && typeof doc.toObject === 'function' ? doc.toObject() : doc;
   if (!d) return null;
   const priceStart = Math.max(0, Number(d.priceStart) || 0);
+  const coords =
+    d.location && d.location.type === 'Point' && Array.isArray(d.location.coordinates)
+      ? d.location.coordinates
+      : null;
+  const lng = coords && coords.length >= 2 ? Number(coords[0]) : null;
+  const lat = coords && coords.length >= 2 ? Number(coords[1]) : null;
   return {
     id: String(d._id),
     tailorShopId: d.tailorShopId,
@@ -88,7 +116,9 @@ function mapTailorProfileToPublicRow(doc, idx = 0) {
     priceLabel: `Starting from PKR ${Math.round(priceStart).toLocaleString('en-PK')}`,
     priceStart,
     deliveryDays: Math.max(1, Number(d.deliveryDays) || 7),
-    imageUrl: (d.imageUrl && String(d.imageUrl).trim()) || DEFAULT_TAILOR_IMAGE,
+    imageUrl: (d.imageUrl && String(d.imageUrl).trim()) || '',
+    lat: Number.isFinite(lat) ? lat : null,
+    lng: Number.isFinite(lng) ? lng : null,
     bio: d.bio || '',
     skillsNotes: d.skillsNotes || '',
   };
@@ -96,8 +126,14 @@ function mapTailorProfileToPublicRow(doc, idx = 0) {
 
 async function registerUser(req, res) {
   const body = req.body || {};
-  const fullName = body.fullName || body.name;
-  const { email, password } = body;
+
+  // Debug + safety: needed for multipart/form-data (FormData) submissions.
+  console.log("BODY RECEIVED:", body);
+  console.log("FILE RECEIVED:", req.file);
+
+  const fullName = String(body.fullName || body.name || "").trim();
+  const email = String(body.email || "").trim();
+  const password = String(body.password || "").trim();
   const role = body.role === 'tailor' ? 'tailor' : 'customer';
 
   if (!fullName || !email || !password) {
@@ -144,10 +180,21 @@ async function registerUser(req, res) {
       const shopName = String(body.shopName || '').trim();
       const city = String(body.city || '').trim();
       const specialty = String(body.specialty || '').trim();
+      const latRaw = body.lat != null ? String(body.lat).trim() : '';
+      const lngRaw = body.lng != null ? String(body.lng).trim() : '';
+      const lat = latRaw !== '' ? Number(latRaw) : NaN;
+      const lng = lngRaw !== '' ? Number(lngRaw) : NaN;
+      if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+        return res.status(400).json({
+          error: 'Valid location coordinates (lat/lng) are required.',
+          message: 'Valid location coordinates (lat/lng) are required.',
+        });
+      }
       const experienceYears = Math.max(0, parseInt(String(body.experienceYears || '0'), 10) || 0);
       const priceStart = Math.max(0, parseInt(String(body.priceStart || '1500'), 10) || 1500);
       const deliveryDays = Math.max(1, parseInt(String(body.deliveryDays || '7'), 10) || 7);
       try {
+        const avatarPath = req.file ? `/uploads/${req.file.filename}` : '';
         await TailorProfile.create({
           userId: created.id,
           email: normalizedEmail,
@@ -156,13 +203,14 @@ async function registerUser(req, res) {
           displayName: String(fullName).trim(),
           city,
           address: String(body.address || '').trim(),
+          location: { type: 'Point', coordinates: [lng, lat] },
           specialty,
           bio: String(body.bio || '').trim(),
           skillsNotes: String(body.experience || '').trim(),
           experienceYears,
           priceStart,
           deliveryDays,
-          imageUrl: String(body.imageUrl || '').trim() || DEFAULT_TAILOR_IMAGE,
+          imageUrl: avatarPath || String(body.imageUrl || '').trim(),
           rating: 4.7,
           availability: 'available',
           published: true,
@@ -195,8 +243,8 @@ async function registerUser(req, res) {
   }
 }
 
-app.post('/signup', registerUser);
-app.post('/api/register', registerUser);
+app.post('/signup', upload.single('avatar'), registerUser);
+app.post('/api/register', upload.single('avatar'), registerUser);
 
 async function loginUser(req, res) {
   const { email, password } = req.body || {};
@@ -259,6 +307,65 @@ app.get('/api/tailors/public', async (req, res) => {
   } catch (e) {
     console.error('GET /api/tailors/public', e);
     return res.status(500).json({ tailors: [], error: 'Unable to load tailors.' });
+  }
+});
+
+/**
+ * Compatibility endpoint (requested by frontend): list all tailors.
+ * Mirrors `/api/tailors/public` but under a simpler path.
+ */
+app.get('/api/tailors', async (req, res) => {
+  try {
+    const docs = await TailorProfile.find({ published: true }).sort({ createdAt: -1 }).exec();
+    const tailors = docs.map((d, i) => mapTailorProfileToPublicRow(d, i)).filter(Boolean);
+    return res.json({ tailors, source: 'api' });
+  } catch (e) {
+    console.error('GET /api/tailors', e);
+    return res.status(500).json({ tailors: [], error: 'Unable to load tailors.' });
+  }
+});
+
+/** Geospatial nearby tailors (requires TailorProfile.location 2dsphere). */
+app.get('/api/tailors/nearby', async (req, res) => {
+  const lat = req.query.lat != null ? Number(String(req.query.lat)) : NaN;
+  const lng = req.query.lng != null ? Number(String(req.query.lng)) : NaN;
+  const radiusKmRaw = req.query.radiusKm != null ? Number(String(req.query.radiusKm)) : 5;
+  const radiusKm = Number.isFinite(radiusKmRaw) && radiusKmRaw > 0 ? radiusKmRaw : 5;
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+    return res.status(400).json({ tailors: [], error: 'lat and lng are required.' });
+  }
+  try {
+    const radiusM = Math.max(100, Math.round(radiusKm * 1000));
+    const rows = await TailorProfile.aggregate([
+      {
+        $geoNear: {
+          near: { type: 'Point', coordinates: [lng, lat] },
+          distanceField: 'distanceMeters',
+          maxDistance: radiusM,
+          spherical: true,
+          query: { published: true },
+        },
+      },
+      { $limit: 60 },
+    ]);
+
+    const tailors = rows
+      .map((row, idx) => {
+        const t = mapTailorProfileToPublicRow(row, idx);
+        if (!t) return null;
+        const km = Number(row.distanceMeters) / 1000;
+        if (Number.isFinite(km)) {
+          t.distanceKm = Number(km.toFixed(2));
+          t.distanceLabel = `${t.distanceKm} km`;
+        }
+        return t;
+      })
+      .filter(Boolean);
+
+    return res.json({ tailors, radiusKm, source: 'geo' });
+  } catch (e) {
+    console.error('GET /api/tailors/nearby', e);
+    return res.status(500).json({ tailors: [], error: 'Unable to load nearby tailors.' });
   }
 });
 
@@ -410,6 +517,8 @@ function buildWorkflowSocketPayload(orderDoc, fallbackOrderId = '') {
   const orderId = String(fullOrder?.id || fullOrder?._id || fallbackOrderId || '').trim();
   return {
     orderId,
+    clientOrderId: fullOrder?.clientOrderId != null ? String(fullOrder.clientOrderId) : '',
+    tailorId: fullOrder?.tailorId != null ? String(fullOrder.tailorId) : '',
     fullOrder: fullOrder
       ? {
           ...fullOrder,
@@ -677,6 +786,49 @@ app.patch('/orders/:orderId', async (req, res) => {
       return res.status(404).json({ message: 'Order not found.' });
     }
     emitMeasurementOrderToTailor(updatedOrder);
+    try {
+      const payload = buildWorkflowSocketPayload(updatedOrder);
+      // Always emit the unified status update to the order room (map listens here).
+      io.to(payload.orderId).emit('order:statusUpdated', payload);
+      // Also emit to the map matching room (older flow).
+      io.to(`map_order:${payload.orderId}`).emit('order:statusUpdated', payload);
+
+      const tId = payload.tailorId != null && String(payload.tailorId).trim() !== '' ? String(payload.tailorId).trim() : '';
+      const s = payload.status != null ? String(payload.status).trim() : '';
+      const isReject =
+        s === 'rejected' || s === 'declined' || s === 'cancelled' || s === 'canceled';
+      const isAccept = Boolean(tId) && !isReject;
+
+      if (isAccept) {
+        io.to(payload.orderId).emit('orderAccepted', {
+          orderId: payload.orderId,
+          clientOrderId: payload.clientOrderId || '',
+          tailorId: tId,
+          status: payload.status,
+        });
+        io.to(`map_order:${payload.orderId}`).emit('orderAccepted', {
+          orderId: payload.orderId,
+          clientOrderId: payload.clientOrderId || '',
+          tailorId: tId,
+          status: payload.status,
+        });
+      } else if (isReject) {
+        io.to(payload.orderId).emit('orderRejected', {
+          orderId: payload.orderId,
+          clientOrderId: payload.clientOrderId || '',
+          tailorId: tId,
+          status: payload.status,
+        });
+        io.to(`map_order:${payload.orderId}`).emit('orderRejected', {
+          orderId: payload.orderId,
+          clientOrderId: payload.clientOrderId || '',
+          tailorId: tId,
+          status: payload.status,
+        });
+      }
+    } catch (socketErr) {
+      console.error('[Socket Sync] PATCH /orders emit error', socketErr);
+    }
     console.log(
       '[Workflow Engine] PATCH /orders',
       String(updatedOrder._id),
@@ -764,9 +916,25 @@ app.put('/orders/:orderId', async (req, res) => {
 const MAP_INTEREST_STAGGER_MS = 650;
 
 io.on('connection', (socket) => {
-  socket.on('newOrder', (order) => {
-    console.log('[socket] newOrder received from client:', order);
-    io.emit('newOrder', order);
+  socket.on('tailor:selected', (data = {}) => {
+    try {
+      const tailorId = data.tailorId != null ? String(data.tailorId).trim() : '';
+      const customerId = data.customerId != null ? String(data.customerId).trim() : '';
+      const orderId = data.orderId != null ? String(data.orderId).trim() : '';
+      if (!tailorId || !orderId) return;
+
+      io.to(tailorId).emit('tailor:popup', {
+        type: 'NEW_ORDER_REQUEST',
+        orderId,
+        customerId,
+        location: data.location || null,
+        garmentType: data.garmentType || data.dressType || '—',
+        budget: data.budget != null ? String(data.budget) : '—',
+        message: 'A customer selected you for an order',
+      });
+    } catch (e) {
+      console.error('[socket] tailor:selected handler', e);
+    }
   });
 
   socket.on('newOrder', (data = {}) => {
@@ -800,16 +968,6 @@ io.on('connection', (socket) => {
     // Notify every connected client (map page does not listen). Ensures tailor tab receives
     // the alert even when debugging from one machine; broadcast.emit omits only the sender.
     io.emit('newOrder', tailorBroadcast);
-    const queue = ['T-A1', 't2', 't3'];
-    queue.forEach((tailorId, i) => {
-      setTimeout(() => {
-        socket.emit('tailorInterested', {
-          orderId,
-          tailorId,
-          tailor: { id: tailorId },
-        });
-      }, 500 + i * MAP_INTEREST_STAGGER_MS);
-    });
   });
 
   socket.on('interest', (data = {}) => {

@@ -8,7 +8,6 @@ import TailorCard from "../components/TailorCard";
 import SendRequestModal from "../components/SendRequestModal";
 import { fetchPublicTailors } from "../api/tailorsPublicApi";
 import {
-  BROWSE_TAILORS,
   RATING_OPTIONS,
   PRICE_OPTIONS,
   DELIVERY_OPTIONS,
@@ -87,7 +86,8 @@ export default function BrowseTailors() {
   const [sortBy, setSortBy] = useState("rating");
   const [filterMenu, setFilterMenu] = useState(null);
   const [requestFor, setRequestFor] = useState(null);
-  const [tailorDataset, setTailorDataset] = useState(BROWSE_TAILORS);
+  const [tailorDataset, setTailorDataset] = useState([]);
+  const [tailorLoadError, setTailorLoadError] = useState("");
   const popoverRef = useRef(null);
   const urlHydrated = useRef(false);
 
@@ -100,11 +100,13 @@ export default function BrowseTailors() {
     (async () => {
       const { tailors, ok } = await fetchPublicTailors();
       if (cancelled) return;
-      if (ok && Array.isArray(tailors) && tailors.length > 0) {
+      if (ok && Array.isArray(tailors)) {
         setTailorDataset(tailors);
-      } else {
-        setTailorDataset(BROWSE_TAILORS);
+        setTailorLoadError("");
+        return;
       }
+      setTailorDataset([]);
+      setTailorLoadError("Could not load tailors right now. Please try again.");
     })();
     return () => {
       cancelled = true;
@@ -599,9 +601,9 @@ export default function BrowseTailors() {
                     <div className="mb-4 flex h-16 w-16 items-center justify-center rounded-2xl bg-emerald-50 text-emerald-600 shadow-inner">
                       <Search className="h-8 w-8" strokeWidth={1.5} aria-hidden />
                     </div>
-                    <p className="text-lg font-semibold text-slate-900">No tailors found</p>
+                    <p className="text-lg font-semibold text-slate-900">No tailors found nearby</p>
                     <p className="mt-2 max-w-sm text-sm text-slate-600">
-                      Try adjusting your search or filters to see more results.
+                      {tailorLoadError ? tailorLoadError : "Try adjusting your search or filters to see more results."}
                     </p>
                     {hasActiveFilters && (
                       <button

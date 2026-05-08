@@ -1,10 +1,13 @@
 import { useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import styled from "styled-components";
+import { AnimatePresence, motion } from "framer-motion";
+import { X } from "lucide-react";
 
 import { LandingStylePageBackground } from "./components/LandingStylePageBackground.jsx";
 import { useAuth } from "./context/AuthContext.jsx";
 import { useSewServeLogoProcessedSrc } from "./hooks/useSewServeLogoProcessedSrc";
+import LocationPickerMap from "./components/LocationPickerMap.jsx";
 
 const LOGO_SRC = `${process.env.PUBLIC_URL || ""}/images/hero/sewserve-logo.png`;
 
@@ -446,9 +449,16 @@ export default function TailorSignUpPage() {
   const [priceStart, setPriceStart] = useState("");
   const [deliveryDays, setDeliveryDays] = useState("");
   const [bio, setBio] = useState("");
+  const [imageFile, setImageFile] = useState(null);
   const [phone, setPhone] = useState("");
   const [email, setEmail] = useState("");
   const [address, setAddress] = useState("");
+  const [lat, setLat] = useState(null);
+  const [lng, setLng] = useState(null);
+  const [isMapOpen, setIsMapOpen] = useState(false);
+  const [locating, setLocating] = useState(false);
+  const [geocoding, setGeocoding] = useState(false);
+  const [locationError, setLocationError] = useState("");
   const [experience, setExperience] = useState("");
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
@@ -461,9 +471,70 @@ export default function TailorSignUpPage() {
     document.title = "SewServe | Tailor sign up";
   }, []);
 
+  async function reverseGeocode(latVal, lngVal) {
+    const url =
+      `https://nominatim.openstreetmap.org/reverse?format=json&lat=${encodeURIComponent(String(latVal))}` +
+      `&lon=${encodeURIComponent(String(lngVal))}`;
+    const res = await fetch(url, { headers: { Accept: "application/json" } });
+    if (!res.ok) throw new Error("Could not fetch address from coordinates.");
+    const data = await res.json();
+    return String(data?.display_name || "").trim();
+  }
+
+  const setLocation = async (nextLat, nextLng) => {
+    setLocationError("");
+    const nLat = Number(nextLat);
+    const nLng = Number(nextLng);
+    setLat(nLat);
+    setLng(nLng);
+
+    setGeocoding(true);
+    try {
+      const display = await reverseGeocode(nLat, nLng);
+      setAddress(display || "Selected Location (address unavailable)");
+    } catch {
+      setAddress("Selected Location (address unavailable)");
+    } finally {
+      setGeocoding(false);
+    }
+  };
+
+  const handleLocationSelect = async (nextLat, nextLng) => {
+    // Map picker should override GPS and close immediately.
+    setIsMapOpen(false);
+    await setLocation(nextLat, nextLng);
+  };
+
+  const handleUseMyLocation = () => {
+    setLocationError("");
+    if (!navigator.geolocation) {
+      setLocationError("Geolocation is not supported in this browser.");
+      return;
+    }
+    setLocating(true);
+    navigator.geolocation.getCurrentPosition(
+      async (pos) => {
+        const nextLat = pos.coords.latitude;
+        const nextLng = pos.coords.longitude;
+        setLocating(false);
+        await setLocation(nextLat, nextLng);
+      },
+      (geoErr) => {
+        setLocating(false);
+        if (geoErr && geoErr.code === 1) {
+          setLocationError("Location permission denied. Please select location on map or enter a valid address.");
+          return;
+        }
+        setLocationError("Could not get your location. Please try again.");
+      },
+      { enableHighAccuracy: true, timeout: 12_000, maximumAge: 60_000 }
+    );
+  };
+
   async function handleSubmit(e) {
     e.preventDefault();
     setError("");
+    setLocationError("");
     if (password !== confirmPassword) {
       setError("Passwords do not match.");
       return;
@@ -472,27 +543,36 @@ export default function TailorSignUpPage() {
       setError("Shop name, city, and specialty are required for your public listing.");
       return;
     }
+    if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+      setLocationError("Please select a valid location");
+      return;
+    }
     setLoading(true);
     try {
       const ey = parseInt(String(experienceYears).trim(), 10);
       const ps = parseInt(String(priceStart).trim(), 10);
       const dd = parseInt(String(deliveryDays).trim(), 10);
-      await register({
-        role: "tailor",
-        name: name.trim(),
-        shopName: shopName.trim(),
-        city: city.trim(),
-        specialty: specialty.trim(),
-        experienceYears: Number.isFinite(ey) ? ey : 0,
-        priceStart: Number.isFinite(ps) && ps > 0 ? ps : 1500,
-        deliveryDays: Number.isFinite(dd) && dd > 0 ? dd : 7,
-        bio: bio.trim(),
-        phone: phone.trim(),
-        email: email.trim(),
-        address: address.trim(),
-        experience: experience.trim(),
-        password,
-      });
+      const formData = new FormData();
+      formData.append("role", "tailor");
+      formData.append("name", name.trim());
+      formData.append("shopName", shopName.trim());
+      formData.append("city", city.trim());
+      formData.append("specialty", specialty.trim());
+      formData.append("experienceYears", String(Number.isFinite(ey) ? ey : 0));
+      formData.append("priceStart", String(Number.isFinite(ps) && ps > 0 ? ps : 1500));
+      formData.append("deliveryDays", String(Number.isFinite(dd) && dd > 0 ? dd : 7));
+      formData.append("bio", bio.trim());
+      formData.append("phone", phone.trim());
+      formData.append("email", email.trim());
+      formData.append("address", address.trim());
+      formData.append("lat", String(lat));
+      formData.append("lng", String(lng));
+      formData.append("experience", experience.trim());
+      formData.append("password", password);
+      if (imageFile) {
+        formData.append("avatar", imageFile);
+      }
+      await register(formData);
       navigate("/select-workspace", { replace: true });
     } catch (err) {
       setError(err.message || "Registration failed");
@@ -537,6 +617,7 @@ export default function TailorSignUpPage() {
 
             <form onSubmit={handleSubmit} noValidate>
               {error ? <ErrorBox role="alert">{error}</ErrorBox> : null}
+              {locationError ? <ErrorBox role="alert">{locationError}</ErrorBox> : null}
 
               <Field>
                 <InputNoIcon
@@ -638,6 +719,15 @@ export default function TailorSignUpPage() {
 
               <Field>
                 <InputNoIcon
+                  type="file"
+                  name="avatar"
+                  accept="image/*"
+                  onChange={(e) => setImageFile(e.target.files?.[0] || null)}
+                />
+              </Field>
+
+              <Field>
+                <InputNoIcon
                   type="tel"
                   name="phone"
                   autoComplete="tel"
@@ -674,6 +764,97 @@ export default function TailorSignUpPage() {
                   required
                 />
               </Field>
+
+              <Field>
+                <div className="flex flex-col gap-2 sm:flex-row">
+                  <button
+                    type="button"
+                    onClick={handleUseMyLocation}
+                    disabled={locating || geocoding || loading}
+                    className="inline-flex flex-1 items-center justify-center rounded-lg border border-gray-200 bg-white px-3 py-2 text-xs font-semibold text-gray-800 shadow-sm transition hover:bg-gray-50 disabled:opacity-60"
+                  >
+                    {locating || geocoding ? "Fetching location…" : "Use My Current Location"}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setLocationError("");
+                      setIsMapOpen(true);
+                    }}
+                    disabled={loading}
+                    className="inline-flex flex-1 items-center justify-center rounded-lg border border-gray-200 bg-white px-3 py-2 text-xs font-semibold text-gray-800 shadow-sm transition hover:bg-gray-50 disabled:opacity-60"
+                  >
+                    Select Location on Map
+                  </button>
+                </div>
+                <p className="mt-2 text-xs font-semibold text-gray-700">
+                  {Number.isFinite(lat) && Number.isFinite(lng) ? (
+                    <span className="text-emerald-700">Location Selected ✔</span>
+                  ) : (
+                    <span className="text-slate-600">No location selected</span>
+                  )}
+                </p>
+                <div className="mt-2 grid grid-cols-2 gap-2 text-[11px] text-gray-600">
+                  <div className="rounded-lg bg-white/70 px-3 py-2">
+                    <span className="font-semibold text-gray-700">Lat:</span>{" "}
+                    {Number.isFinite(lat) ? lat.toFixed(6) : "—"}
+                  </div>
+                  <div className="rounded-lg bg-white/70 px-3 py-2">
+                    <span className="font-semibold text-gray-700">Lng:</span>{" "}
+                    {Number.isFinite(lng) ? lng.toFixed(6) : "—"}
+                  </div>
+                </div>
+              </Field>
+
+              <AnimatePresence>
+                {isMapOpen ? (
+                  <motion.div
+                    className="fixed inset-0 z-[10000] flex items-center justify-center bg-black/50 p-4 backdrop-blur-sm"
+                    role="dialog"
+                    aria-modal="true"
+                    aria-label="Select location on map"
+                    initial={{ opacity: 0 }}
+                    animate={{ opacity: 1 }}
+                    exit={{ opacity: 0 }}
+                    transition={{ duration: 0.18, ease: "easeOut" }}
+                    onMouseDown={() => setIsMapOpen(false)}
+                  >
+                    <motion.div
+                      className="w-full max-w-3xl overflow-hidden rounded-2xl border border-white/40 bg-white/95 shadow-[0_24px_80px_-26px_rgba(15,23,42,0.55)] backdrop-blur-md"
+                      initial={{ opacity: 0, scale: 0.95, y: 20 }}
+                      animate={{ opacity: 1, scale: 1, y: 0 }}
+                      exit={{ opacity: 0, scale: 0.98, y: 10 }}
+                      transition={{ type: "spring", stiffness: 420, damping: 34 }}
+                      onMouseDown={(e) => e.stopPropagation()}
+                    >
+                      <div className="flex items-center justify-between gap-3 border-b border-slate-200/80 px-4 py-3">
+                        <div className="min-w-0">
+                          <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">
+                            Select Your Location
+                          </p>
+                          <p className="mt-0.5 text-sm font-semibold text-slate-900">
+                            Click on the map to pick your shop location
+                          </p>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => setIsMapOpen(false)}
+                          className="inline-flex h-9 w-9 items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-600 shadow-sm transition hover:bg-slate-50 hover:text-slate-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-600/25 focus-visible:ring-offset-2"
+                          aria-label="Close modal"
+                        >
+                          <X className="h-4.5 w-4.5" aria-hidden />
+                        </button>
+                      </div>
+                      <div className="p-4">
+                        <LocationPickerMap onSelect={handleLocationSelect} />
+                        <p className="mt-2 text-xs text-slate-600">
+                          Tip: The modal closes automatically after you click on the map.
+                        </p>
+                      </div>
+                    </motion.div>
+                  </motion.div>
+                ) : null}
+              </AnimatePresence>
 
               <Field>
                 <TextAreaField

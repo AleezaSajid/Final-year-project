@@ -45,6 +45,18 @@ const tailorProfileSchema = new mongoose.Schema(
       default: '',
       trim: true,
     },
+    location: {
+      type: {
+        type: String,
+        enum: ['Point'],
+        required: true,
+        default: 'Point',
+      },
+      coordinates: {
+        type: [Number],
+        required: true,
+      },
+    },
     specialty: {
       type: String,
       required: true,
@@ -100,5 +112,7 @@ const tailorProfileSchema = new mongoose.Schema(
     timestamps: true,
   }
 );
+
+tailorProfileSchema.index({ location: '2dsphere' });
 
 module.exports = mongoose.model('TailorProfile', tailorProfileSchema);

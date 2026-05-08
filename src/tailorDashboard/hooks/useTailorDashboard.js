@@ -547,6 +547,65 @@ export function useTailorDashboard() {
     }
   };
 
+  /**
+   * Accept an incoming order request and immediately move it into Current Tasks.
+   * Logic only (no UI changes): assigns `tailorId` to this tailor and keeps workflow consistent.
+   */
+  const acceptOrderIntoCurrentTasks = useCallback(
+    async (orderId, popupHint = null) => {
+      const oid = String(orderId || "").trim();
+      if (!oid) return;
+      const tailorId = String(activeTailorShopId || "").trim();
+      if (!tailorId) return;
+
+      // Optimistic: ensure it shows up in `tailorOrders` immediately.
+      setOrders((prev) => {
+        const exists = prev.some((o) => String(o.id ?? o._id ?? "") === oid || String(o._id ?? "") === oid);
+        if (exists) {
+          return prev.map((o) => {
+            const idMatch =
+              String(o.id ?? o._id ?? "") === oid || String(o._id ?? "") === oid;
+            if (!idMatch) return o;
+            return toStoreOrder(
+              mergeOrderPatch(o, {
+                tailorId,
+                status: normalizeStatus(o.status || "pending"),
+              })
+            );
+          });
+        }
+
+        const hinted =
+          popupHint && typeof popupHint === "object"
+            ? {
+                id: oid,
+                tailorId,
+                customerId: popupHint.customerId || "",
+                customerName: popupHint.customerName || "",
+                garmentType: popupHint.dressType || popupHint.garmentType || "",
+                notes: popupHint.notes || "",
+                status: "pending",
+                createdAt: new Date().toISOString(),
+              }
+            : { id: oid, tailorId, status: "pending", createdAt: new Date().toISOString() };
+        return [toStoreOrder(hinted), ...prev];
+      });
+
+      try {
+        await patchOrderWizardFields(oid, {
+          tailorId,
+          isActive: true,
+          status: "pending",
+        });
+        await fetchOrders();
+      } catch {
+        await fetchOrders();
+        setNotifications((prev) => ["Could not accept the order right now.", ...prev]);
+      }
+    },
+    [activeTailorShopId, fetchOrders, setNotifications, setOrders]
+  );
+
   const advanceWorkflow = async () => {
     if (!activeOrder) return;
     setIsAdvancing(true);
@@ -813,6 +872,7 @@ export function useTailorDashboard() {
     newOrders,
     fetchOrders,
     updateOrderStatus,
+    acceptOrderIntoCurrentTasks,
     advanceWorkflow,
     handleWorkflowStageClick,
     openChatForOrder,

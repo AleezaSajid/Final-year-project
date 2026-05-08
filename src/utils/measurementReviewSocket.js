@@ -1,4 +1,4 @@
-import { socket } from "../socket.js";
+import { ensureSocketThen, socket } from "../socket.js";
 import { resolveTailorIdForCustomerChat } from "./chatIdentity.js";
 import { DEFAULT_TAILOR_SHOP_ID } from "../tailorDashboard/constants.js";
 import { patchOrderWizardFields } from "../api/ordersApi.js";
@@ -93,6 +93,30 @@ function buildMeasurementReviewSocketPayload(orderId, tailorId, full) {
 }
 
 /**
+ * Lightweight payload for map matching (`newOrder` on server). No full measurements or address text.
+ * @param {string} orderId
+ * @param {Record<string, unknown>} full — cloned wizard snapshot
+ */
+function buildMapNewOrderPayload(orderId, full) {
+  const garment =
+    (full && typeof full.customGarmentType === "string" && full.customGarmentType.trim()) ||
+    (full && typeof full.selectedGarmentType === "string" && full.selectedGarmentType.trim()) ||
+    "—";
+  const design = full && full.designBrief && typeof full.designBrief === "object" ? full.designBrief : {};
+  const notes = typeof design.designNotes === "string" ? design.designNotes.trim() : "";
+  const urgency = typeof design.urgency === "string" ? design.urgency.trim() : "";
+  return {
+    orderId,
+    garmentType: garment,
+    dressType: garment,
+    radiusKm: 5,
+    budget: "—",
+    ...(notes ? { notes } : {}),
+    ...(urgency ? { dueDate: urgency } : {}),
+  };
+}
+
+/**
  * Persists the order, stores the complete wizard state on the order document, then emits
  * measurement:review with a single unfiltered `wizardData` object.
  * @param {Record<string, unknown>} wizardData — entire wizard state (no field picking)
@@ -124,5 +148,11 @@ export async function emitWizardMeasurementReview(wizardData, authUser) {
   const socketPayload = buildMeasurementReviewSocketPayload(orderId, tailorId, full);
   console.log("[measurement:review emit] wizardData.image:", socketPayload?.wizardData?.image);
   socket.emit("measurement:review", socketPayload);
+
+  const mapPayload = buildMapNewOrderPayload(orderId, full);
+  ensureSocketThen(() => {
+    socket.emit("newOrder", mapPayload);
+  });
+
   return { ok: true, orderId };
 }

@@ -30,7 +30,11 @@ export function AuthProvider({ children }) {
   }, []);
 
   const register = useCallback(async (payload) => {
-    const data = await api("/api/register", { method: "POST", json: payload });
+    const isFormData = typeof FormData !== "undefined" && payload instanceof FormData;
+    const data = await api("/api/register", {
+      method: "POST",
+      ...(isFormData ? { body: payload } : { json: payload }),
+    });
     setUser(data.user);
     return data;
   }, []);

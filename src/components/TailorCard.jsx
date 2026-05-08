@@ -1,11 +1,23 @@
 import { useEffect, useState } from "react";
 import { ChevronRight, MapPin, Star } from "lucide-react";
+import { getApiBaseUrl } from "../api/client.js";
 
 const FALLBACK_IMG =
   "data:image/svg+xml," +
   encodeURIComponent(
     `<svg xmlns="http://www.w3.org/2000/svg" width="400" height="300" viewBox="0 0 400 300"><rect fill="#e2e8f0" width="400" height="300"/><text x="50%" y="50%" dominant-baseline="middle" text-anchor="middle" fill="#64748b" font-family="system-ui,sans-serif" font-size="14">Photo</text></svg>`
   );
+
+function resolveImageSrc(raw) {
+  const src = typeof raw === "string" ? raw.trim() : "";
+  if (!src) return "";
+  if (/^https?:\/\//i.test(src)) return src;
+  if (src.startsWith("/")) {
+    const base = getApiBaseUrl();
+    return base ? `${base}${src}` : src;
+  }
+  return src;
+}
 
 /**
  * Marketplace-style tailor listing card (UI only).
@@ -25,9 +37,11 @@ export default function TailorCard({ tailor, onViewProfile, onSendRequest }) {
     id,
   } = tailor;
 
+  const resolvedImageUrl = resolveImageSrc(imageUrl);
+
   useEffect(() => {
     setImgFailed(false);
-  }, [imageUrl]);
+  }, [resolvedImageUrl]);
 
   const isAvailable = availability === "available";
   const fullStars = Math.floor(rating);
@@ -40,7 +54,7 @@ export default function TailorCard({ tailor, onViewProfile, onSendRequest }) {
       <div className="relative w-[40%] shrink-0 self-stretch p-2 sm:p-0 sm:pr-0">
         <div className="relative h-full min-h-[7.5rem] overflow-hidden rounded-2xl bg-gray-100 sm:min-h-0 sm:rounded-xl">
           <img
-            src={imgFailed ? FALLBACK_IMG : imageUrl}
+            src={imgFailed ? FALLBACK_IMG : resolvedImageUrl}
             alt={name}
             className="h-full w-full object-cover transition-all duration-300 group-hover:scale-105"
             loading="lazy"

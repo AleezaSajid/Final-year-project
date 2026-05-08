@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { Link, useLocation, useNavigate } from "react-router-dom";
 import styled from "styled-components";
 
 import { LandingStylePageBackground } from "./components/LandingStylePageBackground.jsx";
@@ -437,6 +437,7 @@ const HERO_IMAGE = `${process.env.PUBLIC_URL || ""}/images/hero/sewing-side.png`
 export default function CustomerSignUpPage() {
   const { register } = useAuth();
   const navigate = useNavigate();
+  const location = useLocation();
   const logoDisplaySrc = useSewServeLogoProcessedSrc(LOGO_SRC);
   const [name, setName] = useState("");
   const [phone, setPhone] = useState("");
@@ -472,7 +473,8 @@ export default function CustomerSignUpPage() {
         address: address.trim(),
         password,
       });
-      navigate("/select-workspace", { replace: true });
+      const from = location?.state?.from;
+      navigate(typeof from === "string" && from.trim() ? from : "/customer/dashboard", { replace: true });
     } catch (err) {
       setError(err.message || "Registration failed");
     } finally {
@@ -629,7 +631,10 @@ export default function CustomerSignUpPage() {
             </form>
 
             <CardFooter>
-              Already have an account? <UnderlineLink to="/login">Sign In</UnderlineLink>
+              Already have an account?{" "}
+              <UnderlineLink to="/login" state={{ from: location?.state?.from }}>
+                Sign In
+              </UnderlineLink>
             </CardFooter>
           </Card>
         </TwoCol>

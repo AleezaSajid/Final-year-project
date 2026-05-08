@@ -31,8 +31,8 @@ export default function NearbyTailorsSection({
 
   return (
     <section id="nearby-tailors" className="scroll-mt-24">
-      <div className="mb-6 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-        <h2 className="font-['Playfair_Display',Georgia,serif] text-2xl font-semibold tracking-tight text-ink">
+      <div className="mb-7 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+        <h2 className="font-['Playfair_Display',Georgia,serif] text-[2rem] font-semibold tracking-tight text-ink">
           {sectionTitle}
         </h2>
         {showSort ? (
@@ -52,7 +52,7 @@ export default function NearbyTailorsSection({
         ) : null}
       </div>
 
-      <div className="flex flex-col gap-4">
+      <div className="flex flex-col gap-5">
         {tailors.slice(0, visibleCount).map((t) => (
           <div
             key={t.id}

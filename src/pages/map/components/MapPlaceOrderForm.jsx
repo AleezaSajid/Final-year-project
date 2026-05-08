@@ -26,7 +26,7 @@ export default function MapPlaceOrderForm({ onSubmit, onCancel }) {
 
   return (
     <section className="scroll-mt-24" aria-label="Place order">
-      <div className="ss-glass-card rounded-apple-card p-5 shadow-lg shadow-slate-900/5 sm:p-6">
+      <div className="ss-glass-card rounded-apple-card p-5 shadow-sm shadow-slate-900/5 sm:p-6">
         <h2 className="font-['Playfair_Display',Georgia,serif] text-xl font-semibold tracking-tight text-ink">
           Order details
         </h2>
@@ -40,7 +40,7 @@ export default function MapPlaceOrderForm({ onSubmit, onCancel }) {
               type="text"
               value={garmentType}
               onChange={(e) => setGarmentType(e.target.value)}
-              className="mt-1.5 w-full rounded-xl border border-white/40 bg-white/70 py-2.5 px-3 text-sm font-medium text-ink shadow-sm backdrop-blur-sm focus:border-emerald-300 focus:outline-none focus:ring-2 focus:ring-emerald-500/25"
+              className="mt-1.5 w-full rounded-2xl border border-white/30 bg-white/70 py-3 px-3 text-sm font-medium text-ink shadow-sm backdrop-blur-sm focus:border-emerald-300 focus:outline-none focus:ring-2 focus:ring-emerald-500/25"
               placeholder="e.g. Bridal lehenga alterations"
               autoComplete="off"
             />
@@ -54,7 +54,7 @@ export default function MapPlaceOrderForm({ onSubmit, onCancel }) {
               type="date"
               value={dueDate}
               onChange={(e) => setDueDate(e.target.value)}
-              className="mt-1.5 w-full rounded-xl border border-white/40 bg-white/70 py-2.5 px-3 text-sm font-medium text-ink shadow-sm backdrop-blur-sm focus:border-emerald-300 focus:outline-none focus:ring-2 focus:ring-emerald-500/25"
+              className="mt-1.5 w-full rounded-2xl border border-white/30 bg-white/70 py-3 px-3 text-sm font-medium text-ink shadow-sm backdrop-blur-sm focus:border-emerald-300 focus:outline-none focus:ring-2 focus:ring-emerald-500/25"
             />
           </div>
           <div>
@@ -66,7 +66,7 @@ export default function MapPlaceOrderForm({ onSubmit, onCancel }) {
               value={notes}
               onChange={(e) => setNotes(e.target.value)}
               rows={3}
-              className="mt-1.5 w-full resize-y rounded-xl border border-white/40 bg-white/70 py-2.5 px-3 text-sm font-medium text-ink shadow-sm backdrop-blur-sm focus:border-emerald-300 focus:outline-none focus:ring-2 focus:ring-emerald-500/25"
+              className="mt-1.5 w-full resize-y rounded-2xl border border-white/30 bg-white/70 py-3 px-3 text-sm font-medium text-ink shadow-sm backdrop-blur-sm focus:border-emerald-300 focus:outline-none focus:ring-2 focus:ring-emerald-500/25"
               placeholder="Measurements, fabric, special requests…"
             />
           </div>

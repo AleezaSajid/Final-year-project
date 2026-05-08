@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { Link, useLocation, useNavigate } from "react-router-dom";
 import styled from "styled-components";
 import { motion } from "framer-motion";
 
@@ -447,6 +447,7 @@ const HERO_IMAGE = `${process.env.PUBLIC_URL || ""}/images/hero/sewing-side.png`
 export default function SignInPage() {
   const { login } = useAuth();
   const navigate = useNavigate();
+  const location = useLocation();
   const logoDisplaySrc = useSewServeLogoProcessedSrc(LOGO_SRC);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -461,7 +462,8 @@ export default function SignInPage() {
     try {
       await login(email.trim(), password);
       setUserRole("customer");
-      navigate("/customer/dashboard", { replace: true });
+      const from = location?.state?.from;
+      navigate(typeof from === "string" && from.trim() ? from : "/customer/dashboard", { replace: true });
     } catch (err) {
       setError(err.message || "Sign in failed");
     } finally {
@@ -556,7 +558,10 @@ export default function SignInPage() {
             </form>
 
             <CardFooter>
-              Need an account? <UnderlineLink to="/signup">Register Now</UnderlineLink>
+              Need an account?{" "}
+              <UnderlineLink to="/signup" state={{ from: location?.state?.from }}>
+                Register Now
+              </UnderlineLink>
             </CardFooter>
           </MotionCard>
         </MotionTwoCol>

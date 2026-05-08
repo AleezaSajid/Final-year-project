@@ -8,6 +8,12 @@
     overflow-x: hidden;
   }
 
+  @media (prefers-reduced-motion: no-preference) {
+    html:focus-within {
+      scroll-behavior: smooth;
+    }
+  }
+
   body {
     margin: 0;
     overflow-x: hidden;

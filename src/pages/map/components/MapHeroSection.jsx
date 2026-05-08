@@ -3,16 +3,16 @@ import { Check, MapPin, Sparkles } from "lucide-react";
 /**
  * Marketing-style hero for the map dashboard page (SewServe glass + emerald theme).
  */
-export default function MapHeroSection({ geoStatus, onDetectLocation, showPlaceOrder, onPlaceOrder }) {
+export default function MapHeroSection({ geoStatus, onDetectLocation }) {
   const locationOn = geoStatus === "ok";
 
   return (
-    <section className="ss-glass-card relative overflow-hidden rounded-apple-card p-6 shadow-lg shadow-slate-900/5 sm:p-8 lg:p-10">
-      <div className="pointer-events-none absolute -right-20 -top-20 h-56 w-56 rounded-full bg-emerald-300/15 blur-3xl" aria-hidden />
-      <div className="pointer-events-none absolute -bottom-16 -left-16 h-48 w-48 rounded-full bg-sky-200/20 blur-3xl" aria-hidden />
+    <section className="ss-glass-card relative overflow-hidden rounded-apple-card p-5 shadow-lg shadow-slate-900/5 sm:p-6 lg:p-7">
+      <div className="pointer-events-none absolute -right-20 -top-20 h-56 w-56 rounded-full bg-emerald-300/12 blur-[2.5rem]" aria-hidden />
+      <div className="pointer-events-none absolute -bottom-16 -left-16 h-48 w-48 rounded-full bg-sky-200/16 blur-[2.5rem]" aria-hidden />
 
-      <div className="relative z-[1] grid items-center gap-10 lg:grid-cols-2 lg:gap-12">
-        <div>
+      <div className="relative z-[1] grid items-center gap-6 lg:grid-cols-2 lg:gap-8">
+        <div className="flex flex-col items-center text-center lg:items-start lg:text-left">
           <p className="mb-3 inline-flex items-center gap-2 rounded-full bg-emerald-100/90 px-3 py-1 text-xs font-bold uppercase tracking-wider text-emerald-800 ring-1 ring-emerald-200/60">
             <Sparkles className="h-3.5 w-3.5" aria-hidden />
             Smart matching
@@ -24,8 +24,8 @@ export default function MapHeroSection({ geoStatus, onDetectLocation, showPlaceO
             </span>
           </h1>
           <p className="mt-4 max-w-xl text-base leading-[1.6] text-ink-muted">
-            We connect you with skilled tailors near your location. Place an order and let the best tailor near you
-            bring your ideas to life.
+            After you complete the measurement wizard, your order appears here. See nearby tailors and live updates as
+            they respond.
           </p>
           <div className="mt-6 flex flex-col items-start gap-3 sm:flex-row sm:flex-wrap sm:items-center">
             <button
@@ -38,15 +38,6 @@ export default function MapHeroSection({ geoStatus, onDetectLocation, showPlaceO
                 Detect My Location
               </span>
             </button>
-            {showPlaceOrder ? (
-              <button
-                type="button"
-                onClick={onPlaceOrder}
-                className="hero-cta inline-flex shrink-0 items-center justify-center gap-2 rounded-xl px-6 py-3.5 text-sm font-semibold text-white transition-all duration-200 ease-out hover:-translate-y-0.5 hover:brightness-[1.04] focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-600/45 focus-visible:ring-offset-2 bg-gradient-to-b from-[#4a7c59] to-[#355542]"
-              >
-                <span className="relative z-10">Place Order</span>
-              </button>
-            ) : null}
             <p className="flex w-full min-w-0 flex-wrap items-center gap-2 text-sm font-medium text-ink-muted sm:w-auto sm:max-w-md">
               {locationOn ? (
                 <>
@@ -68,7 +59,7 @@ export default function MapHeroSection({ geoStatus, onDetectLocation, showPlaceO
         <div className="relative mx-auto w-full max-w-md lg:mx-0 lg:max-w-none">
           <div className="ss-glass-card rounded-2xl p-6 shadow-lg shadow-slate-900/5">
             <div className="flex flex-col items-center justify-center gap-4 py-4">
-              <div className="relative flex h-40 w-full max-w-[280px] items-center justify-center">
+              <div className="relative flex h-32 w-full max-w-[280px] items-center justify-center">
                 <div className="absolute inset-0 flex items-center justify-center">
                   <div className="h-px w-full max-w-[200px] border-t-2 border-dashed border-emerald-200/90" />
                 </div>

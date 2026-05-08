@@ -21,20 +21,20 @@ export default function MapPanelToolbar({
           value={search}
           onChange={(e) => onSearchChange(e.target.value)}
           placeholder="Search tailors…"
-          className="w-full rounded-xl border border-white/40 bg-white/70 py-2.5 pl-10 pr-3 text-sm font-medium text-ink shadow-sm placeholder:text-ink-subtle backdrop-blur-sm focus:border-emerald-300 focus:outline-none focus:ring-2 focus:ring-emerald-500/25"
+          className="w-full rounded-2xl border border-white/30 bg-white/70 py-3 pl-10 pr-3 text-sm font-medium text-ink shadow-sm placeholder:text-ink-subtle backdrop-blur-sm focus:border-emerald-300 focus:outline-none focus:ring-2 focus:ring-emerald-500/25"
         />
       </label>
       <div className="flex items-center gap-2 whitespace-nowrap text-sm font-medium text-ink-muted">
         <span>Search radius:</span>
         {radiusLockedKm != null ? (
-          <span className="rounded-xl border border-white/40 bg-white/75 px-3 py-2 text-sm font-semibold text-ink shadow-sm backdrop-blur-sm">
+          <span className="rounded-2xl border border-white/30 bg-white/75 px-3 py-3 text-sm font-semibold text-ink shadow-sm backdrop-blur-sm">
             {radiusLockedKm} km
           </span>
         ) : (
           <select
             value={radiusKm}
             onChange={(e) => onRadiusChange(Number(e.target.value))}
-            className="rounded-xl border border-white/40 bg-white/75 px-3 py-2 text-sm font-semibold text-ink shadow-sm backdrop-blur-sm focus:border-emerald-300 focus:outline-none focus:ring-2 focus:ring-emerald-500/25"
+            className="rounded-2xl border border-white/30 bg-white/75 px-3 py-3 text-sm font-semibold text-ink shadow-sm backdrop-blur-sm focus:border-emerald-300 focus:outline-none focus:ring-2 focus:ring-emerald-500/25"
           >
             <option value={3}>3 km</option>
             <option value={5}>5 km</option>

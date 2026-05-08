@@ -1283,9 +1283,12 @@ export default function MeasurementWizard() {
         }
         window.dispatchEvent(new CustomEvent("sewserve:orders-refresh"));
         resetWizardProgress();
-        navigate("/customer/dashboard");
-        const order = { id: result.orderId };
-        navigate("/map?orderId=" + order.id);
+        try {
+          localStorage.setItem("sewserve_pending_order_id", String(result.orderId));
+        } catch {
+          /* ignore */
+        }
+        navigate("/location-step");
       } catch (e) {
         setError(e instanceof Error ? e.message : "Could not complete setup. Please try again.");
       }
