@@ -32,7 +32,6 @@ function resolveTailorImageSrc(tailor) {
   }
   return src;
 }
-
 /**
  * Rich tailor row for the dashboard list (matches booking platform card pattern).
  */

@@ -1,7 +1,7 @@
 import React, { useMemo, useRef, useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { motion } from "framer-motion";
-import { Bell, LogOut, Menu, MessageCircle, UserRound, X } from "lucide-react";
+import { Bell, LogOut, Menu, MessageCircle, X } from "lucide-react";
 import { SewServeBrandImg } from "./SewServeBrandImg.jsx";
 import { clearUserRole } from "../utils/userRole";
 import { TAILOR_SESSION_STORAGE_KEY } from "../utils/chatIdentity.js";
@@ -32,7 +32,6 @@ const ORDER_TRACKING_PAGE_PATH = "/track-orders#order-tracking";
 const navLinks = [
   { label: "Dashboard", to: null, match: "dashboard" },
   { label: "Orders", to: ORDER_TRACKING_PAGE_PATH, match: "orders" },
-  { label: "Profile", to: "/profile", match: "profile" },
 ];
 
 export default function DashboardNavbar() {
@@ -87,6 +86,7 @@ export default function DashboardNavbar() {
   const handleLogout = () => {
     localStorage.removeItem("sewserve_auth_token");
     sessionStorage.removeItem("sewserve_auth_token");
+    localStorage.removeItem("currentUser");
     try {
       localStorage.removeItem(TAILOR_SESSION_STORAGE_KEY);
     } catch {
@@ -102,7 +102,6 @@ export default function DashboardNavbar() {
       if (link.match === "dashboard") return isDashboardRoute(location.pathname);
       if (link.match === "orders")
         return location.pathname === "/track-orders" || location.pathname === "/orders";
-      if (link.match === "profile") return location.pathname === "/profile";
       return false;
     };
   }, [location.pathname]);
@@ -264,15 +263,6 @@ export default function DashboardNavbar() {
             >
               <Bell className="h-[1.125rem] w-[1.125rem]" strokeWidth={2} aria-hidden />
             </motion.button>
-            <motion.div whileHover={{ scale: 1.04 }} whileTap={{ scale: 0.96 }}>
-              <Link
-                to="/profile"
-                className="inline-flex h-10 w-10 items-center justify-center rounded-xl border border-white/50 bg-white/35 text-slate-600 shadow-sm backdrop-blur-sm transition hover:bg-white/55 hover:text-[#1e293b] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#3b6b52]/30"
-                aria-label="Profile"
-              >
-                <UserRound className="h-[1.125rem] w-[1.125rem]" strokeWidth={2} aria-hidden />
-              </Link>
-            </motion.div>
             <motion.button
               type="button"
               onClick={handleLogout}
@@ -348,17 +338,6 @@ export default function DashboardNavbar() {
               }`}
             >
               Orders
-            </Link>
-            <Link
-              to="/profile"
-              onClick={handleCloseMobileMenu}
-              className={`rounded-xl px-3 py-2.5 text-left text-sm font-medium transition ${
-                linkIsActive({ match: "profile" })
-                  ? "bg-white/50 text-slate-900 ring-1 ring-white/45"
-                  : "text-slate-600 hover:bg-white/35"
-              }`}
-            >
-              Profile
             </Link>
           </div>
           <div className="mt-auto space-y-2 border-t border-white/25 pt-4">

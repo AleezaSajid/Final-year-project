@@ -6,7 +6,7 @@ import { getUserRole } from "../../utils/userRole.js";
 import { canUpdateWorkflowStatus, resolveWorkflowControlRole } from "../../utils/workflowRole.js";
 import { buildViewModelFromFullWizardData } from "../../utils/wizardDataToReviewViewModel.js";
 import { ensureSocketThen, socket } from "../../socket";
-import { getConversationId, normalizeChatId } from "../../chatUtils";
+import { getOrderChatConversationId, isOrderEligibleForChat, normalizeChatId } from "../../chatUtils";
 import {
   resolveTailorIdWhenViewingAsTailor,
   syncTailorSessionFromTailorUser,
@@ -14,17 +14,17 @@ import {
 import {
   API_BASE_URL,
   DEFAULT_CUSTOMER_ID,
+  defaultProfiles,
   GARMENT_REGEX,
   isPendingWorkflowStatus,
   normalizeOrder,
   normalizeStatus,
-  readProfilesFromStorage,
   resolveOrderWorkflowState,
   TAILOR_CURRENT_TASKS_VISIBLE_MAX,
-  TAILOR_PROFILE_STORAGE_KEY,
   WORKFLOW_NON_COMPLETED_STATUSES,
   workflowStages,
 } from "../constants";
+import { getTailorProfileSelf, patchTailorProfileSelf } from "../../api/accountApi.js";
 import { getPriorityScore, isTailorActiveTask } from "../../utils/workflowEngine.js";
 
 function isPlainOrderObject(v) {
@@ -91,7 +91,7 @@ export function useTailorDashboard() {
   const { user } = useAuth();
   const navigate = useNavigate();
   const activeTailorShopId = useMemo(() => resolveTailorIdWhenViewingAsTailor(user), [user]);
-  const [profiles, setProfiles] = useState(readProfilesFromStorage);
+  const [profiles, setProfiles] = useState(() => ({ ...defaultProfiles }));
 
   const [orders, setOrders] = useState(() => []);
 
@@ -187,8 +187,31 @@ export function useTailorDashboard() {
   }, []);
 
   useEffect(() => {
-    localStorage.setItem(TAILOR_PROFILE_STORAGE_KEY, JSON.stringify(profiles));
-  }, [profiles]);
+    if (!user?.id || user.role !== "tailor") return;
+    let cancelled = false;
+    void (async () => {
+      const data = await getTailorProfileSelf(user);
+      if (cancelled || !data?.profile) return;
+      const p = data.profile;
+      const shopId = activeTailorShopId;
+      if (!shopId) return;
+      setProfiles((prev) => ({
+        ...prev,
+        [shopId]: {
+          ...(prev[shopId] || {}),
+          name: p.name || prev[shopId]?.name || "",
+          skills: p.skills || prev[shopId]?.skills || "",
+          experience:
+            p.experience !== "" && p.experience != null
+              ? `${p.experience} years`
+              : prev[shopId]?.experience || "",
+        },
+      }));
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [user?.id, user?.email, user?.role, activeTailorShopId]);
 
   useEffect(() => {
     socket.connect();
@@ -199,6 +222,7 @@ export function useTailorDashboard() {
     };
     const handleNewNotification = (payload) => {
       if (payload?.type !== "new_message") return;
+      if (normalizeChatId(payload?.senderId) === normalizeChatId(activeTailorShopId)) return;
       setNotifications((prev) => [
         ...prev,
         `New message from ${payload?.senderId || "Customer"}: ${payload?.content || ""}`,
@@ -384,23 +408,29 @@ export function useTailorDashboard() {
     console.log("[TailorDashboard] conversationId:", activeConversationId);
   }, [activeConversationId]);
 
-  useEffect(() => {
-    const syncProfilesFromStorage = (event) => {
-      if (event.key && event.key !== TAILOR_PROFILE_STORAGE_KEY) return;
-      setProfiles(readProfilesFromStorage());
-    };
-    window.addEventListener("storage", syncProfilesFromStorage);
-    window.addEventListener("focus", syncProfilesFromStorage);
-    return () => {
-      window.removeEventListener("storage", syncProfilesFromStorage);
-      window.removeEventListener("focus", syncProfilesFromStorage);
-    };
-  }, []);
-
   const tailorOrders = useMemo(
     () => orders.filter((order) => String(order.tailorId ?? "").trim() === String(activeTailorShopId).trim()),
     [orders, activeTailorShopId]
   );
+
+  useEffect(() => {
+    if (!activeTailorShopId) return;
+    const joinOrderConversations = () => {
+      const seen = new Set();
+      for (const order of tailorOrders) {
+        if (!isOrderEligibleForChat(order)) continue;
+        const oid = order.id ?? order._id;
+        const conv = getOrderChatConversationId(oid);
+        const n = normalizeChatId(conv);
+        if (!n || seen.has(n)) continue;
+        seen.add(n);
+        socket.emit("join_conversation", { conversationId: n });
+      }
+    };
+    joinOrderConversations();
+    socket.on("connect", joinOrderConversations);
+    return () => socket.off("connect", joinOrderConversations);
+  }, [activeTailorShopId, tailorOrders]);
 
   const activeOrder = useMemo(() => {
     if (tailorOrders.length === 0) return null;
@@ -645,9 +675,12 @@ export function useTailorDashboard() {
     if (!order) {
       return;
     }
+    if (!isOrderEligibleForChat(order)) {
+      return;
+    }
     const targetCustomerId = normalizeChatId(order.customerId) || DEFAULT_CUSTOMER_ID;
-
-    const conversationId = getConversationId(activeTailorShopId, targetCustomerId);
+    const oid = String(order.id ?? order._id ?? "").trim();
+    const conversationId = getOrderChatConversationId(oid);
 
     setActiveChatCustomer({
       id: targetCustomerId,
@@ -660,18 +693,13 @@ export function useTailorDashboard() {
   };
 
   const openChatFromActiveOrder = () => {
-    const targetOrder = activeOrder || tailorOrders[0] || null;
-    if (targetOrder) {
-      openChatForOrder(targetOrder);
+    const candidates = [activeOrder, ...tailorOrders].filter(Boolean);
+    const eligible = candidates.find((o) => isOrderEligibleForChat(o));
+    if (eligible) {
+      openChatForOrder(eligible);
       return;
     }
-    const fallbackCustomerId = normalizeChatId(activeChatCustomer.id) || DEFAULT_CUSTOMER_ID;
-    setActiveConversationId(getConversationId(activeTailorShopId, fallbackCustomerId));
-    setActiveChatCustomer((prev) => ({
-      id: fallbackCustomerId,
-      name: prev.name || "Customer",
-    }));
-    setIsChatOpen(true);
+    setNotifications((prev) => [...prev, "Chat opens after an order is accepted and assigned to you."]);
   };
 
   const handleNewOrderSubmit = async (event) => {
@@ -735,6 +763,13 @@ export function useTailorDashboard() {
             : prev[activeTailorShopId]?.experience || "",
       },
     }));
+    if (user?.id && user.role === "tailor") {
+      void patchTailorProfileSelf(user, {
+        name: trimmedName,
+        skills: trimmedSkills,
+        experience: Number.isFinite(parsedExperience) ? parsedExperience : "",
+      }).catch(() => {});
+    }
     setNotifications((prev) => ["Tailor profile updated successfully.", ...prev]);
   };
 

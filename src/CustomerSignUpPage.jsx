@@ -3,6 +3,8 @@ import { Link, useLocation, useNavigate } from "react-router-dom";
 import styled from "styled-components";
 
 import { LandingStylePageBackground } from "./components/LandingStylePageBackground.jsx";
+import EmailOtpGate from "./components/EmailOtpGate.jsx";
+import { useToast } from "./components/ToastProvider.jsx";
 import { useAuth } from "./context/AuthContext.jsx";
 import { useSewServeLogoProcessedSrc } from "./hooks/useSewServeLogoProcessedSrc";
 
@@ -435,7 +437,8 @@ function EyeIcon({ passwordVisible }) {
 const HERO_IMAGE = `${process.env.PUBLIC_URL || ""}/images/hero/sewing-side.png`;
 
 export default function CustomerSignUpPage() {
-  const { register } = useAuth();
+  const { register, refreshUser } = useAuth();
+  const toast = useToast();
   const navigate = useNavigate();
   const location = useLocation();
   const logoDisplaySrc = useSewServeLogoProcessedSrc(LOGO_SRC);
@@ -450,6 +453,8 @@ export default function CustomerSignUpPage() {
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const [otpOpen, setOtpOpen] = useState(false);
+  const [otpEmail, setOtpEmail] = useState("");
 
   useEffect(() => {
     document.title = "SewServe | Customer sign up";
@@ -464,7 +469,7 @@ export default function CustomerSignUpPage() {
     }
     setLoading(true);
     try {
-      await register({
+      const data = await register({
         role: "customer",
         name: name.trim(),
         phone: phone.trim(),
@@ -473,6 +478,12 @@ export default function CustomerSignUpPage() {
         address: address.trim(),
         password,
       });
+      if (data && data.needsVerification) {
+        setOtpEmail(String(email || "").trim().toLowerCase());
+        setOtpOpen(true);
+        toast.success("Check your email", "We sent a 6-digit verification code.");
+        return;
+      }
       const from = location?.state?.from;
       navigate(typeof from === "string" && from.trim() ? from : "/customer/dashboard", { replace: true });
     } catch (err) {
@@ -641,6 +652,19 @@ export default function CustomerSignUpPage() {
       </Main>
 
       <PageFooter>Fast • Reliable • Professional Tailoring Platform</PageFooter>
+
+      {otpOpen ? (
+        <EmailOtpGate
+          email={otpEmail}
+          onDismiss={() => setOtpOpen(false)}
+          onVerified={async () => {
+            await refreshUser();
+            setOtpOpen(false);
+            const from = location?.state?.from;
+            navigate(typeof from === "string" && from.trim() ? from : "/customer/dashboard", { replace: true });
+          }}
+        />
+      ) : null}
     </Page>
   );
 }

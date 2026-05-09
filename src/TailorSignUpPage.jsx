@@ -5,9 +5,12 @@ import { AnimatePresence, motion } from "framer-motion";
 import { X } from "lucide-react";
 
 import { LandingStylePageBackground } from "./components/LandingStylePageBackground.jsx";
+import EmailOtpGate from "./components/EmailOtpGate.jsx";
+import { useToast } from "./components/ToastProvider.jsx";
 import { useAuth } from "./context/AuthContext.jsx";
 import { useSewServeLogoProcessedSrc } from "./hooks/useSewServeLogoProcessedSrc";
 import LocationPickerMap from "./components/LocationPickerMap.jsx";
+import { setUserRole } from "./utils/userRole";
 
 const LOGO_SRC = `${process.env.PUBLIC_URL || ""}/images/hero/sewserve-logo.png`;
 
@@ -438,7 +441,8 @@ function EyeIcon({ passwordVisible }) {
 const HERO_IMAGE = `${process.env.PUBLIC_URL || ""}/images/hero/sewing-side.png`;
 
 export default function TailorSignUpPage() {
-  const { register } = useAuth();
+  const { register, refreshUser } = useAuth();
+  const toast = useToast();
   const navigate = useNavigate();
   const logoDisplaySrc = useSewServeLogoProcessedSrc(LOGO_SRC);
   const [name, setName] = useState("");
@@ -459,13 +463,14 @@ export default function TailorSignUpPage() {
   const [locating, setLocating] = useState(false);
   const [geocoding, setGeocoding] = useState(false);
   const [locationError, setLocationError] = useState("");
-  const [experience, setExperience] = useState("");
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const [otpOpen, setOtpOpen] = useState(false);
+  const [otpEmail, setOtpEmail] = useState("");
 
   useEffect(() => {
     document.title = "SewServe | Tailor sign up";
@@ -567,13 +572,19 @@ export default function TailorSignUpPage() {
       formData.append("address", address.trim());
       formData.append("lat", String(lat));
       formData.append("lng", String(lng));
-      formData.append("experience", experience.trim());
       formData.append("password", password);
       if (imageFile) {
         formData.append("avatar", imageFile);
       }
-      await register(formData);
-      navigate("/select-workspace", { replace: true });
+      const data = await register(formData);
+      if (data && data.needsVerification) {
+        setOtpEmail(String(email || "").trim().toLowerCase());
+        setOtpOpen(true);
+        toast.success("Check your email", "We sent a 6-digit verification code.");
+        return;
+      }
+      setUserRole("tailor");
+      navigate("/tailor/dashboard", { replace: true });
     } catch (err) {
       setError(err.message || "Registration failed");
     } finally {
@@ -857,18 +868,6 @@ export default function TailorSignUpPage() {
               </AnimatePresence>
 
               <Field>
-                <TextAreaField
-                  name="experience"
-                  autoComplete="off"
-                  placeholder="Experience"
-                  rows={3}
-                  value={experience}
-                  onChange={(ev) => setExperience(ev.target.value)}
-                  required
-                />
-              </Field>
-
-              <Field>
                 <IconLeft>
                   <LockIcon />
                 </IconLeft>
@@ -925,6 +924,19 @@ export default function TailorSignUpPage() {
       </Main>
 
       <PageFooter>Fast • Reliable • Professional Tailoring Platform</PageFooter>
+
+      {otpOpen ? (
+        <EmailOtpGate
+          email={otpEmail}
+          onDismiss={() => setOtpOpen(false)}
+          onVerified={async () => {
+            await refreshUser();
+            setOtpOpen(false);
+            setUserRole("tailor");
+            navigate("/tailor/dashboard", { replace: true });
+          }}
+        />
+      ) : null}
     </Page>
   );
 }

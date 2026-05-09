@@ -3,17 +3,11 @@
  */
 
 import { api, getApiBaseUrl } from "./client.js";
-import { ORDERS_INVALIDATE_AT_KEY } from "../utils/chatIdentity.js";
 import { measurementOrderPayloadToServerBody } from "../utils/measurementOrderPayload.js";
 import { mapApiOrderToRecentRow } from "../utils/mapApiOrderToRecentRow.js";
 
 function notifyOrderListsInvalidated() {
   if (typeof window === "undefined") return;
-  try {
-    localStorage.setItem(ORDERS_INVALIDATE_AT_KEY, String(Date.now()));
-  } catch {
-    /* ignore */
-  }
   window.dispatchEvent(new CustomEvent("sewserve:orders-refresh"));
 }
 

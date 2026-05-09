@@ -33,9 +33,6 @@ export default function MapDashboardNav() {
           <NavLink to="/orders" className={linkClass}>
             Orders
           </NavLink>
-          <NavLink to="/profile" className={linkClass}>
-            Profile
-          </NavLink>
         </nav>
 
         <Link

@@ -20,6 +20,24 @@ export const getConversationId = (userA, userB) => {
     .join("-");
 };
 
+/** Private chat room id for an accepted order (matches persisted `Message.conversationId`). */
+export function getOrderChatConversationId(orderId) {
+  const id = orderId != null ? String(orderId).trim() : "";
+  if (!id) return "";
+  return `order_${id}`;
+}
+
+export function isOrderEligibleForChat(order) {
+  if (!order || typeof order !== "object") return false;
+  const tid = order.tailorId != null ? String(order.tailorId).trim() : "";
+  if (!tid) return false;
+  const raw = order.status ?? order.workflowStatus ?? "";
+  const s = String(raw).trim().toLowerCase().replace(/\s+/g, "_");
+  if (["rejected", "declined", "cancelled", "canceled"].includes(s)) return false;
+  if (s === "order_placed") return false;
+  return true;
+}
+
 /** Keeps customer chat `customerId` aligned with `order.customerId` (tailor uses the same field). */
 export const CHAT_ROOM_CUSTOMER_SYNC_EVENT = "sewserve:chat-room-customer-sync";
 export const CHAT_ROOM_CUSTOMER_SESSION_KEY = "sewserve_chat_room_customer_id";

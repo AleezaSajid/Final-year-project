@@ -25,6 +25,7 @@ export const socket = io(url, {
   reconnectionDelayMax: 5000,
   reconnectionAttempts: 20,
   timeout: 20000,
+  withCredentials: true,
 });
 
 if (typeof window !== "undefined") {

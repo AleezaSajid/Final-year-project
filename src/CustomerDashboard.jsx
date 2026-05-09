@@ -14,7 +14,11 @@ import {
   X,
 } from "lucide-react";
 
-import { notifyChatIdsFromOrderUpdated, publishChatRoomCustomerId } from "./chatUtils.js";
+import {
+  isOrderEligibleForChat,
+  notifyChatIdsFromOrderUpdated,
+  publishChatRoomCustomerId,
+} from "./chatUtils.js";
 import { listOrdersForCustomer, mapOrdersToRecentRows } from "./api/ordersApi.js";
 import { mapApiOrderToRecentRow } from "./utils/mapApiOrderToRecentRow.js";
 import { socket } from "./socket.js";
@@ -24,11 +28,10 @@ import { useAuth } from "./context/AuthContext.jsx";
 import { useCustomerChat } from "./context/CustomerChatContext.jsx";
 import { resolveCustomerIdForChat, TAILOR_SESSION_STORAGE_KEY } from "./utils/chatIdentity.js";
 import {
-  MEASUREMENT_WIZARD_STORAGE_KEY,
   buildDashboardProfileRows,
   buildDashboardProfileRowsFromOrder,
-  readWizardStateFromStorage,
 } from "./utils/wizardDashboardProfile.js";
+import { loadWizardDraft } from "./api/wizardDraftApi.js";
 
 const PUB = process.env.PUBLIC_URL || "";
 const SUPPORT_EMAIL = "info@sewserve.com";
@@ -298,24 +301,35 @@ function ProfileRows({ rows }) {
  * Profile rows from the selected API order when available; wizard draft only after load confirms zero orders.
  */
 function MeasurementProfileAccordion({ profileFromOrder, ordersLoading, ordersLength }) {
+  const { user } = useAuth();
   const allowWizardFallback = !ordersLoading && ordersLength === 0;
   const [openId, setOpenId] = useState(/** @type {"measurement" | "styleOptions" | "notes" | null} */ (null));
-  const [wizardProfile, setWizardProfile] = useState(() => buildDashboardProfileRows(readWizardStateFromStorage()));
+  const [wizardProfile, setWizardProfile] = useState(() => buildDashboardProfileRows(null));
 
   useEffect(() => {
     if (profileFromOrder != null || !allowWizardFallback) return undefined;
-    const sync = () => setWizardProfile(buildDashboardProfileRows(readWizardStateFromStorage()));
-    const onStorage = (e) => {
-      if (e.key === MEASUREMENT_WIZARD_STORAGE_KEY || e.key === null) sync();
+    let cancelled = false;
+    const sync = async () => {
+      if (!user?.id) {
+        if (!cancelled) setWizardProfile(buildDashboardProfileRows(null));
+        return;
+      }
+      const draft = await loadWizardDraft(user);
+      if (cancelled) return;
+      setWizardProfile(buildDashboardProfileRows(draft));
     };
-    sync();
-    window.addEventListener("storage", onStorage);
-    window.addEventListener("focus", sync);
+    void sync();
+    const onDraft = () => {
+      void sync();
+    };
+    window.addEventListener("sewserve:wizard-draft-updated", onDraft);
+    window.addEventListener("focus", onDraft);
     return () => {
-      window.removeEventListener("storage", onStorage);
-      window.removeEventListener("focus", sync);
+      cancelled = true;
+      window.removeEventListener("sewserve:wizard-draft-updated", onDraft);
+      window.removeEventListener("focus", onDraft);
     };
-  }, [profileFromOrder, allowWizardFallback]);
+  }, [profileFromOrder, allowWizardFallback, user?.id, user?.email]);
 
   const profile = profileFromOrder ?? (allowWizardFallback ? wizardProfile : EMPTY_PROFILE_ROWS);
 
@@ -753,40 +767,17 @@ function HelpSupportCard({ orders, onTrackOrder }) {
   );
 }
 
-function countDistinctTailorChatsFromOrders(orders) {
-  const ids = new Set();
-  if (!Array.isArray(orders)) return 0;
-  for (const o of orders) {
-    const t =
-      o?.tailorId ??
-      o?.tailorShopId ??
-      o?.assignedTailorId ??
-      o?.assignedTailor ??
-      (o?.tailor && typeof o.tailor === "object" && (o.tailor._id ?? o.tailor.id)) ??
-      o?.orderPayload?.tailorId;
-    if (t != null && String(t).trim() !== "") ids.add(String(t).trim());
-  }
-  return ids.size;
-}
-
-function CustomerDashboardChatCard({ orders }) {
+function CustomerDashboardChatCard({ activeOrder }) {
   const { openCustomerChat, unreadChatCount, lastChatPreview } = useCustomerChat();
 
-  const activeChatsCount = useMemo(() => {
-    const n = countDistinctTailorChatsFromOrders(orders);
-    if (n > 0) return n;
-    if (orders.length > 0) return 1;
-    return 0;
-  }, [orders]);
+  const eligible = activeOrder && isOrderEligibleForChat(activeOrder);
+  if (!eligible) return null;
 
-  const hasActiveChats = activeChatsCount > 0;
   const unreadLabel = unreadChatCount > 99 ? "99+" : String(unreadChatCount);
 
   const previewText = lastChatPreview?.text?.trim()
     ? lastChatPreview.text
-    : hasActiveChats
-      ? "No messages yet — open chat to reach your tailor."
-      : null;
+    : "No messages yet — open chat to reach your tailor.";
 
   return (
     <button
@@ -815,18 +806,12 @@ function CustomerDashboardChatCard({ orders }) {
       </div>
 
       <div className="mt-4 min-h-0 flex-1">
-        {hasActiveChats ? (
-          <>
-            <p className="text-sm font-semibold text-slate-800">
-              {activeChatsCount === 1 ? "1 active chat" : `${activeChatsCount} active chats`}
-            </p>
-            {previewText ? (
-              <p className="mt-2 line-clamp-1 text-sm leading-snug text-slate-600">{previewText}</p>
-            ) : null}
-          </>
-        ) : (
-          <p className="text-sm leading-relaxed text-slate-600">No active chats yet</p>
-        )}
+        <p className="text-sm leading-relaxed text-slate-700">
+          Your tailor is available for chat regarding this order.
+        </p>
+        {previewText ? (
+          <p className="mt-2 line-clamp-1 text-sm leading-snug text-slate-600">{previewText}</p>
+        ) : null}
       </div>
 
       <span className="mt-auto inline-flex w-full shrink-0 items-center justify-center gap-2 rounded-xl border border-emerald-800/25 bg-gradient-to-b from-[#3d6b4a] to-[#2f5a42] px-4 py-3 text-sm font-semibold text-white shadow-md shadow-emerald-900/20 transition duration-300 group-hover:brightness-105">
@@ -839,6 +824,7 @@ function CustomerDashboardChatCard({ orders }) {
 export default function CustomerDashboard() {
   const navigate = useNavigate();
   const { user } = useAuth();
+  const { syncCustomerOrderChatFromOrder } = useCustomerChat();
   const [orders, setOrders] = useState([]);
   /** Selected order for details (workflow/profile); empty string = default to latest in list. */
   const [activeOrderId, setActiveOrderId] = useState("");
@@ -903,6 +889,10 @@ export default function CustomerDashboard() {
   useEffect(() => {
     void fetchOrders();
   }, [fetchOrders]);
+
+  useEffect(() => {
+    syncCustomerOrderChatFromOrder(activeOrder ?? null);
+  }, [activeOrder, syncCustomerOrderChatFromOrder]);
 
   useEffect(() => {
     const cid = String(resolveCustomerIdForChat(user) || "").trim();
@@ -1206,7 +1196,7 @@ export default function CustomerDashboard() {
               </section>
 
               <div className="flex h-full min-h-0 w-full min-w-0 flex-col lg:col-span-4">
-                <CustomerDashboardChatCard orders={orders} />
+                <CustomerDashboardChatCard activeOrder={activeOrder} />
               </div>
             </div>
 

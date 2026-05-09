@@ -5,8 +5,6 @@
 
 export const TAILOR_SESSION_STORAGE_KEY = "sewserve_tailor_session_id";
 export const CUSTOMER_ID_STORAGE_KEY = "sewserve_customer_id";
-/** Bumped when a new order is created so other tabs (e.g. tailor dashboard) can refetch. */
-export const ORDERS_INVALIDATE_AT_KEY = "sewserve_orders_invalidate_at";
 
 /** Matches legacy demo orders / wizard when no better id exists. */
 export const DEFAULT_TAILOR_CHAT_ID = "T-A1";

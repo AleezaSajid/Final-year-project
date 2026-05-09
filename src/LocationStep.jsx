@@ -1,12 +1,11 @@
 import React, { useCallback, useMemo, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useLocation } from "react-router-dom";
 import { LocateFixed, MapPin, Loader2 } from "lucide-react";
 
 import { LandingStylePageBackground } from "./components/LandingStylePageBackground.jsx";
 import DashboardNavbar from "./components/DashboardNavbar.jsx";
-
-const USER_LOCATION_KEY = "userLocation";
-const PENDING_ORDER_ID_KEY = "sewserve_pending_order_id";
+import { useAuth } from "./context/AuthContext.jsx";
+import { getCustomerMeta, putCustomerMeta } from "./api/accountApi.js";
 
 function normalizeText(v) {
   return String(v ?? "").trim();
@@ -32,6 +31,8 @@ async function reverseGeocodeNominatim(lat, lng, signal) {
 
 export default function LocationStep() {
   const navigate = useNavigate();
+  const location = useLocation();
+  const { user } = useAuth();
 
   const [lat, setLat] = useState(null);
   const [lng, setLng] = useState(null);
@@ -85,7 +86,7 @@ export default function LocationStep() {
     );
   }, []);
 
-  const handleContinue = useCallback(() => {
+  const handleContinue = useCallback(async () => {
     setError("");
     const a = normalizeText(address);
     const hasCoords = typeof lat === "number" && typeof lng === "number";
@@ -99,21 +100,26 @@ export default function LocationStep() {
       lng: hasCoords ? lng : null,
       address: a,
     };
-    try {
-      localStorage.setItem(USER_LOCATION_KEY, JSON.stringify(payload));
-    } catch {
-      // ignore
+    if (user?.id && user.role === "customer") {
+      try {
+        await putCustomerMeta(user, { lastKnownLocation: payload });
+      } catch {
+        /* non-fatal */
+      }
     }
 
-    let pendingOrderId = "";
-    try {
-      pendingOrderId = normalizeText(localStorage.getItem(PENDING_ORDER_ID_KEY));
-    } catch {
-      pendingOrderId = "";
+    let pendingOrderId = normalizeText(location.state?.orderId);
+    if (!pendingOrderId && user?.id && user.role === "customer") {
+      try {
+        const meta = await getCustomerMeta(user);
+        pendingOrderId = normalizeText(meta?.lastWizardOrderId);
+      } catch {
+        pendingOrderId = "";
+      }
     }
 
     navigate(pendingOrderId ? `/map?orderId=${encodeURIComponent(pendingOrderId)}` : "/map");
-  }, [address, lat, lng, navigate]);
+  }, [address, lat, lng, navigate, location.state, user]);
 
   return (
     <div

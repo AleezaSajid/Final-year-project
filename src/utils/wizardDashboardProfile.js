@@ -1,9 +1,7 @@
 /**
- * Maps Measurement Wizard localStorage payload → dashboard profile rows.
+ * Maps Measurement Wizard snapshot payload → dashboard profile rows.
  * Option lists mirror MeasurementWizard.jsx (keep in sync when wizard options change).
  */
-
-export const MEASUREMENT_WIZARD_STORAGE_KEY = "measurement_wizard_state";
 
 const NECK_OPTIONS = [
   { id: "round", label: "Round" },
@@ -72,18 +70,6 @@ function labelsFromIds(options, ids) {
   if (!Array.isArray(ids) || ids.length === 0) return null;
   const labels = ids.map((id) => labelFrom(options, id)).filter(Boolean);
   return labels.length ? labels.join(", ") : null;
-}
-
-export function readWizardStateFromStorage() {
-  if (typeof window === "undefined") return null;
-  try {
-    const raw = localStorage.getItem(MEASUREMENT_WIZARD_STORAGE_KEY);
-    if (!raw) return null;
-    const p = JSON.parse(raw);
-    return p && typeof p === "object" && !Array.isArray(p) ? p : null;
-  } catch {
-    return null;
-  }
 }
 
 /**

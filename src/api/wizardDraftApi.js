@@ -1,30 +1,34 @@
-/**
- * Measurement wizard draft API — wire to backend when ready.
- * localStorage remains the source of truth until API is integrated.
- */
-
-export const API_BASE_URL = process.env.REACT_APP_API_BASE_URL || "";
+import { getWizardDraft as getDraft, putWizardDraft as putDraft } from "./accountApi.js";
 
 /**
- * @param {object} payload Full wizard snapshot (activeStep, measurements, data, draftVersion, …)
- * @returns {Promise<{ ok?: boolean, localOnly?: boolean }>}
+ * Measurement wizard draft — persisted on the user document via `/api/account/wizard-draft`.
+ * @param {object} payload Full wizard snapshot
+ * @param {object | null} user Auth user (customer)
+ * @returns {Promise<{ ok?: boolean }>}
  */
-export async function saveWizardDraft(payload) {
-  if (!API_BASE_URL) {
-    return Promise.resolve({ ok: true, localOnly: true });
+export async function saveWizardDraft(payload, user) {
+  if (!user || user.id == null) {
+    return { ok: false };
   }
-  // Future: POST `${API_BASE_URL}/measurements/wizard/draft` with JSON body
-  return Promise.resolve({ ok: true, localOnly: true });
+  try {
+    await putDraft(user, payload);
+    return { ok: true };
+  } catch (e) {
+    console.warn("[wizardDraftApi] save failed", e);
+    return { ok: false };
+  }
 }
 
 /**
- * @param {string} userId Authenticated user id when auth exists
- * @returns {Promise<object | null>}
+ * @param {object | null} user
+ * @returns {Promise<object | null>} draft blob or null
  */
-export async function getWizardDraft(userId) {
-  if (!API_BASE_URL || !userId) {
-    return Promise.resolve(null);
+export async function loadWizardDraft(user) {
+  if (!user || user.id == null) return null;
+  try {
+    const data = await getDraft(user);
+    return data && data.draft && typeof data.draft === "object" ? data.draft : null;
+  } catch {
+    return null;
   }
-  // Future: GET `${API_BASE_URL}/measurements/wizard/draft?userId=…`
-  return Promise.resolve(null);
 }

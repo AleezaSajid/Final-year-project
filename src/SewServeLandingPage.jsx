@@ -20,6 +20,7 @@ import { SiFacebook, SiInstagram, SiPinterest, SiWhatsapp } from "react-icons/si
 import LandingNavbar from "./components/LandingNavbar.jsx";
 import HowItWorksSplitSection from "./components/HowItWorksSplitSection.jsx";
 import { useSewServeLogoProcessedSrc } from "./hooks/useSewServeLogoProcessedSrc";
+import { fetchTestimonials } from "./api/testimonialsApi.js";
 const navLinks = [
   { label: "Home", sectionId: "home" },
   { label: "About", sectionId: "about" },
@@ -87,8 +88,6 @@ const features = [
   },
 ];
 
-const TESTIMONIALS_STORAGE_KEY = "sewserve_testimonials";
-
 const staticTestimonials = [
   {
     name: "Ayesha Khan",
@@ -124,30 +123,25 @@ export default function SewServeLandingPage() {
   const [storedTestimonials, setStoredTestimonials] = useState([]);
 
   useEffect(() => {
-    const readStored = () => {
-      try {
-        const raw = localStorage.getItem(TESTIMONIALS_STORAGE_KEY);
-        const parsed = raw ? JSON.parse(raw) : [];
-        setStoredTestimonials(Array.isArray(parsed) ? parsed : []);
-      } catch {
-        setStoredTestimonials([]);
-      }
+    let cancelled = false;
+    const load = async () => {
+      const rows = await fetchTestimonials();
+      if (cancelled) return;
+      setStoredTestimonials(Array.isArray(rows) ? rows : []);
     };
-    readStored();
-    const onStorage = (e) => {
-      if (e?.key === TESTIMONIALS_STORAGE_KEY) readStored();
+    void load();
+    const onUpdated = () => {
+      void load();
     };
-    const onUpdated = () => readStored();
-    window.addEventListener("storage", onStorage);
     window.addEventListener("sewserve:testimonials-updated", onUpdated);
     return () => {
-      window.removeEventListener("storage", onStorage);
+      cancelled = true;
       window.removeEventListener("sewserve:testimonials-updated", onUpdated);
     };
   }, []);
 
   const testimonials = useMemo(() => {
-    const fromStorage = (Array.isArray(storedTestimonials) ? storedTestimonials : [])
+    const fromApi = (Array.isArray(storedTestimonials) ? storedTestimonials : [])
       .filter((t) => t && typeof t === "object")
       .map((t) => ({
         name: typeof t.name === "string" && t.name.trim() ? t.name.trim() : "Customer",
@@ -156,7 +150,7 @@ export default function SewServeLandingPage() {
       }))
       .filter((t) => t.feedback.trim());
 
-    const merged = [...fromStorage, ...staticTestimonials];
+    const merged = [...fromApi, ...staticTestimonials];
     const seen = new Set();
     const deduped = [];
     for (const t of merged) {

@@ -7,25 +7,12 @@ import { useAuth } from "./context/AuthContext.jsx";
 import { syncTailorSessionFromTailorUser } from "./utils/chatIdentity.js";
 import { setUserRole } from "./utils/userRole";
 
-const WORKSPACE_ROLES_KEY = "sewserve_workspace_roles";
 const ROLE_OPTIONS = ["Tailor", "Customer"];
 
 function normalizeRole(value) {
   const role = String(value || "").trim().toLowerCase();
   const matched = ROLE_OPTIONS.find((o) => o.toLowerCase() === role);
   return matched || "Customer";
-}
-
-function readWorkspaceRoles() {
-  try {
-    const raw = localStorage.getItem(WORKSPACE_ROLES_KEY);
-    if (!raw) return [];
-    const parsed = JSON.parse(raw);
-    if (!Array.isArray(parsed)) return [];
-    return [...new Set(parsed.map((r) => normalizeRole(r)))];
-  } catch {
-    return [];
-  }
 }
 
 function pathForSlug(slug) {
@@ -43,16 +30,18 @@ export default function WorkspaceSelect() {
   const { user } = useAuth();
   const [ready, setReady] = useState(false);
 
-  const roles = useMemo(() => readWorkspaceRoles(), []);
+  const roles = useMemo(() => {
+    if (!user?.role) return [];
+    return [user.role === "tailor" ? "Tailor" : "Customer"];
+  }, [user?.role]);
 
   useEffect(() => {
     document.title = "SewServe | Select workspace";
   }, []);
 
   useEffect(() => {
-    const token =
-      localStorage.getItem("sewserve_auth_token") || sessionStorage.getItem("sewserve_auth_token");
-    if (!token) {
+    // Auth is now backed by AuthContext (currentUser), not the legacy token key.
+    if (!user) {
       navigate("/login", { replace: true });
       return;
     }

@@ -22,67 +22,37 @@ export default function CustomerChatWindow({ isOpen, onClose, customerId, tailor
   const [inputValue, setInputValue] = useState("");
   const endOfMessagesRef = useRef(null);
   const activeConversationRef = useRef(null);
-  const senderRef = useRef(senderId);
-  const receiverRef = useRef(receiverId);
-  const isOpenRef = useRef(isOpen);
 
   useEffect(() => {
     activeConversationRef.current = convId;
   }, [convId]);
-  useEffect(() => {
-    senderRef.current = senderId;
-    receiverRef.current = receiverId;
-  }, [receiverId, senderId]);
 
   useEffect(() => {
-    isOpenRef.current = isOpen;
-  }, [isOpen]);
-
-  useEffect(() => {
-    const participantMatch = (message) => {
-      const s = normalizeChatId(message?.senderId);
-      const r = normalizeChatId(message?.receiverId);
-      return (
-        (s === senderRef.current && r === receiverRef.current) || (s === receiverRef.current && r === senderRef.current)
-      );
-    };
-
     const handleChatHistory = (payload) => {
       const history = Array.isArray(payload?.messages) ? payload.messages : [];
       const activeConversationId = activeConversationRef.current;
-      if (activeConversationId) {
-        const byConv = history.filter((message) => belongsToConversation(message, activeConversationId));
-        if (byConv.length > 0) {
-          setMessages(byConv);
-          return;
-        }
+      if (!activeConversationId) {
+        setMessages([]);
+        return;
       }
-      setMessages(history.filter(participantMatch));
+      setMessages(history.filter((message) => belongsToConversation(message, activeConversationId)));
     };
 
     const handleMessageReceived = (message) => {
       const activeConversationId = activeConversationRef.current;
-
-      const matchesConversation =
-        Boolean(normalizeChatId(message?.conversationId)) &&
-        Boolean(activeConversationId) &&
-        normalizeChatId(message.conversationId) === activeConversationId;
-      const matchesParticipants = participantMatch(message);
-
-      if (!matchesConversation && !matchesParticipants) {
+      if (
+        !normalizeChatId(message?.conversationId) ||
+        !activeConversationId ||
+        normalizeChatId(message.conversationId) !== activeConversationId
+      ) {
         return;
       }
 
-      if (message?.conversationId) {
-        activeConversationRef.current = normalizeChatId(message.conversationId);
-      }
-    
       setMessages((prev) => {
         const exists = prev.some(
           (m) =>
             (m.id && message.id && m.id === message.id) ||
-            (m.senderId === message.senderId &&
-              m.receiverId === message.receiverId &&
+            (belongsToConversation(m, activeConversationId) &&
               m.timestamp === message.timestamp &&
               m.content === message.content)
         );

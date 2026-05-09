@@ -14,6 +14,7 @@ import TailorCard from "./components/TailorCard";
 import { distanceKm, formatDistance } from "./utils/haversine";
 import { useAuth } from "../../context/AuthContext.jsx";
 import { resolveCustomerIdForChat } from "../../utils/chatIdentity.js";
+import { getCustomerMeta, putCustomerMeta } from "../../api/accountApi.js";
 import { tailorMarkerIcon, userMarkerIcon } from "./markerIcons.js";
 import { normalizeWorkflowStatus } from "../../utils/workflowEngine.js";
 
@@ -111,8 +112,6 @@ function orderEventMatches(orderEvent, oid) {
   return false;
 }
 
-const PENDING_ORDER_ID_KEY = "sewserve_pending_order_id";
-
 function formatDeliveryDays(days) {
   const n = Number(days);
   if (!Number.isFinite(n) || n <= 0) return "";
@@ -151,6 +150,7 @@ export default function NearbyTailorsMap() {
   const [apiTailors, setApiTailors] = useState([]);
   const [orderLiveHint, setOrderLiveHint] = useState("");
   const redirectedRef = useRef(false);
+  const lastMapTailorRequestRef = useRef(null);
 
   // Map/card sync: marker popups + horizontal rail scroll
   const markerRefs = useRef(new Map());
@@ -160,23 +160,32 @@ export default function NearbyTailorsMap() {
   useEffect(() => {
     const q = (searchParams.get("orderId") || "").trim();
     if (q) return;
-    let pending = "";
-    try {
-      pending = (localStorage.getItem(PENDING_ORDER_ID_KEY) || "").trim();
-    } catch {
-      return;
-    }
-    if (!pending) return;
-    navigate(`/map?orderId=${encodeURIComponent(pending)}`, { replace: true });
-  }, [searchParams, navigate]);
+    if (!user?.id || user.role !== "customer") return;
+    let cancelled = false;
+    void (async () => {
+      const meta = await getCustomerMeta(user);
+      if (cancelled) return;
+      const pending = (meta?.lastWizardOrderId || "").trim();
+      if (pending) navigate(`/map?orderId=${encodeURIComponent(pending)}`, { replace: true });
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [searchParams, navigate, user]);
 
   useEffect(() => {
-    try {
-      const raw = localStorage.getItem("userLocation");
-      if (!raw) return;
-      const parsed = JSON.parse(raw);
-      const lat = typeof parsed?.lat === "number" ? parsed.lat : null;
-      const lng = typeof parsed?.lng === "number" ? parsed.lng : null;
+    if (!user?.id || user.role !== "customer") return;
+    let cancelled = false;
+    void (async () => {
+      const meta = await getCustomerMeta(user);
+      if (cancelled) return;
+      if (meta?.lastMapTailorRequest && typeof meta.lastMapTailorRequest === "object") {
+        lastMapTailorRequestRef.current = meta.lastMapTailorRequest;
+      }
+      const parsed = meta?.lastKnownLocation;
+      if (!parsed || typeof parsed !== "object") return;
+      const lat = typeof parsed.lat === "number" ? parsed.lat : null;
+      const lng = typeof parsed.lng === "number" ? parsed.lng : null;
       if (lat != null && lng != null) {
         setUserCenter([lat, lng]);
         setGeoStatus("ok");
@@ -185,13 +194,14 @@ export default function NearbyTailorsMap() {
         socket.emit("get_nearby_tailors", {
           lat,
           lng,
-          address: parsed?.address || "",
+          address: typeof parsed.address === "string" ? parsed.address : "",
         });
       });
-    } catch {
-      // ignore
-    }
-  }, []);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [user?.id, user?.email, user?.role]);
 
   const requestLocation = useCallback(() => {
     if (!navigator.geolocation) {
@@ -309,31 +319,41 @@ export default function NearbyTailorsMap() {
     if (!wizardOrderId) return;
     activeOrderIdRef.current = wizardOrderId;
     setOrderLiveHint("");
-    let restoredSent = false;
-    try {
-      const raw = localStorage.getItem("sewserve_map_last_request");
-      if (raw) {
-        const p = JSON.parse(raw);
-        if (orderIdsMatch(p?.orderId, wizardOrderId)) {
-          setMatchStatus("confirmed");
-          restoredSent = true;
-        } else {
-          localStorage.removeItem("sewserve_map_last_request");
+    let cancelled = false;
+
+    const applyRestore = (last) => {
+      if (last && orderIdsMatch(last.orderId, wizardOrderId)) {
+        setMatchStatus("confirmed");
+        return true;
+      }
+      return false;
+    };
+
+    void (async () => {
+      let restoredSent = false;
+      if (lastMapTailorRequestRef.current) {
+        restoredSent = applyRestore(lastMapTailorRequestRef.current);
+      }
+      if (!restoredSent && user?.id && user.role === "customer") {
+        const meta = await getCustomerMeta(user);
+        if (cancelled) return;
+        const last = meta?.lastMapTailorRequest;
+        if (last && typeof last === "object") {
+          lastMapTailorRequestRef.current = last;
+          restoredSent = applyRestore(last);
         }
       }
-    } catch {
-      try {
-        localStorage.removeItem("sewserve_map_last_request");
-      } catch {
-        /* ignore */
+      if (!restoredSent) {
+        setMatchStatus("idle");
+        setInterestedTailors([]);
+        setSelectedId(null);
       }
-    }
-    if (!restoredSent) {
-      setMatchStatus("idle");
-      setInterestedTailors([]);
-      setSelectedId(null);
-    }
-  }, [wizardOrderId]);
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [wizardOrderId, user]);
 
   /** Join order room + surface status updates on the map (same events as order tracking). */
   useEffect(() => {
@@ -365,17 +385,9 @@ export default function NearbyTailorsMap() {
         const orderObj = data.fullOrder || data.order || null;
         const orderTailorId =
           orderObj && orderObj.tailorId != null ? String(orderObj.tailorId).trim() : "";
-        let requestedTailorId = "";
-        let requestedOrderId = "";
-        try {
-          const raw = localStorage.getItem("sewserve_map_last_request");
-          const last = raw ? JSON.parse(raw) : null;
-          requestedTailorId = last?.tailorId != null ? String(last.tailorId).trim() : "";
-          requestedOrderId = last?.orderId != null ? String(last.orderId).trim() : "";
-        } catch {
-          requestedTailorId = "";
-          requestedOrderId = "";
-        }
+        const last = lastMapTailorRequestRef.current;
+        const requestedTailorId = last?.tailorId != null ? String(last.tailorId).trim() : "";
+        const requestedOrderId = last?.orderId != null ? String(last.orderId).trim() : "";
 
         // Only redirect if this browser actually sent a request for this order.
         if (!requestedOrderId || !orderIdsMatch(requestedOrderId, oid)) return;
@@ -514,26 +526,19 @@ export default function NearbyTailorsMap() {
       const tid = String(partial.id ?? payload.tailorId ?? "").trim();
       if (!tid) return;
 
-      // If the customer already sent a request to a specific tailor (confirmed),
-      // treat the response from that SAME tailor as "accepted" and redirect.
-      try {
-        const raw = localStorage.getItem("sewserve_map_last_request");
-        const last = raw ? JSON.parse(raw) : null;
-        const requestedOrderId = last?.orderId != null ? String(last.orderId).trim() : "";
-        const requestedTailorId = last?.tailorId != null ? String(last.tailorId).trim() : "";
-        if (
-          matchStatus === "confirmed" &&
-          requestedOrderId &&
-          activeOrderIdRef.current &&
-          orderIdsMatch(requestedOrderId, activeOrderIdRef.current) &&
-          requestedTailorId &&
-          requestedTailorId === tid
-        ) {
-          navigate("/customer/dashboard", { replace: true });
-          return;
-        }
-      } catch {
-        // ignore storage parse errors
+      const lastReq = lastMapTailorRequestRef.current;
+      const requestedOrderId = lastReq?.orderId != null ? String(lastReq.orderId).trim() : "";
+      const requestedTailorId = lastReq?.tailorId != null ? String(lastReq.tailorId).trim() : "";
+      if (
+        matchStatus === "confirmed" &&
+        requestedOrderId &&
+        activeOrderIdRef.current &&
+        orderIdsMatch(requestedOrderId, activeOrderIdRef.current) &&
+        requestedTailorId &&
+        requestedTailorId === tid
+      ) {
+        navigate("/customer/dashboard", { replace: true });
+        return;
       }
 
       const full = mergeTailorFromInterest({ ...partial, id: tid }, allTailorsRef.current);
@@ -567,19 +572,15 @@ export default function NearbyTailorsMap() {
         });
       });
       setMatchStatus("confirmed");
-      try {
-        localStorage.setItem(
-          "sewserve_map_last_request",
-          JSON.stringify({
-            orderId: oid != null ? String(oid) : "",
-            tailorId: tailorId != null ? String(tailorId) : "",
-            tailorName: tailor?.name != null ? String(tailor.name) : "",
-            sentAt: Date.now(),
-          })
-        );
-        localStorage.removeItem(PENDING_ORDER_ID_KEY);
-      } catch {
-        /* ignore */
+      const mapReq = {
+        orderId: oid != null ? String(oid) : "",
+        tailorId: tailorId != null ? String(tailorId) : "",
+        tailorName: tailor?.name != null ? String(tailor.name) : "",
+        sentAt: Date.now(),
+      };
+      lastMapTailorRequestRef.current = mapReq;
+      if (user?.id && user.role === "customer") {
+        void putCustomerMeta(user, { lastMapTailorRequest: mapReq }).catch(() => {});
       }
       if (oid) {
         navigate(`/map?orderId=${encodeURIComponent(String(oid))}`, { replace: true });

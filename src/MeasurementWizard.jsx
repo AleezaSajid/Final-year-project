@@ -3,9 +3,15 @@ import { AnimatePresence, motion } from "framer-motion";
 import { useLocation, useNavigate } from "react-router-dom";
 import { Check, ChevronLeft, ChevronRight, Upload } from "lucide-react";
 import WizardNavbar from "./components/WizardNavbar";
-import { saveWizardDraft } from "./api/wizardDraftApi";
+import { saveWizardDraft, loadWizardDraft } from "./api/wizardDraftApi";
+import { putWizardDraft, putCustomerMeta } from "./api/accountApi.js";
 import { useAuth } from "./context/AuthContext.jsx";
-import { clearLinkedWizardOrderId, syncWizardOrderToServer } from "./utils/measurementWizardOrderSync.js";
+import {
+  clearLinkedWizardOrderId,
+  getLinkedWizardOrderId,
+  hydrateLinkedOrderIdFromDraft,
+  syncWizardOrderToServer,
+} from "./utils/measurementWizardOrderSync.js";
 import { emitWizardMeasurementReview } from "./utils/measurementReviewSocket.js";
 
 const WIZARD_STEPS = [
@@ -121,8 +127,6 @@ const initialMeasurements = {
 
 const BODY_MEASUREMENT_KEYS = ["chest", "waist", "shoulder", "neck", "armLength", "sleeveLength"];
 
-const STORAGE_KEY = "measurement_wizard_state";
-
 const NECK_IDS = new Set(NECK_OPTIONS.map((o) => o.id));
 
 const GARMENT_TYPE_OPTIONS = [
@@ -227,19 +231,6 @@ function mergeDesignBrief(raw) {
   return { designNotes, occasion, urgency, instructions };
 }
 
-function readStoredWizardState() {
-  if (typeof window === "undefined") return null;
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return null;
-    const p = JSON.parse(raw);
-    if (!p || typeof p !== "object") return null;
-    return p;
-  } catch {
-    return null;
-  }
-}
-
 const initialWizardData = {};
 
 const initialCustomerInfo = {
@@ -270,8 +261,7 @@ function mergeWizardData(raw) {
   return { ...initialWizardData, ...raw };
 }
 
-function buildInitialStateFromStorage() {
-  const saved = readStoredWizardState();
+function buildInitialStateFromDraftPayload(saved) {
   let activeStep = 3;
   let selectedNeck = "v-neck";
   let measurements = { ...initialMeasurements };
@@ -360,7 +350,7 @@ function buildInitialStateFromStorage() {
   };
 }
 
-const initialWizardFromStorage = buildInitialStateFromStorage();
+const initialWizardFromDraft = buildInitialStateFromDraftPayload(null);
 
 const inputShell =
   "relative flex w-full items-center overflow-hidden rounded-xl border border-white/55 bg-white/55 pl-3 shadow-[inset_0_1px_2px_rgba(15,23,42,0.04)] backdrop-blur-md transition focus-within:border-[#3b6b52]/50 focus-within:bg-white/75 focus-within:shadow-[0_0_0_3px_rgba(31,61,43,0.14)]";
@@ -931,25 +921,25 @@ export default function MeasurementWizard() {
   const navigate = useNavigate();
   const location = useLocation();
   const { user } = useAuth();
-  const [activeStep, setActiveStep] = useState(initialWizardFromStorage.activeStep);
-  const [customerInfo, setCustomerInfo] = useState(initialWizardFromStorage.customerInfo);
+  const [activeStep, setActiveStep] = useState(initialWizardFromDraft.activeStep);
+  const [customerInfo, setCustomerInfo] = useState(initialWizardFromDraft.customerInfo);
   const [selectedGarmentType, setSelectedGarmentType] = useState(
-    initialWizardFromStorage.selectedGarmentType
+    initialWizardFromDraft.selectedGarmentType
   );
   const [customGarmentType, setCustomGarmentType] = useState(
-    initialWizardFromStorage.customGarmentType ?? ""
+    initialWizardFromDraft.customGarmentType ?? ""
   );
   const [referenceImage, setReferenceImage] = useState(
-    initialWizardFromStorage.referenceImage ?? null
+    initialWizardFromDraft.referenceImage ?? null
   );
-  const [selectedNeck, setSelectedNeck] = useState(initialWizardFromStorage.selectedNeck);
-  const [measurements, setMeasurements] = useState(initialWizardFromStorage.measurements);
-  const [styleOptions, setStyleOptions] = useState(initialWizardFromStorage.styleOptions);
-  const [designBrief, setDesignBrief] = useState(initialWizardFromStorage.designBrief);
-  const [data, setData] = useState(initialWizardFromStorage.data);
-  const [draftVersion, setDraftVersion] = useState(initialWizardFromStorage.draftVersion);
+  const [selectedNeck, setSelectedNeck] = useState(initialWizardFromDraft.selectedNeck);
+  const [measurements, setMeasurements] = useState(initialWizardFromDraft.measurements);
+  const [styleOptions, setStyleOptions] = useState(initialWizardFromDraft.styleOptions);
+  const [designBrief, setDesignBrief] = useState(initialWizardFromDraft.designBrief);
+  const [data, setData] = useState(initialWizardFromDraft.data);
+  const [draftVersion, setDraftVersion] = useState(initialWizardFromDraft.draftVersion);
   const [assignedTailorShopId, setAssignedTailorShopId] = useState(
-    initialWizardFromStorage.assignedTailorShopId ?? ""
+    initialWizardFromDraft.assignedTailorShopId ?? ""
   );
   const [browseTailorBanner, setBrowseTailorBanner] = useState(null);
   const [autoSaved, setAutoSaved] = useState(false);
@@ -961,19 +951,65 @@ export default function MeasurementWizard() {
   const referenceFileInputRef = useRef(null);
   const lastPersistedSnapshotRef = useRef(
     JSON.stringify({
-      activeStep: initialWizardFromStorage.activeStep,
-      customerInfo: initialWizardFromStorage.customerInfo,
-      selectedGarmentType: initialWizardFromStorage.selectedGarmentType,
-      customGarmentType: initialWizardFromStorage.customGarmentType,
-      referenceImage: initialWizardFromStorage.referenceImage,
-      selectedNeck: initialWizardFromStorage.selectedNeck,
-      measurements: initialWizardFromStorage.measurements,
-      styleOptions: initialWizardFromStorage.styleOptions,
-      designBrief: initialWizardFromStorage.designBrief,
-      data: initialWizardFromStorage.data,
-      assignedTailorShopId: initialWizardFromStorage.assignedTailorShopId ?? "",
+      activeStep: initialWizardFromDraft.activeStep,
+      customerInfo: initialWizardFromDraft.customerInfo,
+      selectedGarmentType: initialWizardFromDraft.selectedGarmentType,
+      customGarmentType: initialWizardFromDraft.customGarmentType,
+      referenceImage: initialWizardFromDraft.referenceImage,
+      selectedNeck: initialWizardFromDraft.selectedNeck,
+      measurements: initialWizardFromDraft.measurements,
+      styleOptions: initialWizardFromDraft.styleOptions,
+      designBrief: initialWizardFromDraft.designBrief,
+      data: initialWizardFromDraft.data,
+      assignedTailorShopId: initialWizardFromDraft.assignedTailorShopId ?? "",
     })
   );
+  const draftHydratedUserIdRef = useRef(null);
+
+  useEffect(() => {
+    if (!user?.id) {
+      draftHydratedUserIdRef.current = null;
+      return;
+    }
+    if (draftHydratedUserIdRef.current === user.id) return;
+    let cancelled = false;
+    void (async () => {
+      const draft = await loadWizardDraft(user);
+      if (cancelled) return;
+      draftHydratedUserIdRef.current = user.id;
+      if (!draft) return;
+      const next = buildInitialStateFromDraftPayload(draft);
+      hydrateLinkedOrderIdFromDraft(draft.linkedOrderId);
+      setActiveStep(next.activeStep);
+      setCustomerInfo(next.customerInfo);
+      setSelectedGarmentType(next.selectedGarmentType);
+      setCustomGarmentType(next.customGarmentType);
+      setReferenceImage(next.referenceImage);
+      setSelectedNeck(next.selectedNeck);
+      setMeasurements(next.measurements);
+      setStyleOptions(next.styleOptions);
+      setDesignBrief(next.designBrief);
+      setData(next.data);
+      setDraftVersion(next.draftVersion);
+      setAssignedTailorShopId(next.assignedTailorShopId);
+      lastPersistedSnapshotRef.current = JSON.stringify({
+        activeStep: next.activeStep,
+        customerInfo: next.customerInfo,
+        selectedGarmentType: next.selectedGarmentType,
+        customGarmentType: next.customGarmentType,
+        referenceImage: next.referenceImage,
+        selectedNeck: next.selectedNeck,
+        measurements: next.measurements,
+        styleOptions: next.styleOptions,
+        designBrief: next.designBrief,
+        data: next.data,
+        assignedTailorShopId: next.assignedTailorShopId,
+      });
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [user?.id, user?.email]);
 
   const prevActiveStepForMotionRef = useRef(activeStep);
   let stepTransitionDir = 1;
@@ -985,10 +1021,8 @@ export default function MeasurementWizard() {
 
   const resetWizardProgress = useCallback(() => {
     clearLinkedWizardOrderId();
-    try {
-      localStorage.removeItem(STORAGE_KEY);
-    } catch {
-      // ignore
+    if (user?.id) {
+      void putWizardDraft(user, null).catch(() => {});
     }
     setActiveStep(3);
     setCustomerInfo({ ...initialCustomerInfo });
@@ -1019,7 +1053,7 @@ export default function MeasurementWizard() {
     setError("");
     setFieldInsight(getAdaptiveHint(3));
     setIsThinking(false);
-  }, []);
+  }, [user]);
 
   useEffect(() => {
     const raw = location.state;
@@ -1042,10 +1076,8 @@ export default function MeasurementWizard() {
 
     if (fresh) {
       clearLinkedWizardOrderId();
-      try {
-        localStorage.removeItem(STORAGE_KEY);
-      } catch {
-        /* ignore */
+      if (user?.id) {
+        void putWizardDraft(user, null).catch(() => {});
       }
       setActiveStep(1);
       setCustomerInfo({ ...initialCustomerInfo });
@@ -1085,7 +1117,7 @@ export default function MeasurementWizard() {
     }
 
     navigate(".", { replace: true, state: null });
-  }, [location.state, location.key, navigate]);
+  }, [location.state, location.key, navigate, user]);
 
   useEffect(() => {
     const snapshot = JSON.stringify({
@@ -1132,13 +1164,13 @@ export default function MeasurementWizard() {
           data,
           draftVersion: next,
           assignedTailorShopId,
+          linkedOrderId: getLinkedWizardOrderId() || "",
         };
-        try {
-          localStorage.setItem(STORAGE_KEY, JSON.stringify(payload));
-        } catch {
-          // ignore quota / private mode
-        }
-        saveWizardDraft(payload).catch(() => {});
+        saveWizardDraft(payload, user)
+          .then(() => {
+            window.dispatchEvent(new CustomEvent("sewserve:wizard-draft-updated"));
+          })
+          .catch(() => {});
         return next;
       });
     }, 1200);
@@ -1155,6 +1187,7 @@ export default function MeasurementWizard() {
     designBrief,
     data,
     assignedTailorShopId,
+    user,
   ]);
 
   useEffect(() => {
@@ -1282,13 +1315,16 @@ export default function MeasurementWizard() {
           throw new Error("Order was not created. Please try Complete Setup again.");
         }
         window.dispatchEvent(new CustomEvent("sewserve:orders-refresh"));
-        resetWizardProgress();
-        try {
-          localStorage.setItem("sewserve_pending_order_id", String(result.orderId));
-        } catch {
-          /* ignore */
+        const oid = String(result.orderId);
+        if (user?.id) {
+          try {
+            await putCustomerMeta(user, { lastWizardOrderId: oid });
+          } catch {
+            /* non-fatal */
+          }
         }
-        navigate("/location-step");
+        resetWizardProgress();
+        navigate("/location-step", { state: { orderId: oid } });
       } catch (e) {
         setError(e instanceof Error ? e.message : "Could not complete setup. Please try again.");
       }

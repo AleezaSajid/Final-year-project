@@ -4,10 +4,11 @@ import DashboardNavbar from "./components/DashboardNavbar";
 import { LandingStylePageBackground } from "./components/LandingStylePageBackground.jsx";
 import { notifyChatIdsFromOrderUpdated, publishChatRoomCustomerId } from "./chatUtils.js";
 import { TAILOR_SESSION_STORAGE_KEY } from "./utils/chatIdentity.js";
+import { useAuth } from "./context/AuthContext.jsx";
+import { useCustomerChat } from "./context/CustomerChatContext.jsx";
+import { createTestimonial } from "./api/testimonialsApi.js";
 
 const API_BASE_URL = "http://localhost:5000";
-
-const TESTIMONIALS_STORAGE_KEY = "sewserve_testimonials";
 
 const C = {
   heading: "#1a1a1a",
@@ -30,6 +31,8 @@ const statusLabel = (status) => {
 
 export default function CustomerReviewPage() {
   const navigate = useNavigate();
+  const { user } = useAuth();
+  const { syncCustomerOrderChatFromOrder } = useCustomerChat();
   const { orderId } = useParams();
   const [order, setOrder] = useState(null);
   const [isLoadingOrder, setIsLoadingOrder] = useState(true);
@@ -80,6 +83,10 @@ export default function CustomerReviewPage() {
       isMounted = false;
     };
   }, [orderId]);
+
+  useEffect(() => {
+    syncCustomerOrderChatFromOrder(order ?? null);
+  }, [order, syncCustomerOrderChatFromOrder]);
 
   useEffect(() => {
     if (isLoadingOrder) return;
@@ -137,21 +144,15 @@ export default function CustomerReviewPage() {
         const feedback = String(customerComment || "").trim();
         if (feedback) {
           const avatarSeed = encodeURIComponent(String(safeOrder.id || "review"));
-          const entry = {
+          await createTestimonial({
+            orderId: String(safeOrder.id || ""),
             name,
             feedback,
             avatar: `https://i.pravatar.cc/64?u=${avatarSeed}`,
             rating: Number(customerRating) || 0,
-            createdAt: new Date().toISOString(),
-            orderId: String(safeOrder.id || ""),
-          };
-          const raw = localStorage.getItem(TESTIMONIALS_STORAGE_KEY);
-          const prev = raw ? JSON.parse(raw) : [];
-          const list = Array.isArray(prev) ? prev : [];
-          const deduped = list.filter(
-            (t) => !(t && t.orderId && String(t.orderId) === entry.orderId) && !(t && t.feedback === entry.feedback)
-          );
-          localStorage.setItem(TESTIMONIALS_STORAGE_KEY, JSON.stringify([entry, ...deduped].slice(0, 12)));
+            customerUserId: user?.id,
+            customerEmail: user?.email,
+          });
           window.dispatchEvent(new CustomEvent("sewserve:testimonials-updated"));
         }
       } catch {

@@ -6,7 +6,8 @@ import { motion } from "framer-motion";
 import { LandingStylePageBackground } from "./components/LandingStylePageBackground.jsx";
 import { useAuth } from "./context/AuthContext.jsx";
 import { useSewServeLogoProcessedSrc } from "./hooks/useSewServeLogoProcessedSrc";
-import { setUserRole } from "./utils/userRole";
+import { clearUserRole, setUserRole } from "./utils/userRole";
+import { useToast } from "./components/ToastProvider.jsx";
 
 const LOGO_SRC = `${process.env.PUBLIC_URL || ""}/images/hero/sewserve-logo.png`;
 
@@ -286,6 +287,16 @@ const Input = styled.input`
     box-shadow: 0 0 0 3px rgba(31, 168, 85, 0.12);
     background: #fff;
   }
+
+  &[data-state="error"] {
+    border-color: #fca5a5;
+    box-shadow: 0 0 0 3px rgba(244, 63, 94, 0.12);
+  }
+
+  &[data-state="valid"] {
+    border-color: rgba(52, 211, 153, 0.8);
+    box-shadow: 0 0 0 3px rgba(16, 185, 129, 0.12);
+  }
 `;
 
 const InputWithToggle = styled(Input)`
@@ -366,6 +377,19 @@ const ErrorBox = styled.div`
   border-radius: 10px;
 `;
 
+const FieldHint = styled.p`
+  margin: -0.25rem 0 0.65rem;
+  padding-left: 0.1rem;
+  font-size: 0.82rem;
+  color: ${(p) => (p["data-variant"] === "error" ? "#b42318" : "#64748b")};
+  font-weight: 600;
+`;
+
+function isValidEmail(v) {
+  const s = String(v || "").trim();
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(s);
+}
+
 const PageFooter = styled.footer`
   text-align: center;
   padding: 0.7rem 1rem 0.95rem;
@@ -445,27 +469,52 @@ function EyeIcon({ passwordVisible }) {
 const HERO_IMAGE = `${process.env.PUBLIC_URL || ""}/images/hero/sewing-side.png`;
 
 export default function SignInPage() {
-  const { login } = useAuth();
+  const { login, logout } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
   const logoDisplaySrc = useSewServeLogoProcessedSrc(LOGO_SRC);
+  const toast = useToast();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const [touched, setTouched] = useState({ email: false, password: false });
+
+  const emailOk = isValidEmail(email);
+  const passwordOk = String(password || "").length >= 6;
+  const emailError = touched.email && !emailOk ? "Enter a valid email address." : "";
+  const passwordError = touched.password && !passwordOk ? "Password must be at least 6 characters." : "";
 
   async function handleSubmit(e) {
     e.preventDefault();
     setError("");
+    setTouched({ email: true, password: true });
+    if (!emailOk || !passwordOk) {
+      toast.error("Fix the highlighted fields", "Please check your email and password.");
+      return;
+    }
     setLoading(true);
     try {
-      await login(email.trim(), password);
+      const data = await login(email.trim(), password);
+      const role = data?.user?.role ? String(data.user.role).trim() : "";
+      if (role !== "customer") {
+        await logout();
+        clearUserRole();
+        toast.error("Invalid account type for this login", "Please use the Tailor login page.");
+        setError("Invalid account type for this login.");
+        return;
+      }
       setUserRole("customer");
+      toast.success("Welcome back", "Signing you in…", { durationMs: 1400 });
       const from = location?.state?.from;
-      navigate(typeof from === "string" && from.trim() ? from : "/customer/dashboard", { replace: true });
+      window.setTimeout(() => {
+        navigate(typeof from === "string" && from.trim() ? from : "/customer/dashboard", { replace: true });
+      }, 260);
     } catch (err) {
-      setError(err.message || "Sign in failed");
+      const msg = err?.message || "Sign in failed";
+      setError(msg);
+      toast.error("Couldn’t sign you in", msg);
     } finally {
       setLoading(false);
     }
@@ -522,9 +571,12 @@ export default function SignInPage() {
                   placeholder="Email Address"
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
+                  onBlur={() => setTouched((p) => ({ ...p, email: true }))}
+                  data-state={touched.email ? (emailOk ? "valid" : "error") : ""}
                   required
                 />
               </Field>
+              {emailError ? <FieldHint data-variant="error">{emailError}</FieldHint> : null}
 
               <Field>
                 <IconLeft>
@@ -537,6 +589,8 @@ export default function SignInPage() {
                   placeholder="Enter your password"
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
+                  onBlur={() => setTouched((p) => ({ ...p, password: true }))}
+                  data-state={touched.password ? (passwordOk ? "valid" : "error") : ""}
                   required
                 />
                 <IconBtn
@@ -547,13 +601,14 @@ export default function SignInPage() {
                   <EyeIcon passwordVisible={showPassword} />
                 </IconBtn>
               </Field>
+              {passwordError ? <FieldHint data-variant="error">{passwordError}</FieldHint> : null}
 
               <ForgotRow>
                 <TextLink to="/forgot-password">Forgot Password?</TextLink>
               </ForgotRow>
 
-              <SignInBtn type="submit" disabled={loading}>
-                {loading ? "Signing In…" : "Sign In"}
+              <SignInBtn type="submit" disabled={loading} aria-busy={loading}>
+                {loading ? "Signing In..." : "Sign In"}
               </SignInBtn>
             </form>
 

@@ -9,7 +9,6 @@ import SignUpPage from "./SignUpPage";
 import TailorSignUpPage from "./TailorSignUpPage";
 import TailorDashboard from "./TailorDashboard";
 import CustomerDashboard from "./CustomerDashboard";
-import TailorProfile from "./TailorProfile";
 import LastReviewPage from "./LastReviewPage";
 import CustomerReviewPage from "./CustomerReviewPage";
 import MeasurementWizard from "./MeasurementWizard";
@@ -25,6 +24,7 @@ import { RoleProvider } from "./context/RoleContext";
 import { CustomerChatProvider } from "./context/CustomerChatContext.jsx";
 import { PageBackground } from "./components/PageBackground.jsx";
 import PageTransition from "./components/PageTransition.jsx";
+import { ToastProvider } from "./components/ToastProvider.jsx";
 
 function AnimatedRoutes() {
   const location = useLocation();
@@ -41,17 +41,35 @@ function AnimatedRoutes() {
         <Route path="/signup" element={<PageTransition><SignUpPage /></PageTransition>} />
         <Route path="/tailor-signup" element={<PageTransition><TailorSignUpPage /></PageTransition>} />
         <Route path="/dashboard" element={<PageTransition><TailorDashboard /></PageTransition>} />
-        <Route path="/profile" element={<PageTransition><TailorProfile /></PageTransition>} />
-        <Route path="/tailor/dashboard" element={<PageTransition><TailorDashboard /></PageTransition>} />
+        <Route path="/profile" element={<Navigate to="/tailor/dashboard" replace />} />
+        <Route
+          path="/tailor/dashboard"
+          element={
+            <PageTransition>
+              <ProtectedRoute redirectPath="/tailor-login" allowedRoles={["tailor"]}>
+                <TailorDashboard />
+              </ProtectedRoute>
+            </PageTransition>
+          }
+        />
         <Route path="/tailor-dashboard" element={<Navigate to="/tailor/dashboard" replace />} />
-        <Route path="/customer/dashboard" element={<PageTransition><CustomerDashboard /></PageTransition>} />
+        <Route
+          path="/customer/dashboard"
+          element={
+            <PageTransition>
+              <ProtectedRoute redirectPath="/login" allowedRoles={["customer"]}>
+                <CustomerDashboard />
+              </ProtectedRoute>
+            </PageTransition>
+          }
+        />
         <Route path="/tailor/last-review/:orderId" element={<PageTransition><LastReviewPage /></PageTransition>} />
         <Route path="/customer/review/:orderId" element={<PageTransition><CustomerReviewPage /></PageTransition>} />
         <Route
           path="/measurement-wizard"
           element={
             <PageTransition>
-              <ProtectedRoute>
+              <ProtectedRoute redirectPath="/login" allowedRoles={["customer"]}>
                 <MeasurementWizard />
               </ProtectedRoute>
             </PageTransition>
@@ -61,7 +79,7 @@ function AnimatedRoutes() {
           path="/features/measurement-wizard"
           element={
             <PageTransition>
-              <ProtectedRoute>
+              <ProtectedRoute redirectPath="/login" allowedRoles={["customer"]}>
                 <MeasurementWizard />
               </ProtectedRoute>
             </PageTransition>
@@ -78,7 +96,7 @@ function AnimatedRoutes() {
           path="/measurements/new"
           element={
             <PageTransition>
-              <ProtectedRoute>
+              <ProtectedRoute redirectPath="/login" allowedRoles={["customer"]}>
                 <MeasurementWizard />
               </ProtectedRoute>
             </PageTransition>
@@ -104,9 +122,11 @@ function App() {
   return (
     <RoleProvider>
       <Router>
-      <CustomerChatProvider>
-      <AnimatedRoutes />
-      </CustomerChatProvider>
+      <ToastProvider>
+        <CustomerChatProvider>
+        <AnimatedRoutes />
+        </CustomerChatProvider>
+      </ToastProvider>
       </Router>
     </RoleProvider>
   );

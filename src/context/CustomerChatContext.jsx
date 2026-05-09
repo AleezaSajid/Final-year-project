@@ -5,7 +5,8 @@ import { socket } from "../socket.js";
 import {
   CHAT_IDS_FROM_ORDER_EVENT,
   CHAT_ROOM_CUSTOMER_SYNC_EVENT,
-  getConversationId,
+  getOrderChatConversationId,
+  isOrderEligibleForChat,
   normalizeChatId,
   readChatRoomCustomerIdFromStorage,
 } from "../chatUtils.js";
@@ -38,7 +39,6 @@ function isCustomerChatPath(pathname) {
   return pathname === "/customer/dashboard" || pathname.startsWith("/customer/review");
 }
 
-/** Same conversation id rule as tailor dashboard: sorted pair of tailor + customer. */
 export function CustomerChatProvider({ children }) {
   const { user } = useAuth();
   const location = useLocation();
@@ -48,6 +48,25 @@ export function CustomerChatProvider({ children }) {
   const [lastChatPreview, setLastChatPreview] = useState(() => readStoredChatPreview());
   const [orderRoomCustomerId, setOrderRoomCustomerId] = useState(() => readChatRoomCustomerIdFromStorage());
   const [orderLinkedIdsVersion, setOrderLinkedIdsVersion] = useState(0);
+  const [orderChatBinding, setOrderChatBinding] = useState(null);
+
+  const syncCustomerOrderChatFromOrder = useCallback((order) => {
+    if (!order || !isOrderEligibleForChat(order)) {
+      setOrderChatBinding(null);
+      return;
+    }
+    const oid = order.id ?? order._id;
+    const oidStr = oid != null ? String(oid).trim() : "";
+    if (!oidStr) {
+      setOrderChatBinding(null);
+      return;
+    }
+    setOrderChatBinding({
+      customerId: normalizeChatId(order.customerId),
+      tailorId: normalizeChatId(order.tailorId),
+      conversationId: getOrderChatConversationId(oidStr),
+    });
+  }, []);
 
   useEffect(() => {
     isChatOpenRef.current = isChatOpen;
@@ -75,18 +94,20 @@ export function CustomerChatProvider({ children }) {
   }, []);
 
   const customerId = useMemo(() => {
+    if (orderChatBinding?.customerId) return orderChatBinding.customerId;
     const raw = orderRoomCustomerId || resolveCustomerIdForChat(user);
     return normalizeChatId(raw) || "CU-001";
-  }, [orderRoomCustomerId, user]);
+  }, [orderChatBinding, orderRoomCustomerId, user]);
 
   const tailorIdForChat = useMemo(() => {
     void orderLinkedIdsVersion;
+    if (orderChatBinding?.tailorId) return orderChatBinding.tailorId;
     return normalizeChatId(resolveTailorIdForCustomerChat(user)) || "T-A1";
-  }, [user, orderLinkedIdsVersion]);
+  }, [orderChatBinding, user, orderLinkedIdsVersion]);
 
   const conversationId = useMemo(
-    () => getConversationId(tailorIdForChat, customerId),
-    [customerId, tailorIdForChat]
+    () => normalizeChatId(orderChatBinding?.conversationId || ""),
+    [orderChatBinding]
   );
 
   useEffect(() => {
@@ -105,6 +126,8 @@ export function CustomerChatProvider({ children }) {
     };
     const handleNewNotification = (payload) => {
       if (payload?.type !== "new_message") return;
+      if (normalizeChatId(payload?.senderId) === normalizeChatId(customerId)) return;
+      if (conversationId && normalizeChatId(payload?.conversationId) !== normalizeChatId(conversationId)) return;
       if (isChatOpenRef.current) return;
       setUnreadChatCount((c) => Math.min(c + 1, 999));
     };
@@ -121,20 +144,12 @@ export function CustomerChatProvider({ children }) {
       socket.off("connect", joinRoom);
       socket.off("new_notification", handleNewNotification);
     };
-  }, [customerId, tailorIdForChat, conversationId, location.pathname]);
+  }, [customerId, conversationId, location.pathname]);
 
   useEffect(() => {
     if (!isCustomerChatPath(location.pathname)) return undefined;
 
-    const sid = normalizeChatId(customerId);
-    const tid = normalizeChatId(tailorIdForChat);
     const conv = normalizeChatId(conversationId);
-
-    const participantMatch = (message) => {
-      const s = normalizeChatId(message?.senderId);
-      const r = normalizeChatId(message?.receiverId);
-      return (s === sid && r === tid) || (s === tid && r === sid);
-    };
 
     const persistPreview = (text, at) => {
       const next = { text: String(text).trim().slice(0, 200), at: at || Date.now() };
@@ -148,11 +163,7 @@ export function CustomerChatProvider({ children }) {
     };
 
     const handleMessageReceived = (message) => {
-      const matchesConversation =
-        Boolean(normalizeChatId(message?.conversationId)) &&
-        Boolean(conv) &&
-        normalizeChatId(message.conversationId) === conv;
-      if (!matchesConversation && !participantMatch(message)) return;
+      if (!conv || normalizeChatId(message?.conversationId) !== conv) return;
       const text = String(message?.content ?? "").trim();
       if (!text) return;
       persistPreview(text, message.timestamp || Date.now());
@@ -160,10 +171,7 @@ export function CustomerChatProvider({ children }) {
 
     const handleChatHistory = (payload) => {
       const history = Array.isArray(payload?.messages) ? payload.messages : [];
-      let list = conv ? history.filter((m) => belongsToConversation(m, conv)) : [];
-      if (list.length === 0) {
-        list = history.filter(participantMatch);
-      }
+      const list = conv ? history.filter((m) => belongsToConversation(m, conv)) : [];
       const last = list[list.length - 1];
       if (last && String(last.content || "").trim()) {
         persistPreview(String(last.content).trim(), last.timestamp || Date.now());
@@ -176,7 +184,7 @@ export function CustomerChatProvider({ children }) {
       socket.off("message_received", handleMessageReceived);
       socket.off("chat_history", handleChatHistory);
     };
-  }, [location.pathname, customerId, tailorIdForChat, conversationId]);
+  }, [location.pathname, conversationId]);
 
   const openCustomerChat = useCallback(() => {
     setIsChatOpen(true);
@@ -191,6 +199,7 @@ export function CustomerChatProvider({ children }) {
       isChatOpen,
       openCustomerChat,
       closeCustomerChat,
+      syncCustomerOrderChatFromOrder,
       customerId,
       conversationId,
       tailorIdForChat,
@@ -201,6 +210,7 @@ export function CustomerChatProvider({ children }) {
       isChatOpen,
       openCustomerChat,
       closeCustomerChat,
+      syncCustomerOrderChatFromOrder,
       customerId,
       conversationId,
       tailorIdForChat,
@@ -231,8 +241,9 @@ export function useCustomerChat() {
     isChatOpen: false,
     openCustomerChat: () => {},
     closeCustomerChat: () => {},
+    syncCustomerOrderChatFromOrder: () => {},
     customerId: "CU-001",
-    conversationId: getConversationId("T-A1", "CU-001"),
+    conversationId: "",
     tailorIdForChat: "T-A1",
     unreadChatCount: 0,
     lastChatPreview: null,

@@ -21,6 +21,11 @@ import {
   TD_GLASS_CARD_COMPACT,
   TD_SECONDARY_NAVY_BTN,
 } from "../tailorDashboardClassNames";
+import { isOrderEligibleForChat } from "../../chatUtils.js";
+
+/** Matches customer dashboard chat card glass + footprint */
+const TD_CHAT_CARD_GLASS =
+  "overflow-hidden rounded-2xl border border-white/40 bg-white/45 shadow-[0_8px_32px_-12px_rgba(15,23,42,0.14)] backdrop-blur-xl";
 
 const TASK_MAP = {
   order_placed: "Review & Approve Order",
@@ -58,6 +63,7 @@ export default function TdDashboardOverview({
   updateOrderStatus,
   openMeasurementsReview,
   fetchOrders,
+  openChatForOrder,
 }) {
   const [expandedTaskId, setExpandedTaskId] = useState(null);
 
@@ -216,8 +222,8 @@ export default function TdDashboardOverview({
         })}
       </div>
 
-      <div className="grid grid-cols-1 gap-6 lg:grid-cols-3 lg:gap-8">
-        <div className="space-y-6 lg:col-span-2">
+      <div className="grid grid-cols-1 gap-5 lg:grid-cols-12 lg:items-stretch lg:gap-6">
+        <div className="space-y-6 lg:col-span-8">
           <motion.div
             initial={{ opacity: 0, y: 14 }}
             whileInView={{ opacity: 1, y: 0 }}
@@ -238,7 +244,7 @@ export default function TdDashboardOverview({
               <p className="mt-4 text-sm text-slate-500">No active tasks</p>
             ) : (
               <div
-                className="mt-4 max-h-[min(28rem,55vh)] overflow-y-auto overflow-x-hidden pr-1 [-webkit-overflow-scrolling:touch] scroll-smooth"
+                className="mt-4 max-h-[min(14rem,38vh)] overflow-y-auto overflow-x-hidden pr-1 [-webkit-overflow-scrolling:touch] scroll-smooth"
                 role="region"
                 aria-label="Current tasks (scroll for more)"
               >
@@ -327,47 +333,48 @@ export default function TdDashboardOverview({
           </motion.div>
 
           <motion.div
-            id="td-upcoming"
             initial={{ opacity: 0, y: 14 }}
             whileInView={{ opacity: 1, y: 0 }}
             viewport={{ once: true, margin: "-40px" }}
             transition={{ duration: 0.45, ease: [0.25, 0.1, 0.25, 1] }}
             className={glassCard}
           >
-            <div className="flex items-start gap-3 border-b border-slate-200/50 pb-4">
-              <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-sky-100/80 text-sky-700 shadow-sm">
-                <Calendar className="h-5 w-5" aria-hidden />
-              </span>
-              <div className="flex-1">
-                <h2 className="text-apple-h3 font-semibold text-ink">Calendar Schedule</h2>
-                <p className="text-xs text-slate-500">Next deadlines</p>
-              </div>
-            </div>
+            <h2 className="text-apple-h3 font-semibold text-ink">Measurements to Review</h2>
             <ul className="mt-4 space-y-3">
-              {calendarPreview.length > 0 ? (
-                calendarPreview.map((o) => (
+              {measurementsCandidates.length > 0 ? (
+                measurementsCandidates.map((order) => (
                   <li
-                    key={o.id}
-                    className="flex items-center justify-between gap-3 border-b border-slate-200/40 pb-3 text-sm last:border-0 last:pb-0"
+                    key={order.id}
+                    className="flex items-center gap-3 border-b border-slate-200/40 pb-3 last:border-0 last:pb-0"
                   >
-                    <span className="font-medium text-slate-800">{o.customerName}</span>
-                    <span className="flex items-center gap-1.5 text-xs text-slate-500">
-                      <CalendarDays className="h-3.5 w-3.5" aria-hidden />
-                      {o.dueDate || o.date}
-                    </span>
+                    <img
+                      src={DEFAULT_AVATAR}
+                      alt=""
+                      className="h-11 w-11 rounded-full border border-white/60 object-cover shadow-sm"
+                    />
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate text-sm font-semibold text-slate-900">{order.customerName}</p>
+                      <p className="truncate text-xs text-slate-500">
+                        {order.garmentType ? order.garmentType : "New measurements"}
+                      </p>
+                    </div>
+                    <motion.button
+                      type="button"
+                      whileTap={{ scale: 0.97 }}
+                      onClick={() => {
+                        setActiveOrderId(order.id);
+                        openMeasurementsReview?.(order);
+                      }}
+                      className={secondaryNavyBtn}
+                    >
+                      Review
+                    </motion.button>
                   </li>
                 ))
               ) : (
-                <li className="text-sm text-slate-500">No scheduled items yet.</li>
+                <li className="text-sm text-slate-500">Nothing pending review.</li>
               )}
             </ul>
-            <button
-              type="button"
-              onClick={() => document.getElementById("td-upcoming")?.scrollIntoView({ behavior: "smooth" })}
-              className="mt-5 w-full rounded-full border border-white/60 bg-white/70 py-2.5 text-sm font-semibold text-slate-700 shadow-sm backdrop-blur-md transition hover:bg-white active:scale-[0.99]"
-            >
-              View Calendar
-            </button>
           </motion.div>
 
           <motion.div
@@ -407,7 +414,25 @@ export default function TdDashboardOverview({
           </motion.div>
         </div>
 
-        <div className="space-y-6">
+        <div className="flex h-full min-h-0 w-full min-w-0 flex-col gap-5 lg:col-span-4">
+          {activeOrder && isOrderEligibleForChat(activeOrder) ? (
+            <button
+              type="button"
+              onClick={() => openChatForOrder?.(activeOrder)}
+              className={`group flex h-[min(14rem,38vh)] max-h-[min(14rem,38vh)] min-h-0 w-full min-w-0 flex-none flex-col overflow-hidden p-5 text-left outline-none transition duration-300 ease-out hover:scale-[1.02] focus-visible:ring-2 focus-visible:ring-emerald-600/45 focus-visible:ring-offset-2 sm:p-6 ${TD_CHAT_CARD_GLASS}`}
+            >
+              <div className="min-h-0 flex-1 overflow-y-auto">
+                <p className="text-sm leading-relaxed text-slate-700">
+                  You can now chat with the customer regarding this order.
+                </p>
+              </div>
+              <span className="mt-auto inline-flex w-full shrink-0 items-center justify-center gap-2 rounded-xl border border-emerald-800/25 bg-gradient-to-b from-[#3d6b4a] to-[#2f5a42] px-4 py-3 text-sm font-semibold text-white shadow-md shadow-emerald-900/20 transition duration-300 group-hover:brightness-105">
+                Open Chat
+              </span>
+            </button>
+          ) : null}
+
+          <div className="flex min-h-0 flex-1 flex-col space-y-6">
           <motion.div
             initial={{ opacity: 0, y: 14 }}
             whileInView={{ opacity: 1, y: 0 }}
@@ -468,49 +493,49 @@ export default function TdDashboardOverview({
           </motion.div>
 
           <motion.div
+            id="td-upcoming"
             initial={{ opacity: 0, y: 14 }}
             whileInView={{ opacity: 1, y: 0 }}
             viewport={{ once: true, margin: "-40px" }}
             transition={{ duration: 0.45, ease: [0.25, 0.1, 0.25, 1] }}
             className={glassCard}
           >
-            <h2 className="text-apple-h3 font-semibold text-ink">Measurements to Review</h2>
+            <div className="flex items-start gap-3 border-b border-slate-200/50 pb-4">
+              <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-sky-100/80 text-sky-700 shadow-sm">
+                <Calendar className="h-5 w-5" aria-hidden />
+              </span>
+              <div className="flex-1">
+                <h2 className="text-apple-h3 font-semibold text-ink">Calendar Schedule</h2>
+                <p className="text-xs text-slate-500">Next deadlines</p>
+              </div>
+            </div>
             <ul className="mt-4 space-y-3">
-              {measurementsCandidates.length > 0 ? (
-                measurementsCandidates.map((order) => (
+              {calendarPreview.length > 0 ? (
+                calendarPreview.map((o) => (
                   <li
-                    key={order.id}
-                    className="flex items-center gap-3 border-b border-slate-200/40 pb-3 last:border-0 last:pb-0"
+                    key={o.id}
+                    className="flex items-center justify-between gap-3 border-b border-slate-200/40 pb-3 text-sm last:border-0 last:pb-0"
                   >
-                    <img
-                      src={DEFAULT_AVATAR}
-                      alt=""
-                      className="h-11 w-11 rounded-full border border-white/60 object-cover shadow-sm"
-                    />
-                    <div className="min-w-0 flex-1">
-                      <p className="truncate text-sm font-semibold text-slate-900">{order.customerName}</p>
-                      <p className="truncate text-xs text-slate-500">
-                        {order.garmentType ? order.garmentType : "New measurements"}
-                      </p>
-                    </div>
-                    <motion.button
-                      type="button"
-                      whileTap={{ scale: 0.97 }}
-                      onClick={() => {
-                        setActiveOrderId(order.id);
-                        openMeasurementsReview?.(order);
-                      }}
-                      className={secondaryNavyBtn}
-                    >
-                      Review
-                    </motion.button>
+                    <span className="font-medium text-slate-800">{o.customerName}</span>
+                    <span className="flex items-center gap-1.5 text-xs text-slate-500">
+                      <CalendarDays className="h-3.5 w-3.5" aria-hidden />
+                      {o.dueDate || o.date}
+                    </span>
                   </li>
                 ))
               ) : (
-                <li className="text-sm text-slate-500">Nothing pending review.</li>
+                <li className="text-sm text-slate-500">No scheduled items yet.</li>
               )}
             </ul>
+            <button
+              type="button"
+              onClick={() => document.getElementById("td-upcoming")?.scrollIntoView({ behavior: "smooth" })}
+              className="mt-5 w-full rounded-full border border-white/60 bg-white/70 py-2.5 text-sm font-semibold text-slate-700 shadow-sm backdrop-blur-md transition hover:bg-white active:scale-[0.99]"
+            >
+              View Calendar
+            </button>
           </motion.div>
+          </div>
         </div>
       </div>
     </>

@@ -5,7 +5,8 @@ import styled from "styled-components";
 import { LandingStylePageBackground } from "./components/LandingStylePageBackground.jsx";
 import { useAuth } from "./context/AuthContext.jsx";
 import { useSewServeLogoProcessedSrc } from "./hooks/useSewServeLogoProcessedSrc";
-import { setUserRole } from "./utils/userRole";
+import { clearUserRole, setUserRole } from "./utils/userRole";
+import { useToast } from "./components/ToastProvider.jsx";
 
 const LOGO_SRC = `${process.env.PUBLIC_URL || ""}/images/hero/sewserve-logo.png`;
 
@@ -413,9 +414,10 @@ function EyeIcon({ passwordVisible }) {
 const HERO_IMAGE = `${process.env.PUBLIC_URL || ""}/images/hero/sewing-side.png`;
 
 export default function TailorLoginPage() {
-  const { login } = useAuth();
+  const { login, logout } = useAuth();
   const navigate = useNavigate();
   const logoDisplaySrc = useSewServeLogoProcessedSrc(LOGO_SRC);
+  const toast = useToast();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
@@ -427,11 +429,20 @@ export default function TailorLoginPage() {
     setError("");
     setLoading(true);
     try {
-      await login(email.trim(), password);
+      const data = await login(email.trim(), password);
+      const role = data?.user?.role ? String(data.user.role).trim() : "";
+      if (role !== "tailor") {
+        await logout();
+        clearUserRole();
+        toast.error("Invalid account type for this login", "Please use the Customer login page.");
+        setError("Invalid account type for this login.");
+        return;
+      }
       setUserRole("tailor");
       navigate("/tailor/dashboard", { replace: true });
     } catch (err) {
       setError(err.message || "Sign in failed");
+      toast.error("Couldn’t sign you in", err?.message || "Sign in failed");
     } finally {
       setLoading(false);
     }

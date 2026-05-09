@@ -1,35 +1,26 @@
 import { createMeasurementOrder, patchOrderWizardFields } from "../api/ordersApi.js";
 import { buildMeasurementOrderPayload, measurementOrderPayloadToServerBody } from "./measurementOrderPayload.js";
-import { CUSTOMER_ID_STORAGE_KEY, TAILOR_SESSION_STORAGE_KEY } from "./chatIdentity.js";
 
-export const WIZARD_LINKED_ORDER_ID_KEY = "sewserve_wizard_linked_order_id";
+let linkedWizardOrderIdMemory = null;
 
 export function getLinkedWizardOrderId() {
-  if (typeof window === "undefined") return null;
-  try {
-    const id = localStorage.getItem(WIZARD_LINKED_ORDER_ID_KEY);
-    return id && String(id).trim() !== "" ? String(id).trim() : null;
-  } catch {
-    return null;
-  }
+  return linkedWizardOrderIdMemory && String(linkedWizardOrderIdMemory).trim() !== ""
+    ? String(linkedWizardOrderIdMemory).trim()
+    : null;
 }
 
 export function setLinkedWizardOrderId(mongoId) {
-  if (typeof window === "undefined" || !mongoId) return;
-  try {
-    localStorage.setItem(WIZARD_LINKED_ORDER_ID_KEY, String(mongoId));
-  } catch {
-    // ignore
-  }
+  linkedWizardOrderIdMemory = mongoId ? String(mongoId).trim() : null;
 }
 
 export function clearLinkedWizardOrderId() {
-  if (typeof window === "undefined") return;
-  try {
-    localStorage.removeItem(WIZARD_LINKED_ORDER_ID_KEY);
-  } catch {
-    // ignore
-  }
+  linkedWizardOrderIdMemory = null;
+}
+
+/** Restore linked order id from server-saved wizard draft (in-memory only for this session). */
+export function hydrateLinkedOrderIdFromDraft(draftLinked) {
+  if (draftLinked == null || String(draftLinked).trim() === "") return;
+  linkedWizardOrderIdMemory = String(draftLinked).trim();
 }
 
 let createOrderPromise = null;
@@ -84,16 +75,6 @@ export async function syncWizardOrderToServer(snapshot, authUser) {
   if (!snapshot || typeof snapshot !== "object") return;
 
   const { payload, flat } = buildPayloadAndFlat(snapshot, authUser);
-  try {
-    if (payload?.customer?.id) {
-      localStorage.setItem(CUSTOMER_ID_STORAGE_KEY, String(payload.customer.id));
-    }
-    if (payload?.tailorId) {
-      localStorage.setItem(TAILOR_SESSION_STORAGE_KEY, String(payload.tailorId));
-    }
-  } catch {
-    /* ignore storage errors */
-  }
   let linked = getLinkedWizardOrderId();
 
   if (!linked) {

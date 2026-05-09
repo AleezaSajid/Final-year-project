@@ -6,10 +6,16 @@ const mongoose = require('mongoose');
 const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
+require('dotenv').config();
+const crypto = require('crypto');
 const User = require('./models/User');
 const TailorProfile = require('./models/TailorProfile');
 const Message = require('./models/Message');
 const Order = require('./models/Order');
+const Testimonial = require('./models/Testimonial');
+const { sendMailSafe } = require('./email/mailer');
+const { makeWelcomeEmail } = require('./email/templates/welcomeEmail');
+const { makeOtpEmail } = require('./email/templates/otpEmail');
 
 const app = express();
 const PORT = 5000;
@@ -55,6 +61,192 @@ app.use(
 );
 app.use(express.json());
 
+// --- Auth: stateless signed session cookie (no new deps) ---
+const SESSION_COOKIE_NAME = process.env.SESSION_COOKIE_NAME || 'sewserve_session';
+const SESSION_SECRET = process.env.SESSION_SECRET || 'dev-session-secret-change-me';
+const SESSION_TTL_MS = Math.max(5 * 60 * 1000, Number(process.env.SESSION_TTL_MS) || 1000 * 60 * 60 * 24 * 7); // 7d
+const EMAIL_OTP_TTL_MS = 10 * 60 * 1000;
+
+function generateSixDigitOtp() {
+  return String(Math.floor(100000 + Math.random() * 900000));
+}
+
+function hashEmailOtp(email, otp) {
+  const em = String(email || '')
+    .trim()
+    .toLowerCase();
+  const code = String(otp || '').trim();
+  return crypto.createHmac('sha256', SESSION_SECRET).update(`${em}:${code}`).digest('hex');
+}
+
+async function persistOtpAndSendEmail(userDoc) {
+  const otp = generateSixDigitOtp();
+  userDoc.emailOtpHash = hashEmailOtp(userDoc.email, otp);
+  userDoc.emailOtpExpiresAt = new Date(Date.now() + EMAIL_OTP_TTL_MS);
+  await userDoc.save();
+  const tpl = makeOtpEmail({
+    name: userDoc.fullName,
+    otp,
+    expiresMinutes: Math.floor(EMAIL_OTP_TTL_MS / 60000),
+  });
+  const from = process.env.MAIL_FROM || process.env.SMTP_USER || '';
+  await sendMailSafe({
+    from,
+    to: String(userDoc.email).trim().toLowerCase(),
+    subject: tpl.subject,
+    text: tpl.text,
+    html: tpl.html,
+  });
+}
+
+function base64UrlEncode(input) {
+  return Buffer.from(String(input), 'utf8')
+    .toString('base64')
+    .replace(/=/g, '')
+    .replace(/\+/g, '-')
+    .replace(/\//g, '_');
+}
+
+function base64UrlDecodeToString(input) {
+  const s = String(input || '').replace(/-/g, '+').replace(/_/g, '/');
+  const pad = s.length % 4 === 0 ? '' : '='.repeat(4 - (s.length % 4));
+  return Buffer.from(s + pad, 'base64').toString('utf8');
+}
+
+function timingSafeEqualStr(a, b) {
+  const aa = Buffer.from(String(a || ''), 'utf8');
+  const bb = Buffer.from(String(b || ''), 'utf8');
+  if (aa.length !== bb.length) return false;
+  return crypto.timingSafeEqual(aa, bb);
+}
+
+function parseCookies(req) {
+  const header = req && req.headers ? req.headers.cookie : '';
+  const out = {};
+  if (!header) return out;
+  const parts = String(header).split(';');
+  for (const part of parts) {
+    const i = part.indexOf('=');
+    if (i === -1) continue;
+    const k = part.slice(0, i).trim();
+    const v = part.slice(i + 1).trim();
+    if (!k) continue;
+    out[k] = decodeURIComponent(v);
+  }
+  return out;
+}
+
+function signSessionPayload(payloadObj) {
+  const payloadB64 = base64UrlEncode(JSON.stringify(payloadObj));
+  const sig = crypto.createHmac('sha256', SESSION_SECRET).update(payloadB64).digest('base64url');
+  return `${payloadB64}.${sig}`;
+}
+
+function verifySessionToken(token) {
+  const raw = String(token || '').trim();
+  const [payloadB64, sig] = raw.split('.');
+  if (!payloadB64 || !sig) return null;
+  const expected = crypto.createHmac('sha256', SESSION_SECRET).update(payloadB64).digest('base64url');
+  if (!timingSafeEqualStr(sig, expected)) return null;
+  try {
+    const json = base64UrlDecodeToString(payloadB64);
+    const payload = JSON.parse(json);
+    if (!payload || typeof payload !== 'object') return null;
+    const exp = Number(payload.exp);
+    if (!Number.isFinite(exp) || Date.now() > exp) return null;
+    return payload;
+  } catch {
+    return null;
+  }
+}
+
+function setSessionCookie(res, user) {
+  const now = Date.now();
+  const payload = {
+    uid: user && user.id != null ? Number(user.id) : null,
+    email: user && user.email != null ? String(user.email).trim().toLowerCase() : '',
+    role: user && user.role != null ? String(user.role) : '',
+    exp: now + SESSION_TTL_MS,
+    iat: now,
+  };
+  const token = signSessionPayload(payload);
+  const cookieParts = [
+    `${SESSION_COOKIE_NAME}=${encodeURIComponent(token)}`,
+    'Path=/',
+    'HttpOnly',
+    'SameSite=Lax',
+    `Max-Age=${Math.floor(SESSION_TTL_MS / 1000)}`,
+  ];
+  if (IS_PRODUCTION) cookieParts.push('Secure');
+  res.setHeader('Set-Cookie', cookieParts.join('; '));
+}
+
+function clearSessionCookie(res) {
+  const cookieParts = [
+    `${SESSION_COOKIE_NAME}=`,
+    'Path=/',
+    'HttpOnly',
+    'SameSite=Lax',
+    'Max-Age=0',
+  ];
+  if (IS_PRODUCTION) cookieParts.push('Secure');
+  res.setHeader('Set-Cookie', cookieParts.join('; '));
+}
+
+async function loadAuthedUser(req) {
+  const cookies = parseCookies(req);
+  const token = cookies[SESSION_COOKIE_NAME];
+  const payload = verifySessionToken(token);
+  if (!payload || !payload.uid || !payload.email) return null;
+  const user = await User.findOne({ id: Number(payload.uid), email: String(payload.email) }).lean();
+  if (!user) return null;
+  if (user.isVerified !== true) return null;
+  const role = user.role || 'customer';
+  // Role drift check (token role must match DB role if present)
+  if (payload.role && String(payload.role) !== String(role)) return null;
+  let tailorShopId = null;
+  if (role === 'tailor') {
+    const tp = await TailorProfile.findOne({ userId: user.id }).select('tailorShopId').lean();
+    if (tp && tp.tailorShopId) tailorShopId = String(tp.tailorShopId).trim();
+  }
+  return {
+    id: user.id,
+    fullName: user.fullName,
+    email: user.email,
+    role,
+    ...(tailorShopId ? { tailorShopId } : {}),
+  };
+}
+
+function requireAuth(req, res, next) {
+  void (async () => {
+    try {
+      const u = await loadAuthedUser(req);
+      if (!u) {
+        clearSessionCookie(res);
+        return res.status(401).json({ message: 'Not authenticated.' });
+      }
+      req.authUser = u;
+      return next();
+    } catch (e) {
+      console.error('[auth] requireAuth error', e);
+      clearSessionCookie(res);
+      return res.status(401).json({ message: 'Not authenticated.' });
+    }
+  })();
+}
+
+function requireRole(roles) {
+  const allowed = Array.isArray(roles) ? roles : [];
+  return (req, res, next) => {
+    const role = req.authUser && req.authUser.role ? String(req.authUser.role) : '';
+    if (!role || (allowed.length && !allowed.includes(role))) {
+      return res.status(403).json({ message: 'Forbidden.' });
+    }
+    return next();
+  };
+}
+
 const uploadsDir = path.join(__dirname, 'uploads');
 try {
   fs.mkdirSync(uploadsDir, { recursive: true });
@@ -76,8 +268,17 @@ const upload = multer({
 
 mongoose
   .connect('mongodb://127.0.0.1:27017/sewserve')
-  .then(() => {
+  .then(async () => {
     console.log('DB CONNECTED');
+    try {
+      const r = await User.updateMany(
+        { $or: [{ isVerified: { $exists: false } }, { isVerified: null }] },
+        { $set: { isVerified: true } }
+      );
+      if (r.modifiedCount) console.log('[auth] isVerified legacy migration:', r.modifiedCount);
+    } catch (e) {
+      console.error('[auth] isVerified migration error', e);
+    }
   })
   .catch((error) => {
     console.error('DB CONNECTION FAILED', error);
@@ -89,6 +290,32 @@ app.get('/', (req, res) => {
 app.get('/test', (req, res) => {
     res.send('TEST WORKING');
   });
+
+// Optional email verification (NOT enforced on login; safe to add).
+app.get('/api/verify-email', async (req, res) => {
+  try {
+    const token = req.query.token != null ? String(req.query.token).trim() : '';
+    if (!token) return res.status(400).json({ message: 'Missing token.' });
+
+    const user = await User.findOne({
+      emailVerifyToken: token,
+      emailVerifyTokenExpiresAt: { $gt: new Date() },
+    });
+    if (!user) return res.status(400).json({ message: 'Invalid or expired token.' });
+
+    user.emailVerified = true;
+    user.isVerified = true;
+    user.emailVerifyToken = '';
+    user.emailVerifyTokenExpiresAt = null;
+    user.emailOtpHash = '';
+    user.emailOtpExpiresAt = null;
+    await user.save();
+    return res.status(200).json({ message: 'Email verified successfully.' });
+  } catch (e) {
+    console.error('VERIFY EMAIL ERROR', e);
+    return res.status(500).json({ message: 'Could not verify email.' });
+  }
+});
 
 // NOTE: Do not inject a static default image here.
 // The frontend will generate unique UI Avatars when `imageUrl` is missing.
@@ -163,6 +390,9 @@ async function registerUser(req, res) {
     }
 
     const nextUserId = (await User.countDocuments()) + 1;
+    const verifyToken = crypto.randomBytes(24).toString('hex');
+    const verifyExpiresAt = new Date(Date.now() + 1000 * 60 * 60 * 24); // 24h
+
     const created = await User.create({
       id: nextUserId,
       fullName: String(fullName).trim(),
@@ -172,6 +402,12 @@ async function registerUser(req, res) {
       phone: String(body.phone || '').trim(),
       address: String(body.address || '').trim(),
       experience: String(body.experience || '').trim(),
+      emailVerified: false,
+      isVerified: false,
+      emailOtpHash: '',
+      emailOtpExpiresAt: null,
+      emailVerifyToken: verifyToken,
+      emailVerifyTokenExpiresAt: verifyExpiresAt,
     });
 
     let tailorShopId = null;
@@ -233,8 +469,25 @@ async function registerUser(req, res) {
     };
     if (tailorShopId) userOut.tailorShopId = tailorShopId;
 
+    try {
+      await persistOtpAndSendEmail(created);
+    } catch (e) {
+      console.error('[email] OTP send error', e);
+      if (role === 'tailor') {
+        await TailorProfile.deleteOne({ userId: created.id }).catch(() => {});
+      }
+      await User.deleteOne({ _id: created._id });
+      return res.status(500).json({
+        error: 'Could not send verification email. Please try again.',
+        message: 'Could not send verification email. Please try again.',
+      });
+    }
+
+    // Welcome + link verification (optional) after OTP in a follow-up email is omitted here to avoid duplicate noise.
+
     return res.status(201).json({
-      message: 'Account created successfully.',
+      message: 'Account created. Enter the verification code we emailed you.',
+      needsVerification: true,
       user: userOut,
     });
   } catch (error) {
@@ -245,6 +498,22 @@ async function registerUser(req, res) {
 
 app.post('/signup', upload.single('avatar'), registerUser);
 app.post('/api/register', upload.single('avatar'), registerUser);
+
+async function buildUserOutForSession(user) {
+  if (!user) return null;
+  let tailorShopId = null;
+  if (user.role === 'tailor') {
+    const tp = await TailorProfile.findOne({ userId: user.id }).select('tailorShopId').lean();
+    if (tp && tp.tailorShopId) tailorShopId = String(tp.tailorShopId).trim();
+  }
+  return {
+    id: user.id,
+    fullName: user.fullName,
+    email: user.email,
+    role: user.role || 'customer',
+    ...(tailorShopId ? { tailorShopId } : {}),
+  };
+}
 
 async function loginUser(req, res) {
   const { email, password } = req.body || {};
@@ -264,22 +533,22 @@ async function loginUser(req, res) {
       return res.status(401).json({ error: 'Invalid password.', message: 'Invalid password.' });
     }
 
-    let tailorShopId = null;
-    if (user.role === 'tailor') {
-      const tp = await TailorProfile.findOne({ userId: user.id }).select('tailorShopId').lean();
-      if (tp && tp.tailorShopId) tailorShopId = String(tp.tailorShopId).trim();
+    if (user.isVerified !== true) {
+      return res.status(403).json({
+        error: 'Please verify your email before logging in.',
+        message: 'Please verify your email before logging in.',
+      });
     }
+
+    const userOut = await buildUserOutForSession(user);
+
+    // Issue session cookie (backend is source of truth).
+    setSessionCookie(res, userOut);
 
     return res.status(200).json({
       message: 'Login successful!',
       token: 'dummy-token-123',
-      user: {
-        id: user.id,
-        fullName: user.fullName,
-        email: user.email,
-        role: user.role || 'customer',
-        ...(tailorShopId ? { tailorShopId } : {}),
-      },
+      user: userOut,
     });
   } catch (error) {
     console.error('LOGIN ERROR', error);
@@ -290,12 +559,316 @@ async function loginUser(req, res) {
 app.post('/login', loginUser);
 app.post('/api/login', loginUser);
 
-app.get('/api/me', (req, res) => {
-  res.json({ user: null });
+app.get('/api/auth/me', async (req, res) => {
+  try {
+    const u = await loadAuthedUser(req);
+    if (!u) {
+      clearSessionCookie(res);
+      return res.status(401).json({ message: 'Not authenticated.' });
+    }
+    // Refresh cookie expiry on active use.
+    setSessionCookie(res, u);
+    return res.status(200).json({ user: u });
+  } catch (e) {
+    console.error('GET /api/auth/me', e);
+    clearSessionCookie(res);
+    return res.status(401).json({ message: 'Not authenticated.' });
+  }
+});
+
+// Back-compat: existing frontend calls `/api/me`.
+app.get('/api/me', async (req, res) => {
+  try {
+    const u = await loadAuthedUser(req);
+    if (!u) {
+      clearSessionCookie(res);
+      return res.status(401).json({ message: 'Not authenticated.', user: null });
+    }
+    setSessionCookie(res, u);
+    return res.status(200).json({ user: u });
+  } catch (e) {
+    clearSessionCookie(res);
+    return res.status(401).json({ message: 'Not authenticated.', user: null });
+  }
 });
 
 app.post('/api/logout', (req, res) => {
+  clearSessionCookie(res);
   res.json({ ok: true });
+});
+
+app.post('/api/auth/send-otp', async (req, res) => {
+  const email = String(req.body?.email || '')
+    .trim()
+    .toLowerCase();
+  if (!email) {
+    return res.status(400).json({ message: 'Email is required.' });
+  }
+  try {
+    const user = await User.findOne({ email });
+    if (!user) {
+      return res.status(404).json({ message: 'User not found.' });
+    }
+    if (user.isVerified === true) {
+      return res.status(400).json({ message: 'Account already verified.' });
+    }
+    await persistOtpAndSendEmail(user);
+    return res.json({ ok: true, message: 'Verification code sent.' });
+  } catch (e) {
+    console.error('POST /api/auth/send-otp', e);
+    return res.status(500).json({ message: 'Could not send verification code.' });
+  }
+});
+
+app.post('/api/auth/verify-otp', async (req, res) => {
+  const email = String(req.body?.email || '')
+    .trim()
+    .toLowerCase();
+  const otpRaw = String(req.body?.otp || '').replace(/\D/g, '');
+  if (!email || otpRaw.length !== 6) {
+    return res.status(400).json({ message: 'Email and a 6-digit code are required.' });
+  }
+  try {
+    const user = await User.findOne({ email });
+    if (!user) {
+      return res.status(404).json({ message: 'User not found.' });
+    }
+    if (user.isVerified === true) {
+      const userOut = await buildUserOutForSession(user);
+      setSessionCookie(res, userOut);
+      return res.json({ ok: true, message: 'Already verified.', user: userOut });
+    }
+    if (!user.emailOtpHash || !user.emailOtpExpiresAt || user.emailOtpExpiresAt.getTime() < Date.now()) {
+      return res.status(400).json({ message: 'Code expired or missing. Request a new code.' });
+    }
+    if (user.emailOtpHash !== hashEmailOtp(email, otpRaw)) {
+      return res.status(400).json({ message: 'Invalid verification code.' });
+    }
+    user.isVerified = true;
+    user.emailVerified = true;
+    user.emailOtpHash = '';
+    user.emailOtpExpiresAt = null;
+    await user.save();
+    const userOut = await buildUserOutForSession(user);
+    setSessionCookie(res, userOut);
+    (async () => {
+      try {
+        const appName = process.env.APP_NAME || 'SewServe';
+        const webBase = process.env.WEB_BASE_URL || 'http://localhost:3000';
+        const loginUrl = `${String(webBase).replace(/\/$/, '')}/login`;
+        const tpl = makeWelcomeEmail({
+          name: user.fullName,
+          appName,
+          loginUrl,
+          verifyUrl: '',
+        });
+        const from = process.env.MAIL_FROM || process.env.SMTP_USER || '';
+        await sendMailSafe({
+          from,
+          to: user.email,
+          subject: tpl.subject,
+          text: tpl.text,
+          html: tpl.html,
+        });
+      } catch (e) {
+        console.error('[email] welcome after OTP', e);
+      }
+    })();
+    return res.json({ ok: true, message: 'Email verified successfully.', user: userOut });
+  } catch (e) {
+    console.error('POST /api/auth/verify-otp', e);
+    return res.status(500).json({ message: 'Verification failed.' });
+  }
+});
+
+/** Public testimonials (landing). */
+app.get('/api/testimonials', async (req, res) => {
+  try {
+    const rows = await Testimonial.find({}).sort({ createdAt: -1 }).limit(50).lean();
+    const testimonials = rows.map((r) => ({
+      name: r.name,
+      feedback: r.feedback,
+      avatar: r.avatar || '',
+      rating: r.rating,
+      orderId: r.orderId,
+      createdAt: r.createdAt,
+    }));
+    return res.json({ testimonials });
+  } catch (e) {
+    console.error('GET /api/testimonials', e);
+    return res.status(500).json({ testimonials: [] });
+  }
+});
+
+/** Create testimonial after verified order review (order must exist). */
+app.post('/api/testimonials', requireAuth, requireRole(['customer']), async (req, res) => {
+  const b = req.body && typeof req.body === 'object' ? req.body : {};
+  const orderIdParam = b.orderId != null ? String(b.orderId).trim() : '';
+  const feedback = typeof b.feedback === 'string' ? b.feedback.trim() : '';
+  if (!orderIdParam || !feedback) {
+    return res.status(400).json({ message: 'orderId and feedback are required.' });
+  }
+  try {
+    const order = await findOrderDocByParam(orderIdParam);
+    if (!order) {
+      return res.status(404).json({ message: 'Order not found.' });
+    }
+    const canonicalOrderId = String(order._id);
+    // Enforce that the logged-in customer owns the order.
+    if (String(order.customerId).trim() !== String(req.authUser.id)) {
+      return res.status(403).json({ message: 'Forbidden.' });
+    }
+    const name =
+      typeof b.name === 'string' && b.name.trim()
+        ? b.name.trim()
+        : order.customerName || 'Customer';
+    const avatar = typeof b.avatar === 'string' ? b.avatar.trim() : '';
+    const rating = Math.min(5, Math.max(0, Number(b.rating) || 0));
+    const created = await Testimonial.create({
+      name,
+      feedback,
+      avatar,
+      rating,
+      orderId: canonicalOrderId,
+    });
+    return res.status(201).json({
+      testimonial: {
+        name: created.name,
+        feedback: created.feedback,
+        avatar: created.avatar,
+        rating: created.rating,
+        orderId: created.orderId,
+      },
+    });
+  } catch (e) {
+    console.error('POST /api/testimonials', e);
+    return res.status(500).json({ message: 'Could not save testimonial.' });
+  }
+});
+
+app.get('/api/account/wizard-draft', requireAuth, requireRole(['customer']), async (req, res) => {
+  try {
+    const user = await User.findOne({ id: Number(req.authUser.id), email: String(req.authUser.email) }).exec();
+    if (!user) return res.status(403).json({ draft: null, message: 'Forbidden.' });
+    return res.json({
+      draft: user.wizardDraft != null ? user.wizardDraft : null,
+      updatedAt: user.wizardDraftUpdatedAt || null,
+    });
+  } catch (e) {
+    console.error('GET /api/account/wizard-draft', e);
+    return res.status(500).json({ draft: null });
+  }
+});
+
+app.put('/api/account/wizard-draft', requireAuth, requireRole(['customer']), async (req, res) => {
+  const b = req.body && typeof req.body === 'object' ? req.body : {};
+  try {
+    const user = await User.findOne({ id: Number(req.authUser.id), email: String(req.authUser.email) }).exec();
+    if (!user) return res.status(403).json({ message: 'Forbidden.' });
+    if (b.draft === undefined) {
+      return res.status(400).json({ message: 'draft field required (object or null).' });
+    }
+    if (b.draft === null) {
+      user.wizardDraft = null;
+      user.wizardDraftUpdatedAt = null;
+    } else {
+      user.wizardDraft = b.draft;
+      user.wizardDraftUpdatedAt = new Date();
+    }
+    await user.save();
+    return res.json({ ok: true });
+  } catch (e) {
+    console.error('PUT /api/account/wizard-draft', e);
+    return res.status(500).json({ message: 'Could not save draft.' });
+  }
+});
+
+app.get('/api/account/customer-meta', requireAuth, requireRole(['customer']), async (req, res) => {
+  try {
+    const user = await User.findOne({ id: Number(req.authUser.id), email: String(req.authUser.email) }).exec();
+    if (!user) return res.status(403).json({ message: 'Forbidden.' });
+    return res.json({
+      lastWizardOrderId: user.lastWizardOrderId != null ? String(user.lastWizardOrderId) : '',
+      lastKnownLocation: user.lastKnownLocation || null,
+      lastMapTailorRequest: user.lastMapTailorRequest || null,
+    });
+  } catch (e) {
+    console.error('GET /api/account/customer-meta', e);
+    return res.status(500).json({ message: 'Unable to load account data.' });
+  }
+});
+
+app.put('/api/account/customer-meta', requireAuth, requireRole(['customer']), async (req, res) => {
+  const b = req.body && typeof req.body === 'object' ? req.body : {};
+  try {
+    const user = await User.findOne({ id: Number(req.authUser.id), email: String(req.authUser.email) }).exec();
+    if (!user) return res.status(403).json({ message: 'Forbidden.' });
+    if (b.lastWizardOrderId !== undefined) {
+      user.lastWizardOrderId =
+        b.lastWizardOrderId != null ? String(b.lastWizardOrderId).trim() : '';
+    }
+    if (b.lastKnownLocation !== undefined) {
+      user.lastKnownLocation =
+        b.lastKnownLocation && typeof b.lastKnownLocation === 'object' ? b.lastKnownLocation : null;
+    }
+    if (b.lastMapTailorRequest !== undefined) {
+      user.lastMapTailorRequest =
+        b.lastMapTailorRequest && typeof b.lastMapTailorRequest === 'object'
+          ? b.lastMapTailorRequest
+          : null;
+    }
+    await user.save();
+    return res.json({ ok: true });
+  } catch (e) {
+    console.error('PUT /api/account/customer-meta', e);
+    return res.status(500).json({ message: 'Could not update account data.' });
+  }
+});
+
+app.get('/api/tailor/profile-self', requireAuth, requireRole(['tailor']), async (req, res) => {
+  try {
+    const user = await User.findOne({ id: Number(req.authUser.id), email: String(req.authUser.email) }).exec();
+    if (!user) return res.status(403).json({ message: 'Forbidden.' });
+    const tp = await TailorProfile.findOne({ userId: user.id }).lean();
+    if (!tp) return res.json({ profile: null });
+    return res.json({
+      profile: {
+        name: (tp.displayName && String(tp.displayName).trim()) || tp.shopName || '',
+        skills: tp.skillsNotes || '',
+        experience: String(tp.experienceYears ?? ''),
+      },
+    });
+  } catch (e) {
+    console.error('GET /api/tailor/profile-self', e);
+    return res.status(500).json({ message: 'Unable to load profile.' });
+  }
+});
+
+app.patch('/api/tailor/profile-self', requireAuth, requireRole(['tailor']), async (req, res) => {
+  const b = req.body && typeof req.body === 'object' ? req.body : {};
+  try {
+    const user = await User.findOne({ id: Number(req.authUser.id), email: String(req.authUser.email) }).exec();
+    if (!user) return res.status(403).json({ message: 'Forbidden.' });
+    const tp = await TailorProfile.findOne({ userId: user.id });
+    if (!tp) return res.status(404).json({ message: 'No tailor profile.' });
+    if (b.name != null && String(b.name).trim()) {
+      const nm = String(b.name).trim();
+      tp.displayName = nm;
+      tp.shopName = nm;
+    }
+    if (b.skills != null) {
+      tp.skillsNotes = String(b.skills);
+    }
+    if (b.experience != null && b.experience !== '') {
+      const n = Number(b.experience);
+      if (Number.isFinite(n) && n >= 0) tp.experienceYears = Math.floor(n);
+    }
+    await tp.save();
+    return res.json({ ok: true });
+  } catch (e) {
+    console.error('PATCH /api/tailor/profile-self', e);
+    return res.status(500).json({ message: 'Could not update profile.' });
+  }
 });
 
 /** Public listing for Browse Tailors (no auth). */
@@ -441,39 +1014,51 @@ function internalStatusToTrackingStatus(s) {
 
 const MAX_WORKFLOW_STEP_INDEX = WORKFLOW_STAGES.length - 1;
 
-function stepIndexFromOrderDoc(doc) {
-  if (!doc) return 0;
-  const raw = doc.currentStepIndex;
-  if (raw != null && Number.isFinite(Number(raw))) {
-    return Math.max(0, Math.min(MAX_WORKFLOW_STEP_INDEX, Number(raw)));
-  }
-  const v = normalizeOrderStatus(doc.status);
-  const map = {
-    pending: 0,
-    order_placed: 0,
-    assigned: 0,
-    measurements_verified: 1,
-    processing: 2,
-    in_progress: 2,
-    stitching: 2,
-    quality_check: 3,
-    ready_for_delivery: 4,
-    last_review: 5,
-    completed: 6,
-    needs_alteration: 5,
-  };
-  return Math.max(0, Math.min(MAX_WORKFLOW_STEP_INDEX, map[v] ?? 0));
-}
+const WORKFLOW_STEP_STATUS_MAP = {
+  pending: 0,
+  order_placed: 0,
+  assigned: 0,
+  measurements_verified: 1,
+  processing: 2,
+  in_progress: 2,
+  stitching: 2,
+  quality_check: 3,
+  ready_for_delivery: 4,
+  last_review: 5,
+  completed: 6,
+  needs_alteration: 5,
+};
 
-function normalizeOrderWorkflowFields(raw = {}) {
+function computeWorkflow(raw = {}) {
   const status = normalizeOrderStatus(raw.status != null ? raw.status : raw.workflowStatus);
-  const currentStepIndex = stepIndexFromOrderDoc({
+  const merged = {
     ...raw,
     status,
     currentStepIndex: raw.currentStepIndex ?? raw.currentStep,
-  });
+  };
+  const rawIdx = merged.currentStepIndex;
+  let currentStepIndex;
+  if (rawIdx != null && Number.isFinite(Number(rawIdx))) {
+    currentStepIndex = Math.max(0, Math.min(MAX_WORKFLOW_STEP_INDEX, Number(rawIdx)));
+  } else {
+    const v = normalizeOrderStatus(merged.status);
+    currentStepIndex = Math.max(
+      0,
+      Math.min(MAX_WORKFLOW_STEP_INDEX, WORKFLOW_STEP_STATUS_MAP[v] ?? 0)
+    );
+  }
   const workflowStatus = status;
   return { status, workflowStatus, currentStepIndex, updatedAt: new Date().toISOString() };
+}
+
+function emitToRoomUnion(ioInstance, roomNames, event, data) {
+  const rooms = [...new Set((roomNames || []).map((r) => String(r).trim()).filter(Boolean))];
+  if (rooms.length === 0) return;
+  let op = ioInstance.to(rooms[0]);
+  for (let i = 1; i < rooms.length; i++) {
+    op = op.to(rooms[i]);
+  }
+  op.emit(event, data);
 }
 
 async function findOrderDocByParam(orderIdParam) {
@@ -495,12 +1080,11 @@ function emitOrderLiveToOrderRooms(ioInstance, canonicalOrderId, rawOrderId, pay
   const rooms = new Set([String(canonicalOrderId).trim()]);
   const raw = rawOrderId != null ? String(rawOrderId).trim() : '';
   if (raw && raw !== String(canonicalOrderId).trim()) rooms.add(raw);
-  for (const r of rooms) {
-    if (!r) continue;
-    ioInstance.to(r).emit('order:liveUpdate', payload);
-    if (legacyStatusPayload) {
-      ioInstance.to(r).emit('order:statusUpdated', legacyStatusPayload);
-    }
+  const roomList = [...rooms].filter(Boolean);
+  if (roomList.length === 0) return;
+  emitToRoomUnion(ioInstance, roomList, 'order:liveUpdate', payload);
+  if (legacyStatusPayload) {
+    emitToRoomUnion(ioInstance, roomList, 'order:statusUpdated', legacyStatusPayload);
   }
 }
 
@@ -513,7 +1097,7 @@ function serializeOrderForSocket(doc) {
 
 function buildWorkflowSocketPayload(orderDoc, fallbackOrderId = '') {
   const fullOrder = serializeOrderForSocket(orderDoc);
-  const normalized = normalizeOrderWorkflowFields(fullOrder || { id: fallbackOrderId });
+  const normalized = computeWorkflow(fullOrder || { id: fallbackOrderId });
   const orderId = String(fullOrder?.id || fullOrder?._id || fallbackOrderId || '').trim();
   return {
     orderId,
@@ -542,6 +1126,39 @@ function buildWorkflowSocketPayload(orderDoc, fallbackOrderId = '') {
   };
 }
 
+async function applySocketOrderStatusUpdate(socket, data, emitLiveUpdate) {
+  const rawOrderId = data.orderId != null ? String(data.orderId).trim() : '';
+  if (!rawOrderId) return;
+  socket.join(rawOrderId);
+  let canonicalId = rawOrderId;
+  try {
+    const doc = await findOrderDocByParam(rawOrderId);
+    if (doc) canonicalId = String(doc._id);
+  } catch (err) {
+    console.error(emitLiveUpdate ? '[SERVER] order:statusUpdate load' : '[RELAY] order:statusUpdated', err);
+  }
+  if (canonicalId !== rawOrderId) {
+    socket.join(canonicalId);
+  }
+  let updatedDoc = await findOrderDocByParam(canonicalId);
+  if (updatedDoc && data.status != null && String(data.status).trim() !== '') {
+    const unified = computeWorkflow({ ...updatedDoc.toObject(), status: String(data.status) });
+    updatedDoc = await Order.findByIdAndUpdate(
+      String(updatedDoc._id),
+      { $set: unified },
+      { new: true, strict: false }
+    );
+  }
+  const payload = buildWorkflowSocketPayload(updatedDoc, canonicalId);
+  if (emitLiveUpdate) {
+    console.log('[Socket Sync] order:liveUpdate', payload.orderId, payload.status, payload.currentStepIndex);
+    emitOrderLiveToOrderRooms(io, canonicalId, rawOrderId, payload, payload);
+  } else {
+    console.log('[Socket Sync] order:statusUpdated', payload.orderId, payload.status, payload.currentStepIndex);
+    emitToRoomUnion(io, [canonicalId, rawOrderId], 'order:statusUpdated', payload);
+  }
+}
+
 function emitMeasurementOrderToTailor(orderDoc) {
   try {
     if (!io || !orderDoc) return;
@@ -566,24 +1183,24 @@ function emitMeasurementReviewedToTailorRoom(io, out) {
     out.fullOrder && out.fullOrder.tailorId != null ? String(out.fullOrder.tailorId).trim() : '';
   const tid = fromPayload || fromOrder;
   const oid = out.orderId != null ? String(out.orderId).trim() : '';
-  let targeted = false;
+  const rooms = [];
   if (tid) {
     console.log('[Socket Sync] measurement:reviewed → tailor room', tid, oid || out.orderId);
-    io.to(tid).emit('measurement:reviewed', out);
-    targeted = true;
+    rooms.push(tid);
   }
   if (oid) {
     console.log('[Socket Sync] measurement:reviewed → order room', oid);
-    io.to(oid).emit('measurement:reviewed', out);
-    targeted = true;
+    if (!rooms.includes(oid)) rooms.push(oid);
   }
-  if (!targeted) {
-    console.warn('[Socket Sync] measurement:reviewed fallback broadcast (no tailorId/orderId)', out.orderId);
-    io.emit('measurement:reviewed', out);
+  if (rooms.length) {
+    emitToRoomUnion(io, rooms, 'measurement:reviewed', out);
+    return;
   }
+  console.warn('[Socket Sync] measurement:reviewed fallback broadcast (no tailorId/orderId)', out.orderId);
+  io.emit('measurement:reviewed', out);
 }
 
-app.post('/orders', async (req, res) => {
+app.post('/orders', requireAuth, async (req, res) => {
   const b = req.body || {};
   const { customerId, tailorId, customerName, garmentType, measurements, price, status, dueDate } = b;
   if (!customerId || !tailorId) {
@@ -591,7 +1208,18 @@ app.post('/orders', async (req, res) => {
   }
 
   try {
-    const workflow = normalizeOrderWorkflowFields({
+    // Server-side safety: customers can only create orders for themselves.
+    if (req.authUser.role === 'customer' && String(customerId).trim() !== String(req.authUser.id)) {
+      return res.status(403).json({ message: 'Forbidden.' });
+    }
+    // Tailors can only create orders for their own shop id.
+    if (req.authUser.role === 'tailor') {
+      const shop = req.authUser.tailorShopId != null ? String(req.authUser.tailorShopId).trim() : '';
+      if (!shop || String(tailorId).trim() !== shop) {
+        return res.status(403).json({ message: 'Forbidden.' });
+      }
+    }
+    const workflow = computeWorkflow({
       status: status != null && String(status).trim() !== '' ? status : 'pending',
     });
     const savedOrder = await Order.create({
@@ -630,11 +1258,20 @@ app.post('/orders', async (req, res) => {
 });
 
 /** Unified list: optional ?customerId= & ?tailorId= (same collection as customer/tailor routes). */
-app.get('/orders', async (req, res) => {
+app.get('/orders', requireAuth, async (req, res) => {
   try {
     const q = {};
     const customerId = req.query.customerId != null ? String(req.query.customerId).trim() : '';
     const tailorId = req.query.tailorId != null ? String(req.query.tailorId).trim() : '';
+    if (customerId && req.authUser.role === 'customer' && customerId !== String(req.authUser.id)) {
+      return res.status(403).json({ message: 'Forbidden.' });
+    }
+    if (tailorId && req.authUser.role === 'tailor') {
+      const shop = req.authUser.tailorShopId != null ? String(req.authUser.tailorShopId).trim() : '';
+      if (!shop || tailorId !== shop) {
+        return res.status(403).json({ message: 'Forbidden.' });
+      }
+    }
     if (customerId) q.customerId = customerId;
     if (tailorId) q.tailorId = tailorId;
     const orders = await Order.find(q).sort({ createdAt: -1 });
@@ -645,9 +1282,12 @@ app.get('/orders', async (req, res) => {
   }
 });
 
-app.get('/orders/customer/:customerId', async (req, res) => {
+app.get('/orders/customer/:customerId', requireAuth, requireRole(['customer']), async (req, res) => {
   const { customerId } = req.params;
   try {
+    if (String(customerId).trim() !== String(req.authUser.id)) {
+      return res.status(403).json({ message: 'Forbidden.' });
+    }
     console.log('FETCH CUSTOMER ORDERS', customerId);
     const orders = await Order.find({ customerId: String(customerId) }).sort({ createdAt: -1 });
     return res.status(200).json(orders);
@@ -658,9 +1298,12 @@ app.get('/orders/customer/:customerId', async (req, res) => {
 });
 
 /** Customer Track Order: order the tailor marked active (isActive), if any */
-app.get('/orders/customer/:customerId/active', async (req, res) => {
+app.get('/orders/customer/:customerId/active', requireAuth, requireRole(['customer']), async (req, res) => {
   const { customerId } = req.params;
   try {
+    if (String(customerId).trim() !== String(req.authUser.id)) {
+      return res.status(403).json({ message: 'Forbidden.' });
+    }
     const order = await Order.findOne({ customerId: String(customerId), isActive: true })
       .sort({ updatedAt: -1 })
       .exec();
@@ -674,9 +1317,13 @@ app.get('/orders/customer/:customerId/active', async (req, res) => {
   }
 });
 
-app.get('/orders/tailor/:tailorId', async (req, res) => {
+app.get('/orders/tailor/:tailorId', requireAuth, requireRole(['tailor']), async (req, res) => {
   const { tailorId } = req.params;
   try {
+    const shop = req.authUser.tailorShopId != null ? String(req.authUser.tailorShopId).trim() : '';
+    if (!shop || String(tailorId).trim() !== shop) {
+      return res.status(403).json({ message: 'Forbidden.' });
+    }
     console.log('FETCH TAILOR ORDERS', tailorId);
     const orders = await Order.find({ tailorId: String(tailorId) }).sort({ createdAt: -1 });
     return res.status(200).json(orders);
@@ -686,7 +1333,7 @@ app.get('/orders/tailor/:tailorId', async (req, res) => {
   }
 });
 
-app.get('/orders/:orderId', async (req, res) => {
+app.get('/orders/:orderId', requireAuth, async (req, res) => {
   const { orderId } = req.params;
   const raw = orderId != null ? String(orderId).trim() : '';
   try {
@@ -700,6 +1347,16 @@ app.get('/orders/:orderId', async (req, res) => {
     if (!order) {
       return res.status(404).json({ message: 'Order not found.' });
     }
+    // Only the owning customer or assigned tailor can read.
+    const cid = order.customerId != null ? String(order.customerId).trim() : '';
+    const tid = order.tailorId != null ? String(order.tailorId).trim() : '';
+    if (req.authUser.role === 'customer' && cid !== String(req.authUser.id)) {
+      return res.status(403).json({ message: 'Forbidden.' });
+    }
+    if (req.authUser.role === 'tailor') {
+      const shop = req.authUser.tailorShopId != null ? String(req.authUser.tailorShopId).trim() : '';
+      if (!shop || tid !== shop) return res.status(403).json({ message: 'Forbidden.' });
+    }
     return res.status(200).json(order);
   } catch (error) {
     console.error('FETCH ORDER BY ID ERROR', error);
@@ -708,7 +1365,7 @@ app.get('/orders/:orderId', async (req, res) => {
 });
 
 /** Partial wizard / measurement updates — does not replace PUT workflow fields contract */
-app.patch('/orders/:orderId', async (req, res) => {
+app.patch('/orders/:orderId', requireAuth, async (req, res) => {
   const paramId = req.params.orderId != null ? String(req.params.orderId).trim() : '';
   const b = req.body && typeof req.body === 'object' ? req.body : {};
   const updatePayload = {};
@@ -763,6 +1420,16 @@ app.patch('/orders/:orderId', async (req, res) => {
     if (!existing) {
       return res.status(404).json({ message: 'Order not found.' });
     }
+    // Only owning customer or assigned tailor can patch.
+    const cid = existing.customerId != null ? String(existing.customerId).trim() : '';
+    const tid = existing.tailorId != null ? String(existing.tailorId).trim() : '';
+    if (req.authUser.role === 'customer' && cid !== String(req.authUser.id)) {
+      return res.status(403).json({ message: 'Forbidden.' });
+    }
+    if (req.authUser.role === 'tailor') {
+      const shop = req.authUser.tailorShopId != null ? String(req.authUser.tailorShopId).trim() : '';
+      if (!shop || tid !== shop) return res.status(403).json({ message: 'Forbidden.' });
+    }
     const resolvedId = String(existing._id);
 
     if (updatePayload.isActive === true) {
@@ -772,7 +1439,7 @@ app.patch('/orders/:orderId', async (req, res) => {
       );
     }
 
-    const unified = normalizeOrderWorkflowFields({ ...existing.toObject(), ...updatePayload });
+    const unified = computeWorkflow({ ...existing.toObject(), ...updatePayload });
     updatePayload.status = unified.status;
     updatePayload.workflowStatus = unified.workflowStatus;
     updatePayload.currentStepIndex = unified.currentStepIndex;
@@ -788,10 +1455,14 @@ app.patch('/orders/:orderId', async (req, res) => {
     emitMeasurementOrderToTailor(updatedOrder);
     try {
       const payload = buildWorkflowSocketPayload(updatedOrder);
-      // Always emit the unified status update to the order room (map listens here).
-      io.to(payload.orderId).emit('order:statusUpdated', payload);
-      // Also emit to the map matching room (older flow).
-      io.to(`map_order:${payload.orderId}`).emit('order:statusUpdated', payload);
+      const patchStatusRooms = [];
+      const oid = payload.orderId != null ? String(payload.orderId).trim() : '';
+      if (oid) {
+        patchStatusRooms.push(oid, `map_order:${oid}`);
+      }
+      if (patchStatusRooms.length) {
+        emitToRoomUnion(io, patchStatusRooms, 'order:statusUpdated', payload);
+      }
 
       const tId = payload.tailorId != null && String(payload.tailorId).trim() !== '' ? String(payload.tailorId).trim() : '';
       const s = payload.status != null ? String(payload.status).trim() : '';
@@ -800,31 +1471,24 @@ app.patch('/orders/:orderId', async (req, res) => {
       const isAccept = Boolean(tId) && !isReject;
 
       if (isAccept) {
-        io.to(payload.orderId).emit('orderAccepted', {
+        const oidForChat = payload.orderId != null ? String(payload.orderId).trim() : '';
+        const ack = {
           orderId: payload.orderId,
           clientOrderId: payload.clientOrderId || '',
           tailorId: tId,
           status: payload.status,
-        });
-        io.to(`map_order:${payload.orderId}`).emit('orderAccepted', {
-          orderId: payload.orderId,
-          clientOrderId: payload.clientOrderId || '',
-          tailorId: tId,
-          status: payload.status,
-        });
+          chatEnabled: isOrderDocChatEnabled(updatedOrder),
+          conversationId: oidForChat ? `order_${oidForChat}` : '',
+        };
+        emitToRoomUnion(io, patchStatusRooms, 'orderAccepted', ack);
       } else if (isReject) {
-        io.to(payload.orderId).emit('orderRejected', {
+        const rej = {
           orderId: payload.orderId,
           clientOrderId: payload.clientOrderId || '',
           tailorId: tId,
           status: payload.status,
-        });
-        io.to(`map_order:${payload.orderId}`).emit('orderRejected', {
-          orderId: payload.orderId,
-          clientOrderId: payload.clientOrderId || '',
-          tailorId: tId,
-          status: payload.status,
-        });
+        };
+        emitToRoomUnion(io, patchStatusRooms, 'orderRejected', rej);
       }
     } catch (socketErr) {
       console.error('[Socket Sync] PATCH /orders emit error', socketErr);
@@ -843,7 +1507,7 @@ app.patch('/orders/:orderId', async (req, res) => {
   }
 });
 
-app.put('/orders/:orderId', async (req, res) => {
+app.put('/orders/:orderId', requireAuth, async (req, res) => {
   const { orderId } = req.params;
   const { status, review, customerReview } = req.body || {};
   if (!status && !review && !customerReview) {
@@ -881,7 +1545,17 @@ app.put('/orders/:orderId', async (req, res) => {
     if (!existingOrder) {
       return res.status(404).json({ message: 'Order not found.' });
     }
-    const unified = normalizeOrderWorkflowFields({ ...existingOrder.toObject(), ...updatePayload });
+    // Only owning customer or assigned tailor can update.
+    const cid = existingOrder.customerId != null ? String(existingOrder.customerId).trim() : '';
+    const tid = existingOrder.tailorId != null ? String(existingOrder.tailorId).trim() : '';
+    if (req.authUser.role === 'customer' && cid !== String(req.authUser.id)) {
+      return res.status(403).json({ message: 'Forbidden.' });
+    }
+    if (req.authUser.role === 'tailor') {
+      const shop = req.authUser.tailorShopId != null ? String(req.authUser.tailorShopId).trim() : '';
+      if (!shop || tid !== shop) return res.status(403).json({ message: 'Forbidden.' });
+    }
+    const unified = computeWorkflow({ ...existingOrder.toObject(), ...updatePayload });
     updatePayload.status = unified.status;
     updatePayload.workflowStatus = unified.workflowStatus;
     updatePayload.currentStepIndex = unified.currentStepIndex;
@@ -914,6 +1588,63 @@ app.put('/orders/:orderId', async (req, res) => {
 
 /** Map matching: lightweight payloads; client merges full tailor rows by id. */
 const MAP_INTEREST_STAGGER_MS = 650;
+
+function orderIdFromOrderChatConversationId(conversationId) {
+  const raw = String(conversationId || '').trim();
+  if (!raw.startsWith('order_')) return '';
+  return raw.slice('order_'.length).trim();
+}
+
+function isOrderDocChatEnabled(doc) {
+  if (!doc) return false;
+  const tid = doc.tailorId != null ? String(doc.tailorId).trim() : '';
+  if (!tid) return false;
+  const v = normalizeOrderStatus(doc.status);
+  if (v === 'rejected' || v === 'declined' || v === 'cancelled' || v === 'canceled') return false;
+  if (v === 'order_placed') return false;
+  return true;
+}
+
+async function verifySocketOrderChatAccess(socket, conversationIdRaw) {
+  if (!socket.authUser) return null;
+  const orderKey = orderIdFromOrderChatConversationId(conversationIdRaw);
+  if (!orderKey) return null;
+  const doc = await findOrderDocByParam(orderKey);
+  if (!doc || !isOrderDocChatEnabled(doc)) return null;
+  const u = socket.authUser;
+  const cid = String(doc.customerId || '').trim();
+  const tid = String(doc.tailorId || '').trim();
+  if (u.role === 'customer') {
+    if (cid !== String(u.id)) return null;
+  } else if (u.role === 'tailor') {
+    const shop = u.tailorShopId != null ? String(u.tailorShopId).trim() : '';
+    if (!shop || tid !== shop) return null;
+  } else {
+    return null;
+  }
+  return doc;
+}
+
+function participantIdsMatchOrder(doc, senderId, receiverId) {
+  const s = String(senderId || '').trim();
+  const r = String(receiverId || '').trim();
+  const cid = String(doc.customerId || '').trim();
+  const tid = String(doc.tailorId || '').trim();
+  if (!s || !r || !cid || !tid) return false;
+  return (s === cid && r === tid) || (s === tid && r === cid);
+}
+
+io.use(async (socket, next) => {
+  try {
+    const cookieHeader = socket.handshake.headers.cookie || '';
+    const fakeReq = { headers: { cookie: cookieHeader } };
+    socket.authUser = await loadAuthedUser(fakeReq);
+  } catch (e) {
+    console.error('[socket] auth middleware', e);
+    socket.authUser = null;
+  }
+  next();
+});
 
 io.on('connection', (socket) => {
   socket.on('tailor:selected', (data = {}) => {
@@ -1009,9 +1740,12 @@ io.on('connection', (socket) => {
     socket.join(room);
   });
 
-  socket.on('join_conversation', ({ conversationId } = {}) => {
-    const room = conversationId != null ? String(conversationId).trim() : '';
-    if (!room) return;
+  socket.on('join_conversation', async ({ conversationId } = {}) => {
+    const raw = conversationId != null ? String(conversationId).trim() : '';
+    if (!raw) return;
+    const doc = await verifySocketOrderChatAccess(socket, raw);
+    if (!doc) return;
+    const room = raw.startsWith('conversation:') ? raw : `conversation:${raw}`;
     console.log('JOIN CONVERSATION', room);
     socket.join(room);
   });
@@ -1030,34 +1764,7 @@ io.on('connection', (socket) => {
   });
 
   socket.on('order:statusUpdated', async (data = {}) => {
-    const rawOrderId = data.orderId != null ? String(data.orderId).trim() : '';
-    if (!rawOrderId) return;
-    socket.join(rawOrderId);
-    let canonicalId = rawOrderId;
-    try {
-      const doc = await findOrderDocByParam(rawOrderId);
-      if (doc) canonicalId = String(doc._id);
-    } catch (err) {
-      console.error('[RELAY] order:statusUpdated', err);
-    }
-    if (canonicalId !== rawOrderId) {
-      socket.join(canonicalId);
-    }
-    let updatedDoc = await findOrderDocByParam(canonicalId);
-    if (updatedDoc && data.status != null && String(data.status).trim() !== '') {
-      const unified = normalizeOrderWorkflowFields({ ...updatedDoc.toObject(), status: String(data.status) });
-      updatedDoc = await Order.findByIdAndUpdate(
-        String(updatedDoc._id),
-        { $set: unified },
-        { new: true, strict: false }
-      );
-    }
-    const payload = buildWorkflowSocketPayload(updatedDoc, canonicalId);
-    console.log('[Socket Sync] order:statusUpdated', payload.orderId, payload.status, payload.currentStepIndex);
-    const rooms = new Set([canonicalId, rawOrderId]);
-    for (const r of rooms) {
-      if (r) io.to(r).emit('order:statusUpdated', payload);
-    }
+    await applySocketOrderStatusUpdate(socket, data, false);
   });
 
   socket.on('order:active', (data = {}) => {
@@ -1069,35 +1776,7 @@ io.on('connection', (socket) => {
 
   socket.on('order:statusUpdate', async (data = {}) => {
     console.log('[SERVER] status update:', data);
-    const rawOrderId = data.orderId != null ? String(data.orderId).trim() : '';
-    if (!rawOrderId) return;
-
-    socket.join(rawOrderId);
-
-    let doc = null;
-    try {
-      doc = await findOrderDocByParam(rawOrderId);
-    } catch (e) {
-      console.error('[SERVER] order:statusUpdate load', e);
-    }
-
-    const canonicalId = doc ? String(doc._id) : rawOrderId;
-    if (canonicalId !== rawOrderId) {
-      socket.join(canonicalId);
-    }
-
-    let updatedDoc = doc;
-    if (updatedDoc && data.status != null && String(data.status).trim() !== '') {
-      const unified = normalizeOrderWorkflowFields({ ...updatedDoc.toObject(), status: String(data.status) });
-      updatedDoc = await Order.findByIdAndUpdate(
-        String(updatedDoc._id),
-        { $set: unified },
-        { new: true, strict: false }
-      );
-    }
-    const payload = buildWorkflowSocketPayload(updatedDoc, canonicalId);
-    console.log('[Socket Sync] order:liveUpdate', payload.orderId, payload.status, payload.currentStepIndex);
-    emitOrderLiveToOrderRooms(io, canonicalId, rawOrderId, payload, payload);
+    await applySocketOrderStatusUpdate(socket, data, true);
   });
 
   socket.on('measurement:review', (payload = {}) => {
@@ -1137,6 +1816,11 @@ io.on('connection', (socket) => {
   socket.on('request_history', async ({ conversationId } = {}) => {
     const cid = conversationId != null ? String(conversationId).trim() : '';
     if (!cid) return;
+    const doc = await verifySocketOrderChatAccess(socket, cid);
+    if (!doc) {
+      socket.emit('chat_history', { messages: [] });
+      return;
+    }
     try {
       console.log('FETCHING CHAT HISTORY FROM DB', cid);
       const history = await Message.find({ conversationId: cid }).sort({ timestamp: 1 }).lean();
@@ -1164,6 +1848,15 @@ io.on('connection', (socket) => {
     }
 
     try {
+      const doc = await verifySocketOrderChatAccess(socket, conversationId);
+      if (!doc) {
+        console.warn('SEND_MESSAGE rejected (unauthorized or chat not enabled)');
+        return;
+      }
+      if (!participantIdsMatchOrder(doc, senderId, receiverId)) {
+        console.warn('SEND_MESSAGE rejected (participants mismatch)');
+        return;
+      }
       const ts = timestamp ? new Date(timestamp) : new Date();
       if (Number.isNaN(ts.getTime())) {
         return;
@@ -1195,11 +1888,14 @@ io.on('connection', (socket) => {
         receiverId: message.receiverId,
         conversationId: message.conversationId,
       });
-      console.log('EMITTING TO CONVERSATION ROOM', conversationId);
-      io.to(conversationId).emit('message_received', message);
-      console.log('EMITTING TO USER ROOM', receiverId);
-      io.to(receiverId).emit('message_received', message);
-      io.to(receiverId).emit('new_notification', {
+      const convRoom =
+        String(conversationId).trim().startsWith('conversation:')
+          ? String(conversationId).trim()
+          : `conversation:${String(conversationId).trim()}`;
+      console.log('EMITTING TO CONVERSATION ROOM', convRoom);
+      io.to(convRoom).emit('message_received', message);
+      console.log('EMITTING new_notification TO CONVERSATION ROOM', convRoom);
+      io.to(convRoom).emit('new_notification', {
         conversationId,
         senderId,
         content: message.content,
