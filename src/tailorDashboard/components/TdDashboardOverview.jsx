@@ -385,6 +385,10 @@ export default function TdDashboardOverview({
             className={glassCard}
           >
             <h2 className="text-apple-h3 font-semibold text-ink">Recent Messages</h2>
+            <p className="mt-2 text-sm leading-relaxed text-slate-600">
+              Use the <span className="font-semibold text-slate-800">Messages</span> workspace at the top of your
+              dashboard to search, filter, and reply in a full chat layout.
+            </p>
             <div className="mt-4 space-y-4">
               {notifications.slice(0, 4).length > 0 ? (
                 notifications.slice(0, 4).map((note, index) => {
@@ -408,37 +412,92 @@ export default function TdDashboardOverview({
                   );
                 })
               ) : (
-                <p className="text-sm text-slate-500">No messages yet.</p>
+                <p className="text-sm text-slate-500">No notifications yet.</p>
               )}
             </div>
           </motion.div>
         </div>
 
         <div className="flex h-full min-h-0 w-full min-w-0 flex-col gap-5 lg:col-span-4">
-          {activeOrder && isOrderEligibleForChat(activeOrder) ? (
-            <button
-              type="button"
-              onClick={() => openChatForOrder?.(activeOrder)}
-              className={`group flex h-[min(14rem,38vh)] max-h-[min(14rem,38vh)] min-h-0 w-full min-w-0 flex-none flex-col overflow-hidden p-5 text-left outline-none transition duration-300 ease-out hover:scale-[1.02] focus-visible:ring-2 focus-visible:ring-emerald-600/45 focus-visible:ring-offset-2 sm:p-6 ${TD_CHAT_CARD_GLASS}`}
-            >
-              <div className="min-h-0 flex-1 overflow-y-auto">
-                <p className="text-sm leading-relaxed text-slate-700">
-                  You can now chat with the customer regarding this order.
-                </p>
-              </div>
-              <span className="mt-auto inline-flex w-full shrink-0 items-center justify-center gap-2 rounded-xl border border-emerald-800/25 bg-gradient-to-b from-[#3d6b4a] to-[#2f5a42] px-4 py-3 text-sm font-semibold text-white shadow-md shadow-emerald-900/20 transition duration-300 group-hover:brightness-105">
-                Open Chat
-              </span>
-            </button>
-          ) : null}
+          {(() => {
+            const canChat = Boolean(activeOrder && isOrderEligibleForChat(activeOrder));
+            return (
+              <button
+                type="button"
+                onClick={() => {
+                  if (!canChat) return;
+                  openChatForOrder?.(activeOrder);
+                }}
+                disabled={!canChat}
+                className={`group flex h-[min(14rem,38vh)] max-h-[min(14rem,38vh)] min-h-0 w-full min-w-0 flex-none flex-col overflow-hidden p-5 text-left outline-none transition duration-300 ease-out focus-visible:ring-2 focus-visible:ring-emerald-600/45 focus-visible:ring-offset-2 sm:p-6 ${TD_CHAT_CARD_GLASS} ${
+                  canChat ? "hover:scale-[1.02]" : "cursor-not-allowed opacity-70"
+                }`}
+              >
+                <div className="flex items-start justify-between gap-3">
+                  <div className="flex items-center gap-3">
+                    <span
+                      className={`flex h-10 w-10 items-center justify-center rounded-2xl border shadow-sm ${
+                        canChat
+                          ? "border-emerald-200/70 bg-emerald-50 text-emerald-800"
+                          : "border-slate-200/80 bg-slate-50 text-slate-500"
+                      }`}
+                      aria-hidden
+                    >
+                      <MessageCircle className="h-5 w-5" />
+                    </span>
+                    <div className="min-w-0">
+                      <p className="text-base font-semibold tracking-tight text-slate-900">Order Chat</p>
+                      <p className="mt-0.5 text-xs font-medium text-slate-500">
+                        {canChat ? "Private room is active" : "Locked until acceptance"}
+                      </p>
+                    </div>
+                  </div>
+                  <span
+                    className={`shrink-0 rounded-full px-2.5 py-1 text-[11px] font-semibold ${
+                      canChat ? "bg-emerald-100 text-emerald-800" : "bg-slate-100 text-slate-600"
+                    }`}
+                  >
+                    {canChat ? "Enabled" : "Locked"}
+                  </span>
+                </div>
+
+                <div className="mt-4 min-h-0 flex-1 overflow-y-auto">
+                  <p className="text-sm leading-relaxed text-slate-700">
+                    {canChat
+                      ? "You can now chat with the customer regarding this order."
+                      : "Chat will be available once the order is accepted and assigned."}
+                  </p>
+                  {canChat ? (
+                    <p className="mt-2 text-xs text-slate-500">
+                      Messages stay private to this order and sync across your devices.
+                    </p>
+                  ) : (
+                    <p className="mt-2 text-xs text-slate-500">
+                      Accept an order from your current tasks to unlock messaging.
+                    </p>
+                  )}
+                </div>
+                <span
+                  className={`mt-auto inline-flex w-full shrink-0 items-center justify-center gap-2 rounded-xl border px-4 py-3 text-sm font-semibold shadow-md transition duration-300 ${
+                    canChat
+                      ? "border-emerald-800/25 bg-gradient-to-b from-[#3d6b4a] to-[#2f5a42] text-white shadow-emerald-900/20 group-hover:brightness-105"
+                      : "border-slate-300/70 bg-white/70 text-slate-600 shadow-slate-900/10"
+                  }`}
+                >
+                  Open Chat
+                </span>
+              </button>
+            );
+          })()}
 
           <div className="flex min-h-0 flex-1 flex-col space-y-6">
           <motion.div
+            id="tailor-dashboard-orders"
             initial={{ opacity: 0, y: 14 }}
             whileInView={{ opacity: 1, y: 0 }}
             viewport={{ once: true, margin: "-40px" }}
             transition={{ duration: 0.45, ease: [0.25, 0.1, 0.25, 1] }}
-            className={glassCard}
+            className={`${glassCard} scroll-mt-24`}
           >
             <h2 className="text-apple-h3 font-semibold text-ink">Order Overview</h2>
             <div className="mt-6 flex flex-col items-center gap-6 sm:flex-row sm:items-center sm:justify-between">

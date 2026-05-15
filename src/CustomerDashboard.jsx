@@ -10,6 +10,7 @@ import {
   Mail,
   AlertTriangle,
   ListOrdered,
+  MessageCircle,
   CircleHelp,
   X,
 } from "lucide-react";
@@ -26,6 +27,7 @@ import DashboardNavbar from "./components/DashboardNavbar.jsx";
 import { LandingStylePageBackground } from "./components/LandingStylePageBackground.jsx";
 import { useAuth } from "./context/AuthContext.jsx";
 import { useCustomerChat } from "./context/CustomerChatContext.jsx";
+import CustomerWhatsAppWorkspace from "./components/chat/CustomerWhatsAppWorkspace.jsx";
 import { resolveCustomerIdForChat, TAILOR_SESSION_STORAGE_KEY } from "./utils/chatIdentity.js";
 import {
   buildDashboardProfileRows,
@@ -767,11 +769,11 @@ function HelpSupportCard({ orders, onTrackOrder }) {
   );
 }
 
-function CustomerDashboardChatCard({ activeOrder }) {
-  const { openCustomerChat, unreadChatCount, lastChatPreview } = useCustomerChat();
+function CustomerDashboardChatCard({ activeOrder, onOpenMessages }) {
+  const { unreadChatCount, lastChatPreview } = useCustomerChat();
 
-  const eligible = activeOrder && isOrderEligibleForChat(activeOrder);
-  if (!eligible) return null;
+  const hasOrder = Boolean(activeOrder);
+  const canChat = Boolean(activeOrder && isOrderEligibleForChat(activeOrder, { allowLegacyPlaceholderTailor: true }));
 
   const unreadLabel = unreadChatCount > 99 ? "99+" : String(unreadChatCount);
 
@@ -782,18 +784,33 @@ function CustomerDashboardChatCard({ activeOrder }) {
   return (
     <button
       type="button"
-      onClick={() => openCustomerChat()}
-      className={`group flex min-h-0 w-full min-w-0 flex-1 flex-col p-5 text-left outline-none transition duration-300 ease-out hover:scale-[1.02] focus-visible:ring-2 focus-visible:ring-emerald-600/45 focus-visible:ring-offset-2 sm:p-6 ${GLASS_CARD}`}
+      onClick={() => {
+        if (!canChat) return;
+        onOpenMessages?.();
+      }}
+      disabled={!canChat}
+      className={`group flex min-h-0 w-full min-w-0 flex-1 flex-col p-5 text-left outline-none transition duration-300 ease-out focus-visible:ring-2 focus-visible:ring-emerald-600/45 focus-visible:ring-offset-2 sm:p-6 ${GLASS_CARD} ${
+        canChat ? "hover:scale-[1.02]" : "cursor-not-allowed opacity-70"
+      }`}
     >
-      <div className="flex shrink-0 items-start justify-between gap-2">
-        <div>
-          <h2 className="text-apple-h3 font-semibold tracking-tight text-slate-900">
-            <span className="mr-1.5" aria-hidden>
-              💬
-            </span>
-            Chat
-          </h2>
-          <p className="mt-1 text-sm font-medium text-emerald-900/80">Message your tailor</p>
+      <div className="flex items-start justify-between gap-3">
+        <div className="flex items-center gap-3">
+          <span
+            className={`flex h-10 w-10 items-center justify-center rounded-2xl border shadow-sm ${
+              canChat
+                ? "border-emerald-200/70 bg-emerald-50 text-emerald-800"
+                : "border-slate-200/80 bg-slate-50 text-slate-500"
+            }`}
+            aria-hidden
+          >
+            <MessageCircle className="h-5 w-5" />
+          </span>
+          <div className="min-w-0">
+            <h2 className="text-apple-h3 font-semibold tracking-tight text-slate-900">Order Chat</h2>
+            <p className="mt-0.5 text-xs font-medium text-slate-500">
+              {canChat ? "Private room is active" : hasOrder ? "Locked until acceptance" : "Locked until order is placed"}
+            </p>
+          </div>
         </div>
         {unreadChatCount > 0 ? (
           <span
@@ -802,20 +819,43 @@ function CustomerDashboardChatCard({ activeOrder }) {
           >
             {unreadLabel}
           </span>
-        ) : null}
+        ) : (
+          <span
+            className={`shrink-0 rounded-full px-2.5 py-1 text-[11px] font-semibold ${
+              canChat ? "bg-emerald-100 text-emerald-800" : "bg-slate-100 text-slate-600"
+            }`}
+          >
+            {canChat ? "Enabled" : "Locked"}
+          </span>
+        )}
       </div>
 
       <div className="mt-4 min-h-0 flex-1">
         <p className="text-sm leading-relaxed text-slate-700">
-          Your tailor is available for chat regarding this order.
+          {canChat
+            ? "Your tailor is available for chat regarding this order."
+            : hasOrder
+              ? "Chat will be available once your tailor accepts and is assigned."
+              : "Place an order to unlock chat with your tailor."}
         </p>
-        {previewText ? (
+        {canChat && previewText ? (
           <p className="mt-2 line-clamp-1 text-sm leading-snug text-slate-600">{previewText}</p>
         ) : null}
+        <p className="mt-2 text-xs text-slate-500">
+          {canChat
+            ? "Messages stay private to this order and sync across your devices."
+            : "Once unlocked, messages stay private to this order and sync across your devices."}
+        </p>
       </div>
 
-      <span className="mt-auto inline-flex w-full shrink-0 items-center justify-center gap-2 rounded-xl border border-emerald-800/25 bg-gradient-to-b from-[#3d6b4a] to-[#2f5a42] px-4 py-3 text-sm font-semibold text-white shadow-md shadow-emerald-900/20 transition duration-300 group-hover:brightness-105">
-        Open Chat
+      <span
+        className={`mt-auto inline-flex w-full shrink-0 items-center justify-center gap-2 rounded-xl border px-4 py-3 text-sm font-semibold shadow-md transition duration-300 ${
+          canChat
+            ? "border-emerald-800/25 bg-gradient-to-b from-[#3d6b4a] to-[#2f5a42] text-white shadow-emerald-900/20 group-hover:brightness-105"
+            : "border-slate-300/70 bg-white/70 text-slate-600 shadow-slate-900/10"
+        }`}
+      >
+        Open messages
       </span>
     </button>
   );
@@ -824,7 +864,15 @@ function CustomerDashboardChatCard({ activeOrder }) {
 export default function CustomerDashboard() {
   const navigate = useNavigate();
   const { user } = useAuth();
-  const { syncCustomerOrderChatFromOrder } = useCustomerChat();
+  const {
+    syncCustomerOrderChatFromOrder,
+    customerChatConversations,
+    customerId: chatCustomerId,
+    conversationId: activeConversationId,
+    tailorIdForChat,
+    isChatOpen,
+    lastChatPreview,
+  } = useCustomerChat();
   const [orders, setOrders] = useState([]);
   /** Selected order for details (workflow/profile); empty string = default to latest in list. */
   const [activeOrderId, setActiveOrderId] = useState("");
@@ -981,6 +1029,15 @@ export default function CustomerDashboard() {
     };
   }, [fetchOrders]);
 
+  const scrollToChatWorkspace = useCallback(() => {
+    window.requestAnimationFrame(() => {
+      document.getElementById("customer-chat-workspace")?.scrollIntoView({
+        behavior: "smooth",
+        block: "start",
+      });
+    });
+  }, []);
+
   return (
     <div
       id="home"
@@ -1058,6 +1115,20 @@ export default function CustomerDashboard() {
                 }
                 badgeStyle={{ backgroundColor: C.green }}
                 footerTintClass="bg-slate-100/80"
+              />
+            </div>
+
+            <div className="mt-8 w-full lg:mt-10">
+              <CustomerWhatsAppWorkspace
+                customerChatConversations={customerChatConversations}
+                orders={orders}
+                customerId={chatCustomerId}
+                conversationId={activeConversationId}
+                tailorIdForChat={tailorIdForChat}
+                syncCustomerOrderChatFromOrder={syncCustomerOrderChatFromOrder}
+                setActiveOrderId={setActiveOrderId}
+                isChatOpen={isChatOpen}
+                lastChatPreview={lastChatPreview}
               />
             </div>
 
@@ -1196,7 +1267,7 @@ export default function CustomerDashboard() {
               </section>
 
               <div className="flex h-full min-h-0 w-full min-w-0 flex-col lg:col-span-4">
-                <CustomerDashboardChatCard activeOrder={activeOrder} />
+                <CustomerDashboardChatCard activeOrder={activeOrder} onOpenMessages={scrollToChatWorkspace} />
               </div>
             </div>
 

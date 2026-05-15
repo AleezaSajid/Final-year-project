@@ -1,6 +1,7 @@
 import { useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { Ruler, X } from "lucide-react";
+import { api } from "../api/client.js";
 
 /**
  * Entry from Browse: send the customer through the Measurement Wizard so the tailor gets full design + measurements.
@@ -21,20 +22,29 @@ export default function SendRequestModal({ open, tailor, onClose }) {
 
   const tailorName = typeof tailor.name === "string" ? tailor.name : "Tailor";
 
-  function goToWizard() {
+  async function goToWizard() {
     onClose();
-    navigate("/features/measurement-wizard", {
-      state: {
-        browseTailor: {
-          id: tailor.id,
-          name: tailor.name,
-          city: tailor.city,
-          specialty: tailor.specialty,
-          tailorShopId: tailor.tailorShopId,
-        },
-        startWizardFresh: true,
+    const nextState = {
+      browseTailor: {
+        id: tailor.id,
+        name: tailor.name,
+        city: tailor.city,
+        specialty: tailor.specialty,
+        tailorShopId: tailor.tailorShopId,
       },
-    });
+      startWizardFresh: true,
+    };
+    try {
+      const data = await api("/api/auth/me");
+      const role = data?.user?.role ? String(data.user.role).trim() : "";
+      if (data?.user && role === "customer") {
+        navigate("/features/measurement-wizard", { state: nextState });
+        return;
+      }
+    } catch {
+      // ignore
+    }
+    navigate("/login", { state: { from: "/features/measurement-wizard", ...nextState } });
   }
 
   return (

@@ -1,0 +1,460 @@
+import React, { useCallback, useEffect, useMemo, useState } from "react";
+import {
+  ArrowLeft,
+  Image as ImageIcon,
+  MessageCircle,
+  MoreVertical,
+  Phone,
+  Search,
+  Video,
+} from "lucide-react";
+import { socket } from "../../socket.js";
+import { isOrderEligibleForChat, normalizeConversationId, displayChatActorName } from "../../chatUtils.js";
+import { DEFAULT_AVATAR, resolveOrderWorkflowState } from "../../tailorDashboard/constants.js";
+import OrderChatThread from "./OrderChatThread.jsx";
+import { mergeSidebarRowsWithInjected } from "./workspaceSidebarMerge.js";
+
+function conversationRowCompleted(conv, orderList) {
+  if (conv?.status === "completed") return true;
+  const oid = normalizeConversationId(conv?.orderId ?? conv?.conversationId ?? "");
+  if (!oid) return false;
+  const o = orderList.find((x) => String(x.id ?? x._id) === oid);
+  if (!o) return false;
+  return resolveOrderWorkflowState(o).internalStatus === "completed";
+}
+
+function formatConversationTime(iso) {
+  if (!iso) return "";
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "";
+  return d.toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
+}
+
+function buildOrderStubFromConv(conv, activeTailorShopId) {
+  const oid = normalizeConversationId(conv.orderId ?? conv.conversationId ?? "");
+  return {
+    id: oid,
+    _id: oid,
+    customerId: conv.customerId,
+    customerName: conv.customerName,
+    garmentType: conv.garmentType,
+    tailorId: conv.tailorId || activeTailorShopId,
+    status: conv.status || "processing",
+  };
+}
+
+/**
+ * WhatsApp Web–style 3-panel layout for tailor dashboard. Uses existing openChatForOrder + OrderChatThread (same sockets).
+ */
+export default function TailorWhatsAppWorkspace({
+  tailorChatConversations = [],
+  orders = [],
+  openChatForOrder,
+  activeConversationId = "",
+  activeChatCustomer = { id: "", name: "Customer" },
+  activeTailorShopId = "",
+  setActiveOrderId,
+}) {
+  const [filter, setFilter] = useState("all");
+  const [search, setSearch] = useState("");
+  const [mobilePanel, setMobilePanel] = useState("list");
+
+  const normalizedActive = normalizeConversationId(activeConversationId);
+
+  const activeOrder = useMemo(() => {
+    if (!normalizedActive) return null;
+    return orders.find((o) => String(o.id ?? o._id) === normalizedActive) || null;
+  }, [orders, normalizedActive]);
+
+  /** Ensures the open order chat always has a sidebar row (API list may be empty or not yet hydrated). */
+  const injectedSidebarRow = useMemo(() => {
+    if (!normalizedActive || !activeTailorShopId || !activeChatCustomer?.id) return null;
+    return {
+      orderId: normalizedActive,
+      conversationId: normalizedActive,
+      customerId: activeChatCustomer.id,
+      customerName: activeChatCustomer.name || "Customer",
+      tailorId: activeTailorShopId,
+      garmentType: activeOrder?.garmentType || "",
+      lastMessage: "",
+      lastMessageAt: activeOrder?.updatedAt || activeOrder?.createdAt || new Date().toISOString(),
+      unreadTailor: 0,
+      status: "active",
+    };
+  }, [normalizedActive, activeTailorShopId, activeChatCustomer, activeOrder]);
+
+  const sidebarRows = useMemo(
+    () => mergeSidebarRowsWithInjected(tailorChatConversations, injectedSidebarRow),
+    [tailorChatConversations, injectedSidebarRow]
+  );
+
+  const filteredConversations = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    return sidebarRows.filter((conv) => {
+      const oid = normalizeConversationId(conv.orderId ?? conv.conversationId ?? "");
+      const isSelected = Boolean(normalizedActive && oid === normalizedActive);
+      const unread = Math.max(0, Number(conv.unreadTailor || 0));
+      const done = conversationRowCompleted(conv, orders);
+      if (!isSelected) {
+        if (filter === "unread" && unread === 0) return false;
+        if (filter === "active" && done) return false;
+        if (filter === "completed" && !done) return false;
+      }
+      if (!q) return true;
+      if (isSelected) return true;
+      const order = orders.find((o) => String(o.id ?? o._id) === oid);
+      const name = String(
+        displayChatActorName(conv.customerName, order?.customerName, conv.customerId) || "customer"
+      ).toLowerCase();
+      const preview = String(conv.lastMessage || "").toLowerCase();
+      return name.includes(q) || preview.includes(q);
+    });
+  }, [sidebarRows, orders, filter, search, normalizedActive]);
+
+  useEffect(() => {
+    const api = Array.isArray(tailorChatConversations) ? tailorChatConversations : [];
+    const activeInFetched = Boolean(
+      normalizedActive &&
+        api.some((r) => normalizeConversationId(r?.orderId ?? r?.conversationId) === normalizedActive)
+    );
+    console.log("[Workspace Sidebar]", {
+      role: "tailor",
+      fetchedCount: api.length,
+      renderedMergedCount: sidebarRows.length,
+      activeConversationId: normalizedActive || null,
+      filteredCount: filteredConversations.length,
+      activeRowInFetchedList: activeInFetched,
+      syntheticRowForActive: Boolean(injectedSidebarRow),
+      filter,
+      searchSnippet: search.trim().slice(0, 32),
+    });
+  }, [
+    tailorChatConversations,
+    sidebarRows.length,
+    normalizedActive,
+    filteredConversations.length,
+    injectedSidebarRow,
+    filter,
+    search,
+  ]);
+
+  const chatStub = useMemo(() => {
+    if (!normalizedActive || !activeChatCustomer?.id || !activeTailorShopId) return null;
+    if (activeOrder) return activeOrder;
+    return buildOrderStubFromConv(
+      {
+        orderId: normalizedActive,
+        conversationId: normalizedActive,
+        customerId: activeChatCustomer.id,
+        customerName: activeChatCustomer.name,
+        tailorId: activeTailorShopId,
+        status: "processing",
+      },
+      activeTailorShopId
+    );
+  }, [normalizedActive, activeOrder, activeChatCustomer, activeTailorShopId]);
+
+  const canSend = Boolean(chatStub && isOrderEligibleForChat(chatStub));
+
+  const selectConversation = useCallback(
+    (conv) => {
+      const oid = normalizeConversationId(conv.orderId ?? conv.conversationId ?? "");
+      const order = orders.find((o) => String(o.id ?? o._id) === oid);
+      const stub =
+        order && isOrderEligibleForChat(order)
+          ? order
+          : isOrderEligibleForChat(buildOrderStubFromConv(conv, activeTailorShopId))
+            ? buildOrderStubFromConv(conv, activeTailorShopId)
+            : null;
+      if (!stub) return;
+      openChatForOrder?.(stub);
+      setMobilePanel("chat");
+    },
+    [orders, openChatForOrder, activeTailorShopId]
+  );
+
+  const filterBtn = (id, label) => (
+    <button
+      key={id}
+      type="button"
+      onClick={() => setFilter(id)}
+      className={`rounded-full px-3 py-1 text-xs font-semibold transition ${
+        filter === id
+          ? "bg-[#00a884] text-white shadow-sm"
+          : "bg-slate-200/80 text-slate-600 hover:bg-slate-200"
+      }`}
+    >
+      {label}
+    </button>
+  );
+
+  return (
+    <section
+      id="tailor-chat-workspace"
+      className="scroll-mt-24 overflow-hidden rounded-2xl border border-slate-200/90 bg-[#f0f2f5] shadow-[0_8px_30px_-12px_rgba(15,23,42,0.18)]"
+      aria-label="Order messages"
+    >
+      <div className="flex min-h-[min(720px,78vh)] w-full flex-col lg:flex-row">
+        {/* Left — conversation list */}
+        <aside
+          className={`flex w-full shrink-0 flex-col border-slate-200/80 bg-white lg:w-[320px] lg:max-w-[320px] lg:border-r ${
+            mobilePanel === "chat" || mobilePanel === "detail" ? "hidden lg:flex" : "flex"
+          }`}
+        >
+          <div className="shrink-0 border-b border-slate-100 bg-[#f0f2f5] p-3">
+            <div className="relative">
+              <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+              <input
+                type="search"
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                placeholder="Search or start new chat"
+                className="w-full rounded-xl border-0 bg-white py-2.5 pl-10 pr-3 text-sm text-slate-800 shadow-sm placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-[#00a884]/30"
+              />
+            </div>
+            <div className="mt-3 flex flex-wrap gap-1.5">
+              {filterBtn("all", "All")}
+              {filterBtn("unread", "Unread")}
+              {filterBtn("active", "Active")}
+              {filterBtn("completed", "Completed")}
+            </div>
+          </div>
+          <div className="min-h-0 flex-1 overflow-y-auto">
+            {filteredConversations.length === 0 ? (
+              <p className="px-4 py-8 text-center text-sm text-slate-500">No conversations match.</p>
+            ) : (
+              <ul className="divide-y divide-slate-100">
+                {filteredConversations.map((conv) => {
+                  const oid = normalizeConversationId(conv.orderId ?? conv.conversationId ?? "");
+                  const order = orders.find((o) => String(o.id ?? o._id) === oid);
+                  const cust = displayChatActorName(
+                    conv.customerName,
+                    order?.customerName,
+                    conv.customerId
+                  ) || "Customer";
+                  const preview =
+                    (conv.lastMessage && String(conv.lastMessage).trim()) || "Start conversation";
+                  const ts = conv.lastMessageAt || conv.updatedAt;
+                  const timeLabel = formatConversationTime(ts) || "—";
+                  const unread = Math.max(0, Number(conv.unreadTailor || 0));
+                  const selected = oid && oid === normalizedActive;
+                  return (
+                    <li key={oid ? `${oid}-${cust}` : `${conv.conversationId || "c"}-${cust}`}>
+                      <button
+                        type="button"
+                        onClick={() => selectConversation(conv)}
+                        className={`flex w-full gap-3 px-3 py-3 text-left transition hover:bg-slate-50 ${
+                          selected ? "bg-emerald-50/80" : "bg-white"
+                        }`}
+                      >
+                        <img
+                          src={DEFAULT_AVATAR}
+                          alt=""
+                          className="h-12 w-12 shrink-0 rounded-full object-cover ring-2 ring-white shadow-sm"
+                        />
+                        <div className="min-w-0 flex-1">
+                          <div className="flex items-center justify-between gap-2">
+                            <span className="truncate font-medium text-slate-900">{cust}</span>
+                            <span className="shrink-0 text-[11px] text-slate-400">{timeLabel}</span>
+                          </div>
+                          <div className="mt-0.5 flex items-center justify-between gap-2">
+                            <p className="truncate text-sm text-slate-600">{preview}</p>
+                            {unread > 0 ? (
+                              <span className="shrink-0 rounded-full bg-[#25d366] px-1.5 py-0.5 text-[10px] font-bold text-white">
+                                {unread > 99 ? "99+" : unread}
+                              </span>
+                            ) : null}
+                          </div>
+                        </div>
+                      </button>
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
+          </div>
+        </aside>
+
+        {/* Center — active thread */}
+        <div
+          className={`flex min-h-0 min-w-0 flex-1 flex-col bg-[#e5ddd5] ${
+            mobilePanel === "list" ? "hidden lg:flex" : "flex"
+          }`}
+        >
+          {normalizedActive && canSend ? (
+            <>
+              <header className="flex shrink-0 items-center gap-3 border-b border-slate-200/80 bg-[#f0f2f5] px-2 py-2 sm:px-4">
+                <button
+                  type="button"
+                  className="rounded-full p-2 text-slate-600 hover:bg-slate-200/80 lg:hidden"
+                  aria-label="Back to conversations"
+                  onClick={() => setMobilePanel("list")}
+                >
+                  <ArrowLeft className="h-5 w-5" />
+                </button>
+                <img
+                  src={DEFAULT_AVATAR}
+                  alt=""
+                  className="h-10 w-10 shrink-0 rounded-full object-cover"
+                />
+                <div className="min-w-0 flex-1">
+                  <p className="truncate font-semibold text-slate-900">
+                    {activeChatCustomer?.name || "Customer"}
+                  </p>
+                  <p className="truncate text-xs text-slate-500">
+                    {activeOrder?.garmentType ? String(activeOrder.garmentType) : "Order chat"} ·{" "}
+                    <span className={socket.connected ? "text-emerald-700" : "text-amber-700"}>
+                      {socket.connected ? "Online" : "Connecting…"}
+                    </span>
+                  </p>
+                </div>
+                <div className="hidden items-center gap-0.5 sm:flex">
+                  <button
+                    type="button"
+                    className="rounded-full p-2 text-slate-500 hover:bg-slate-200/80"
+                    aria-label="Voice call"
+                    disabled
+                  >
+                    <Video className="h-5 w-5" />
+                  </button>
+                  <button
+                    type="button"
+                    className="rounded-full p-2 text-slate-500 hover:bg-slate-200/80"
+                    aria-label="Phone"
+                    disabled
+                  >
+                    <Phone className="h-5 w-5" />
+                  </button>
+                  <button
+                    type="button"
+                    className="rounded-full p-2 text-slate-500 hover:bg-slate-200/80"
+                    aria-label="More"
+                    disabled
+                  >
+                    <MoreVertical className="h-5 w-5" />
+                  </button>
+                </div>
+                <button
+                  type="button"
+                  className="hidden rounded-full p-2 text-slate-500 hover:bg-slate-200/80 xl:inline-flex"
+                  aria-label="Profile panel"
+                  onClick={() => setMobilePanel("detail")}
+                >
+                  <ImageIcon className="h-5 w-5" />
+                </button>
+              </header>
+              <OrderChatThread
+                isActive={Boolean(canSend && normalizedActive)}
+                mode="tailor"
+                senderId={activeTailorShopId}
+                receiverId={activeChatCustomer?.id}
+                peerDisplayName={activeChatCustomer?.name || "Customer"}
+                conversationId={normalizedActive}
+                theme="whatsapp"
+                className="min-h-0 flex-1"
+              />
+            </>
+          ) : (
+            <div className="flex flex-1 flex-col items-center justify-center gap-3 px-6 text-center">
+              <div className="rounded-full bg-white/80 p-6 shadow-sm">
+                <MessageCircle className="h-14 w-14 text-[#00a884]" strokeWidth={1.25} aria-hidden />
+              </div>
+              <h3 className="text-lg font-medium text-slate-700">SewServe Messages</h3>
+              <p className="max-w-sm text-sm text-slate-500">
+                Select a conversation on the left to view order chat. Realtime messages use your existing connection.
+              </p>
+            </div>
+          )}
+        </div>
+
+        {/* Right — profile / order */}
+        <aside
+          className={`w-full shrink-0 border-slate-200/80 bg-white xl:w-[300px] xl:max-w-[300px] xl:border-l xl:flex xl:flex-col ${
+            mobilePanel === "detail"
+              ? "flex max-h-[min(70vh,520px)] flex-col overflow-hidden"
+              : "hidden"
+          }`}
+        >
+          {normalizedActive && activeOrder ? (
+            <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
+              <div className="flex shrink-0 flex-col items-center border-b border-slate-100 bg-[#f0f2f5] px-4 py-6">
+                <button
+                  type="button"
+                  className="mb-4 self-start rounded-full p-2 text-slate-600 hover:bg-slate-200/80 xl:hidden"
+                  aria-label="Back to chat"
+                  onClick={() => setMobilePanel("chat")}
+                >
+                  <ArrowLeft className="h-5 w-5" />
+                </button>
+                <img
+                  src={DEFAULT_AVATAR}
+                  alt=""
+                  className="h-28 w-28 rounded-full object-cover shadow-md ring-4 ring-white"
+                />
+                <h3 className="mt-4 text-center text-xl font-semibold text-slate-900">
+                  {activeChatCustomer?.name || "Customer"}
+                </h3>
+                <p className="mt-1 text-center text-sm text-slate-500">
+                  {activeOrder?.garmentType ? String(activeOrder.garmentType) : "Order conversation"}
+                </p>
+                <p className={`mt-2 text-xs font-medium ${socket.connected ? "text-emerald-700" : "text-amber-700"}`}>
+                  {socket.connected ? "Online" : "Connecting…"}
+                </p>
+              </div>
+              <div className="space-y-4 p-4">
+                <div>
+                  <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">About</p>
+                  <p className="mt-1 text-sm text-slate-600">Order messaging for this customer is tied to the selected order.</p>
+                </div>
+                <div className="rounded-xl border border-slate-100 bg-slate-50/80 p-4 shadow-sm">
+                  <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">Order</p>
+                  <dl className="mt-3 space-y-2 text-sm">
+                    <div className="flex justify-between gap-2">
+                      <dt className="text-slate-500">Summary</dt>
+                      <dd className="text-right text-slate-900">
+                        {activeOrder.garmentType || "—"}
+                      </dd>
+                    </div>
+                    <div className="flex justify-between gap-2">
+                      <dt className="text-slate-500">Status</dt>
+                      <dd className="text-right text-slate-900">
+                        {resolveOrderWorkflowState(activeOrder).internalStatus.replace(/_/g, " ")}
+                      </dd>
+                    </div>
+                    <div className="flex justify-between gap-2">
+                      <dt className="text-slate-500">Created</dt>
+                      <dd className="text-right text-slate-900">
+                        {activeOrder.createdAt
+                          ? formatConversationTime(activeOrder.createdAt)
+                          : "—"}
+                      </dd>
+                    </div>
+                  </dl>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setActiveOrderId?.(String(activeOrder.id ?? activeOrder._id ?? normalizedActive));
+                      window.requestAnimationFrame(() => {
+                        document.getElementById("tailor-dashboard-orders")?.scrollIntoView({
+                          behavior: "smooth",
+                          block: "start",
+                        });
+                      });
+                    }}
+                    className="mt-4 w-full rounded-xl bg-[#00a884] py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-[#008f6f]"
+                  >
+                    View order
+                  </button>
+                </div>
+              </div>
+            </div>
+          ) : normalizedActive ? (
+            <div className="flex flex-1 flex-col items-center justify-center p-6 text-center text-sm text-slate-500">
+              <p>Order details will appear when this conversation matches an order in your list.</p>
+            </div>
+          ) : null}
+        </aside>
+      </div>
+    </section>
+  );
+}

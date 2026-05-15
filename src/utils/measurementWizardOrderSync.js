@@ -1,5 +1,9 @@
 import { createMeasurementOrder, patchOrderWizardFields } from "../api/ordersApi.js";
-import { buildMeasurementOrderPayload, measurementOrderPayloadToServerBody } from "./measurementOrderPayload.js";
+import {
+  buildMeasurementOrderPayload,
+  canCreateMeasurementOrderOnServer,
+  measurementOrderPayloadToServerBody,
+} from "./measurementOrderPayload.js";
 
 let linkedWizardOrderIdMemory = null;
 
@@ -25,10 +29,15 @@ export function hydrateLinkedOrderIdFromDraft(draftLinked) {
 
 let createOrderPromise = null;
 
-function buildPayloadAndFlat(snapshot, authUser) {
+function buildPayloadAndFlat(snapshot, authUser, options = {}) {
+  const tailorResolutionHints = options.tailorResolutionHints;
   const override =
     snapshot && typeof snapshot.assignedTailorShopId === "string"
       ? snapshot.assignedTailorShopId.trim()
+      : "";
+  const displayName =
+    snapshot && typeof snapshot.assignedTailorDisplayName === "string"
+      ? snapshot.assignedTailorDisplayName.trim()
       : "";
   const payload = buildMeasurementOrderPayload({
     customerInfo: snapshot.customerInfo,
@@ -40,6 +49,9 @@ function buildPayloadAndFlat(snapshot, authUser) {
     selectedNeck: snapshot.selectedNeck,
     authUser,
     tailorShopIdOverride: override || undefined,
+    assignedTailorDisplayName: displayName || undefined,
+    snapshotForTailorResolve: snapshot,
+    tailorResolutionHints,
   });
   return { payload, flat: measurementOrderPayloadToServerBody(payload) };
 }
@@ -65,22 +77,25 @@ function pickPatchBody(flat) {
 }
 
 /**
- * Pushes the current wizard snapshot to the same order the tailor list uses, creating the
- * document once, then PATCHing. Tailor subscribes via socket for immediate UI merge.
- * @param {object} snapshot — customerInfo, selectedGarmentType, customGarmentType, measurements, styleOptions, designBrief, selectedNeck
+ * @param {object} snapshot
  * @param {object | null} authUser
+ * @param {{ rejectOnCreateFailure?: boolean }} [options] — when true (final wizard submit), surface API errors instead of failing silently.
  */
-export async function syncWizardOrderToServer(snapshot, authUser) {
+export async function syncWizardOrderToServer(snapshot, authUser, options = {}) {
+  const { rejectOnCreateFailure = false, tailorResolutionHints } = options;
   if (typeof window === "undefined") return;
   if (!snapshot || typeof snapshot !== "object") return;
 
-  const { payload, flat } = buildPayloadAndFlat(snapshot, authUser);
+  const { payload, flat } = buildPayloadAndFlat(snapshot, authUser, { tailorResolutionHints });
   let linked = getLinkedWizardOrderId();
 
   if (!linked) {
     if (createOrderPromise) {
       await createOrderPromise;
       linked = getLinkedWizardOrderId();
+    }
+    if (!linked && !canCreateMeasurementOrderOnServer(snapshot, authUser, tailorResolutionHints)) {
+      return null;
     }
     if (!linked) {
       createOrderPromise = (async () => {
@@ -90,11 +105,18 @@ export async function syncWizardOrderToServer(snapshot, authUser) {
           if (id) setLinkedWizardOrderId(String(id));
         } catch (e) {
           console.warn("[measurement sync] create failed", e);
+          if (rejectOnCreateFailure) {
+            throw e instanceof Error ? e : new Error(String(e));
+          }
         } finally {
           createOrderPromise = null;
         }
       })();
-      await createOrderPromise;
+      try {
+        await createOrderPromise;
+      } catch (e) {
+        if (rejectOnCreateFailure) throw e;
+      }
       linked = getLinkedWizardOrderId();
     }
   }

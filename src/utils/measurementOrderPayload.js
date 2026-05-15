@@ -4,8 +4,8 @@
  */
 
 import { garmentDisplayFromWizardPayload } from "./customerRecentOrdersStorage.js";
-import { resolveCustomerIdForChat, resolveTailorIdForCustomerChat } from "./chatIdentity.js";
-import { DEFAULT_TAILOR_SHOP_ID, workflowStages } from "../tailorDashboard/constants.js";
+import { looksLikeTailorShopId, resolveTailorIdForCustomerChat } from "./chatIdentity.js";
+import { workflowStages } from "../tailorDashboard/constants.js";
 
 const FIT_TYPE_OPTIONS = [
   { id: "slim", label: "Slim Fit" },
@@ -84,8 +84,67 @@ function measurementNumbers(m) {
   };
 }
 
-function resolveCustomerId(authUser) {
-  return resolveCustomerIdForChat(authUser);
+/** Session user id for POST /orders — must match req.authUser.id; no demo/localStorage fallback. */
+export function resolveOrderCustomerId(authUser) {
+  if (!authUser || typeof authUser !== "object") return "";
+  const id = authUser.id ?? authUser._id ?? authUser.customerId;
+  if (id == null) return "";
+  const s = String(id).trim();
+  return s || "";
+}
+
+function normalizeTailorCandidate(value) {
+  if (value == null) return "";
+  const s = String(value).trim();
+  return s;
+}
+
+/**
+ * Real tailor shop id for the wizard.
+ * Priority: (1) valid id on snapshot (assignedTailorShopId, tailorShopId, selectedTailorShopId)
+ * (2) active chat / order-bound hint (3) latest conversation row hint (4) session via resolveTailorIdForCustomerChat
+ * @param {Record<string, unknown> | null | undefined} snapshotLike
+ * @param {object | null} authUser
+ * @param {{
+ *   activeChatTailorShopId?: string;
+ *   latestConversationTailorShopId?: string;
+ *   mappedTailorFromLinkedOrder?: string;
+ *   mappedTailorFromConversationOrder?: string;
+ * }} [hints]
+ */
+export function resolveWizardTailorShopIdForOrder(snapshotLike, authUser, hints) {
+  const h = hints && typeof hints === "object" ? hints : {};
+  const snap = snapshotLike && typeof snapshotLike === "object" && !Array.isArray(snapshotLike) ? snapshotLike : {};
+
+  const snapshotKeys = ["assignedTailorShopId", "tailorShopId", "selectedTailorShopId"];
+  for (const key of snapshotKeys) {
+    const c = normalizeTailorCandidate(snap[key]);
+    if (c && looksLikeTailorShopId(c)) return c;
+  }
+
+  const mappedLinked = normalizeTailorCandidate(h.mappedTailorFromLinkedOrder);
+  if (mappedLinked && looksLikeTailorShopId(mappedLinked)) return mappedLinked;
+
+  const mappedConv = normalizeTailorCandidate(h.mappedTailorFromConversationOrder);
+  if (mappedConv && looksLikeTailorShopId(mappedConv)) return mappedConv;
+
+  const activeChat = normalizeTailorCandidate(h.activeChatTailorShopId);
+  if (activeChat && looksLikeTailorShopId(activeChat)) return activeChat;
+
+  const convTailor = normalizeTailorCandidate(h.latestConversationTailorShopId);
+  if (convTailor && looksLikeTailorShopId(convTailor)) return convTailor;
+
+  const fromSession = resolveTailorIdForCustomerChat(authUser);
+  if (fromSession && looksLikeTailorShopId(fromSession)) return fromSession;
+
+  return "";
+}
+
+export function canCreateMeasurementOrderOnServer(snapshot, authUser, hints) {
+  return (
+    Boolean(resolveOrderCustomerId(authUser)) &&
+    Boolean(resolveWizardTailorShopIdForOrder(snapshot, authUser, hints))
+  );
 }
 
 /**
@@ -99,6 +158,9 @@ function resolveCustomerId(authUser) {
  *   selectedNeck: string;
  *   authUser?: object | null;
  *   tailorShopIdOverride?: string | null;
+ *   assignedTailorDisplayName?: string;
+ *   snapshotForTailorResolve?: Record<string, unknown> | null;
+ *   tailorResolutionHints?: { activeChatTailorShopId?: string; latestConversationTailorShopId?: string; mappedTailorFromLinkedOrder?: string; mappedTailorFromConversationOrder?: string };
  * }} input
  */
 export function buildMeasurementOrderPayload(input) {
@@ -112,11 +174,25 @@ export function buildMeasurementOrderPayload(input) {
     selectedNeck,
     authUser,
     tailorShopIdOverride,
+    assignedTailorDisplayName: tailorDisplayNameInput,
+    snapshotForTailorResolve,
+    tailorResolutionHints,
   } = input;
 
   const orderId = `ORD-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
   const createdAt = new Date().toISOString();
-  const customerId = resolveCustomerId(authUser);
+  const customerId = resolveOrderCustomerId(authUser);
+  const snap =
+    snapshotForTailorResolve && typeof snapshotForTailorResolve === "object" && !Array.isArray(snapshotForTailorResolve)
+      ? {
+          ...snapshotForTailorResolve,
+          assignedTailorShopId:
+            tailorShopIdOverride != null && String(tailorShopIdOverride).trim() !== ""
+              ? String(tailorShopIdOverride).trim()
+              : snapshotForTailorResolve.assignedTailorShopId,
+        }
+      : { assignedTailorShopId: tailorShopIdOverride };
+  const tailorId = resolveWizardTailorShopIdForOrder(snap, authUser, tailorResolutionHints) || "";
 
   const garmentLabel = garmentDisplayFromWizardPayload({
     selectedGarmentType,
@@ -146,6 +222,11 @@ export function buildMeasurementOrderPayload(input) {
   const dueDate =
     /^\d{4}-\d{2}-\d{2}$/.test(deliveryDateRaw) ? deliveryDateRaw : null;
 
+  const tailorDisplayNameResolved =
+    tailorDisplayNameInput != null && String(tailorDisplayNameInput).trim() !== ""
+      ? String(tailorDisplayNameInput).trim()
+      : "";
+
   return {
     orderId,
     customer: {
@@ -173,14 +254,10 @@ export function buildMeasurementOrderPayload(input) {
     },
     status: workflowStages[0]?.status || "order_placed",
     createdAt,
-    /** Must match the tailor id used on `/tailor` dashboard (same as GET /orders/tailor/:id). */
-    tailorId:
-      (typeof tailorShopIdOverride === "string" && tailorShopIdOverride.trim()
-        ? tailorShopIdOverride.trim()
-        : null) ||
-      resolveTailorIdForCustomerChat(authUser) ||
-      DEFAULT_TAILOR_SHOP_ID,
+    /** Real tailor shop id only (e.g. T-U17). Empty until snapshot/session has a valid shop. */
+    tailorId,
     dueDate,
+    ...(tailorDisplayNameResolved ? { assignedTailorDisplayName: tailorDisplayNameResolved } : {}),
   };
 }
 

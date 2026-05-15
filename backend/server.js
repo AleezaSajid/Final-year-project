@@ -11,6 +11,7 @@ const crypto = require('crypto');
 const User = require('./models/User');
 const TailorProfile = require('./models/TailorProfile');
 const Message = require('./models/Message');
+const Conversation = require('./models/Conversation');
 const Order = require('./models/Order');
 const Testimonial = require('./models/Testimonial');
 const { sendMailSafe } = require('./email/mailer');
@@ -218,22 +219,22 @@ async function loadAuthedUser(req) {
   };
 }
 
-function requireAuth(req, res, next) {
-  void (async () => {
-    try {
-      const u = await loadAuthedUser(req);
-      if (!u) {
-        clearSessionCookie(res);
-        return res.status(401).json({ message: 'Not authenticated.' });
-      }
-      req.authUser = u;
-      return next();
-    } catch (e) {
-      console.error('[auth] requireAuth error', e);
+/** Express 5 router waits on returned Promises; the old `void async IIFE` pattern can race ahead of `next()`. */
+async function requireAuth(req, res, next) {
+  try {
+    const u = await loadAuthedUser(req);
+    if (!u) {
       clearSessionCookie(res);
-      return res.status(401).json({ message: 'Not authenticated.' });
+      res.status(401).json({ message: 'Not authenticated.' });
+      return;
     }
-  })();
+    req.authUser = u;
+    next();
+  } catch (e) {
+    console.error('[auth] requireAuth error', e);
+    clearSessionCookie(res);
+    res.status(401).json({ message: 'Not authenticated.' });
+  }
 }
 
 function requireRole(roles) {
@@ -597,6 +598,136 @@ app.post('/api/logout', (req, res) => {
   res.json({ ok: true });
 });
 
+function sortConversationsByActivity(rows) {
+  const list = Array.isArray(rows) ? [...rows] : [];
+  return list.sort((a, b) => {
+    const ta = new Date(a.lastMessageAt || a.updatedAt || 0).getTime();
+    const tb = new Date(b.lastMessageAt || b.updatedAt || 0).getTime();
+    return tb - ta;
+  });
+}
+
+function dedupeConversationsByOrderId(rows) {
+  const list = Array.isArray(rows) ? rows : [];
+  const out = [];
+  const seen = new Set();
+  for (const r of list) {
+    const oid = String(r.orderId || r.conversationId || '')
+      .trim()
+      .replace(/^order_/i, '');
+    if (!oid || seen.has(oid)) continue;
+    seen.add(oid);
+    out.push(r);
+  }
+  return out;
+}
+
+/** Lists conversations for a tailor shop id, including legacy rows stored under T-A* while the order now points at this shop. */
+async function fetchConversationRowsForTailorShop(shop) {
+  const shopTrim = String(shop || '').trim();
+  if (!shopTrim) return [];
+  const primary = await Conversation.find({ tailorId: shopTrim }).lean();
+  const legacy = await Conversation.find({ tailorId: { $regex: /^T-A\d+$/i } }).lean();
+  if (legacy.length === 0) {
+    return sortConversationsByActivity(dedupeConversationsByOrderId(primary));
+  }
+  const keys = [...new Set(legacy.map((r) => String(r.orderId || '').trim()).filter(Boolean))];
+  const objectIds = keys.filter((k) => mongoose.Types.ObjectId.isValid(k));
+  const clientIds = keys.filter((k) => !mongoose.Types.ObjectId.isValid(k));
+  const or = [];
+  if (objectIds.length) {
+    or.push({ _id: { $in: objectIds.map((id) => new mongoose.Types.ObjectId(id)) } });
+  }
+  if (clientIds.length) {
+    or.push({ clientOrderId: { $in: clientIds } });
+  }
+  let orders = [];
+  try {
+    if (or.length === 1) {
+      orders = await Order.find(or[0]).select('_id clientOrderId tailorId').lean();
+    } else if (or.length > 1) {
+      orders = await Order.find({ $or: or }).select('_id clientOrderId tailorId').lean();
+    }
+  } catch (e) {
+    console.error('[fetchConversationRowsForTailorShop] orders', e);
+  }
+  const matchingIds = new Set();
+  const clientToMongo = new Map();
+  for (const o of orders || []) {
+    const t = String(o.tailorId || '').trim();
+    if (t === shopTrim) {
+      const mid = String(o._id);
+      matchingIds.add(mid);
+      if (o.clientOrderId) clientToMongo.set(String(o.clientOrderId).trim(), mid);
+    }
+  }
+  const extras = legacy.filter((c) => {
+    const k = String(c.orderId || '').trim();
+    if (matchingIds.has(k)) return true;
+    const mapped = clientToMongo.get(k);
+    return Boolean(mapped && matchingIds.has(mapped));
+  });
+  return sortConversationsByActivity(dedupeConversationsByOrderId([...primary, ...extras]));
+}
+
+app.get('/conversations/customer/:customerId', requireAuth, requireRole(['customer']), async (req, res) => {
+  const cid = req.params.customerId != null ? String(req.params.customerId).trim() : '';
+  if (!cid) return res.status(400).json({ conversations: [] });
+  if (String(req.authUser.id) !== cid) return res.status(403).json({ conversations: [] });
+  try {
+    const raw = await Conversation.find({ customerId: cid }).lean();
+    const rows = sortConversationsByActivity(dedupeConversationsByOrderId(raw));
+    const ids = rows.map((r) => String(r.orderId || r.conversationId || '').trim());
+    console.log('[ChatSync API] customer conversations fetched', cid, rows.length, ids);
+    return res.json({ conversations: rows });
+  } catch (e) {
+    console.error('GET /conversations/customer/:customerId', e);
+    return res.status(500).json({ conversations: [] });
+  }
+});
+
+app.get('/conversations/tailor/:tailorId', requireAuth, requireRole(['tailor']), async (req, res) => {
+  const tid = req.params.tailorId != null ? String(req.params.tailorId).trim() : '';
+  const shop = req.authUser.tailorShopId != null ? String(req.authUser.tailorShopId).trim() : '';
+  if (!tid || !shop || tid !== shop) return res.status(403).json({ conversations: [] });
+  try {
+    const rows = await fetchConversationRowsForTailorShop(tid);
+    const ids = rows.map((r) => String(r.orderId || r.conversationId || '').trim());
+    console.log('[ChatSync API] tailor conversations fetched', tid, rows.length, ids);
+    return res.json({ conversations: rows });
+  } catch (e) {
+    console.error('GET /conversations/tailor/:tailorId', e);
+    return res.status(500).json({ conversations: [] });
+  }
+});
+
+app.get('/messages/:conversationId', requireAuth, async (req, res) => {
+  const cid = req.params.conversationId != null ? String(req.params.conversationId).trim() : '';
+  if (!cid) return res.json({ messages: [] });
+  try {
+    const orderKey = orderIdFromOrderChatConversationId(cid);
+    const order = await findOrderDocByParam(orderKey);
+    if (!order) return res.json({ messages: [] });
+    const u = req.authUser;
+    const cust = String(order.customerId || '').trim();
+    const tail = String(order.tailorId || '').trim();
+    if (u.role === 'customer') {
+      if (cust !== String(u.id)) return res.status(403).json({ messages: [] });
+    } else if (u.role === 'tailor') {
+      const shopId = u.tailorShopId != null ? String(u.tailorShopId).trim() : '';
+      if (!shopId || tail !== shopId) return res.status(403).json({ messages: [] });
+    } else {
+      return res.status(403).json({ messages: [] });
+    }
+    const variants = [...new Set([String(order._id), `order_${String(order._id)}`, cid])];
+    const rows = await Message.find({ conversationId: { $in: variants } }).sort({ timestamp: 1 }).lean();
+    return res.json({ messages: rows });
+  } catch (e) {
+    console.error('GET /messages/:conversationId', e);
+    return res.status(500).json({ messages: [] });
+  }
+});
+
 app.post('/api/auth/send-otp', async (req, res) => {
   const email = String(req.body?.email || '')
     .trim()
@@ -709,13 +840,23 @@ app.post('/api/testimonials', requireAuth, requireRole(['customer']), async (req
     return res.status(400).json({ message: 'orderId and feedback are required.' });
   }
   try {
+    console.log('POST /api/testimonials', {
+      orderIdParam,
+      authCustomerId: req.authUser?.id,
+    });
     const order = await findOrderDocByParam(orderIdParam);
     if (!order) {
+      console.warn('POST /api/testimonials order not found', orderIdParam);
       return res.status(404).json({ message: 'Order not found.' });
     }
     const canonicalOrderId = String(order._id);
     // Enforce that the logged-in customer owns the order.
     if (String(order.customerId).trim() !== String(req.authUser.id)) {
+      console.warn('POST /api/testimonials forbidden (order not owned)', {
+        canonicalOrderId,
+        orderCustomerId: String(order.customerId).trim(),
+        authCustomerId: String(req.authUser.id),
+      });
       return res.status(403).json({ message: 'Forbidden.' });
     }
     const name =
@@ -1054,11 +1195,11 @@ function computeWorkflow(raw = {}) {
 function emitToRoomUnion(ioInstance, roomNames, event, data) {
   const rooms = [...new Set((roomNames || []).map((r) => String(r).trim()).filter(Boolean))];
   if (rooms.length === 0) return;
-  let op = ioInstance.to(rooms[0]);
-  for (let i = 1; i < rooms.length; i++) {
-    op = op.to(rooms[i]);
+  if (!ioInstance || typeof ioInstance.to !== 'function') {
+    console.warn('[emitToRoomUnion] io not ready, skip', event);
+    return;
   }
-  op.emit(event, data);
+  ioInstance.to(rooms).emit(event, data);
 }
 
 async function findOrderDocByParam(orderIdParam) {
@@ -1074,6 +1215,66 @@ async function findOrderDocByParam(orderIdParam) {
     console.error('findOrderDocByParam', e);
     return null;
   }
+}
+
+/** Plain merge input for computeWorkflow — avoids rare toObject failures on hydrated docs. */
+function orderDocToPlainForWorkflow(orderDoc) {
+  if (!orderDoc || typeof orderDoc !== 'object') return {};
+  try {
+    if (typeof orderDoc.toObject === 'function') {
+      return orderDoc.toObject({ depopulate: true, virtuals: false, flattenMaps: true });
+    }
+  } catch (e) {
+    console.error('[orderDocToPlainForWorkflow] toObject failed', e && e.message);
+  }
+  try {
+    return { ...orderDoc };
+  } catch (e2) {
+    console.error('[orderDocToPlainForWorkflow] spread failed', e2 && e2.message);
+    return {};
+  }
+}
+
+/** Normalize Mongo/ObjectId / { $oid } / nested _id for order linkage fields */
+function stringifyOrderIdField(v) {
+  if (v == null || v === '') return '';
+  if (typeof v === 'object' && v !== null) {
+    // BSON / Mongoose ObjectId: never recurse on `. _id` — getters can recurse infinitely.
+    if (v instanceof mongoose.Types.ObjectId) {
+      try {
+        return v.toString();
+      } catch {
+        return '';
+      }
+    }
+    const bsonType = v._bsontype;
+    if (bsonType === 'ObjectId' || bsonType === 'ObjectID') {
+      try {
+        return String(v).trim();
+      } catch {
+        return '';
+      }
+    }
+    if (v.$oid != null) return String(v.$oid).trim();
+    if (v._id != null && v._id !== v) return stringifyOrderIdField(v._id);
+  }
+  const s = String(v).trim();
+  if (s === '[object Object]') return '';
+  return s;
+}
+
+/** True for generic demo shop ids (T-A1, T-A2, …) — never used for conversations, chat, or measurement socket rooms. */
+function isPlaceholderTailorShopId(tailorId) {
+  const t = stringifyOrderIdField(tailorId);
+  if (!t) return true;
+  return /^T-A\d+$/i.test(t);
+}
+
+/**
+ * Orders may be created before a real shop is chosen; allow PATCH { tailorId: shop } when unassigned or placeholder only.
+ */
+function isPlaceholderTailorIdForClaim(tailorId) {
+  return isPlaceholderTailorShopId(tailorId);
 }
 
 function emitOrderLiveToOrderRooms(ioInstance, canonicalOrderId, rawOrderId, payload, legacyStatusPayload) {
@@ -1163,7 +1364,7 @@ function emitMeasurementOrderToTailor(orderDoc) {
   try {
     if (!io || !orderDoc) return;
     const tid = orderDoc.tailorId != null ? String(orderDoc.tailorId).trim() : '';
-    if (!tid) return;
+    if (!tid || isPlaceholderTailorShopId(tid)) return;
     const payload = buildWorkflowSocketPayload(orderDoc);
     console.log('[Socket Sync] measurement:updated', payload.orderId, payload.status, payload.currentStepIndex);
     io.to(tid).emit('measurement:updated', payload);
@@ -1173,7 +1374,7 @@ function emitMeasurementOrderToTailor(orderDoc) {
 }
 
 /**
- * Tailor dashboard joins `join_user` with userId === tailor shop id (e.g. T-A1).
+ * Tailor dashboard joins `join_user` with userId === tailor shop id (e.g. T-U17).
  * Target that room so only the assigned tailor receives the review popup.
  */
 function emitMeasurementReviewedToTailorRoom(io, out) {
@@ -1211,6 +1412,11 @@ app.post('/orders', requireAuth, async (req, res) => {
     // Server-side safety: customers can only create orders for themselves.
     if (req.authUser.role === 'customer' && String(customerId).trim() !== String(req.authUser.id)) {
       return res.status(403).json({ message: 'Forbidden.' });
+    }
+    if (req.authUser.role === 'customer' && isPlaceholderTailorShopId(String(tailorId))) {
+      return res.status(400).json({
+        message: 'Select a tailor shop before placing your order.',
+      });
     }
     // Tailors can only create orders for their own shop id.
     if (req.authUser.role === 'tailor') {
@@ -1355,7 +1561,10 @@ app.get('/orders/:orderId', requireAuth, async (req, res) => {
     }
     if (req.authUser.role === 'tailor') {
       const shop = req.authUser.tailorShopId != null ? String(req.authUser.tailorShopId).trim() : '';
-      if (!shop || tid !== shop) return res.status(403).json({ message: 'Forbidden.' });
+      if (!shop) return res.status(403).json({ message: 'Forbidden.' });
+      if (tid !== shop) {
+        return res.status(403).json({ message: 'Forbidden.' });
+      }
     }
     return res.status(200).json(order);
   } catch (error) {
@@ -1416,11 +1625,17 @@ app.patch('/orders/:orderId', requireAuth, async (req, res) => {
   }
 
   try {
+    if (!req.authUser) {
+      return res.status(401).json({ message: 'Not authenticated.' });
+    }
+    Object.keys(updatePayload).forEach((k) => {
+      if (updatePayload[k] === undefined) delete updatePayload[k];
+    });
     const existing = await findOrderDocByParam(paramId);
     if (!existing) {
       return res.status(404).json({ message: 'Order not found.' });
     }
-    // Only owning customer or assigned tailor can patch.
+    // Only owning customer or assigned tailor can patch (tailor may claim if assigning self on placeholder).
     const cid = existing.customerId != null ? String(existing.customerId).trim() : '';
     const tid = existing.tailorId != null ? String(existing.tailorId).trim() : '';
     if (req.authUser.role === 'customer' && cid !== String(req.authUser.id)) {
@@ -1428,7 +1643,15 @@ app.patch('/orders/:orderId', requireAuth, async (req, res) => {
     }
     if (req.authUser.role === 'tailor') {
       const shop = req.authUser.tailorShopId != null ? String(req.authUser.tailorShopId).trim() : '';
-      if (!shop || tid !== shop) return res.status(403).json({ message: 'Forbidden.' });
+      if (!shop) return res.status(403).json({ message: 'Forbidden.' });
+      const bodyTailorId = b.tailorId != null ? String(b.tailorId).trim() : '';
+      const assignedToThisShop = tid === shop;
+      const claimingAsSelf =
+        bodyTailorId === shop && (assignedToThisShop || !tid || isPlaceholderTailorIdForClaim(tid));
+      if (!assignedToThisShop && !claimingAsSelf) {
+        console.warn('[PATCH /orders] tailor forbidden', { orderId: paramId, tid, shop, bodyTailorId });
+        return res.status(403).json({ message: 'Forbidden.' });
+      }
     }
     const resolvedId = String(existing._id);
 
@@ -1439,7 +1662,15 @@ app.patch('/orders/:orderId', requireAuth, async (req, res) => {
       );
     }
 
-    const unified = computeWorkflow({ ...existing.toObject(), ...updatePayload });
+    const linkBeforeWrite = deriveOrderLinkagesForConversation(existing);
+    if (linkBeforeWrite.customerId && updatePayload.customerId == null) {
+      updatePayload.customerId = linkBeforeWrite.customerId;
+    }
+    if (linkBeforeWrite.tailorId && updatePayload.tailorId == null && b.tailorId == null) {
+      updatePayload.tailorId = linkBeforeWrite.tailorId;
+    }
+
+    const unified = computeWorkflow({ ...orderDocToPlainForWorkflow(existing), ...updatePayload });
     updatePayload.status = unified.status;
     updatePayload.workflowStatus = unified.workflowStatus;
     updatePayload.currentStepIndex = unified.currentStepIndex;
@@ -1452,13 +1683,58 @@ app.patch('/orders/:orderId', requireAuth, async (req, res) => {
     if (!updatedOrder) {
       return res.status(404).json({ message: 'Order not found.' });
     }
-    emitMeasurementOrderToTailor(updatedOrder);
+    let persisted = await Order.findById(resolvedId).lean().exec();
+    if (!persisted) {
+      persisted =
+        typeof updatedOrder.toObject === 'function'
+          ? updatedOrder.toObject({ flattenMaps: true, virtuals: true })
+          : updatedOrder;
+    }
+
+    emitMeasurementOrderToTailor(persisted);
+    let payload;
     try {
-      const payload = buildWorkflowSocketPayload(updatedOrder);
+      payload = buildWorkflowSocketPayload(persisted);
+    } catch (buildErr) {
+      console.error('[Socket Sync] PATCH /orders buildWorkflowSocketPayload failed', buildErr);
+      const mid = persisted._id != null ? String(persisted._id).trim() : '';
+      const coid = persisted.clientOrderId != null ? String(persisted.clientOrderId).trim() : '';
+      const tid = persisted.tailorId != null ? String(persisted.tailorId).trim() : '';
+      const st = persisted.status != null ? normalizeOrderStatus(String(persisted.status)) : 'pending';
+      const wf =
+        persisted.workflowStatus != null ? normalizeOrderStatus(String(persisted.workflowStatus)) : st;
+      const csi = Number.isFinite(Number(persisted.currentStepIndex)) ? Number(persisted.currentStepIndex) : 0;
+      const slim = {
+        _id: mid,
+        id: mid,
+        tailorId: tid,
+        status: st,
+        workflowStatus: wf,
+        currentStepIndex: csi,
+        clientOrderId: coid,
+      };
+      payload = {
+        orderId: mid,
+        clientOrderId: coid,
+        tailorId: tid,
+        fullOrder: slim,
+        order: slim,
+        status: st,
+        workflowStatus: wf,
+        currentStepIndex: csi,
+        updatedAt: new Date().toISOString(),
+      };
+    }
+
+    try {
       const patchStatusRooms = [];
       const oid = payload.orderId != null ? String(payload.orderId).trim() : '';
+      const clientOid = payload.clientOrderId != null ? String(payload.clientOrderId).trim() : '';
       if (oid) {
         patchStatusRooms.push(oid, `map_order:${oid}`);
+      }
+      if (clientOid && clientOid !== oid) {
+        patchStatusRooms.push(clientOid, `map_order:${clientOid}`);
       }
       if (patchStatusRooms.length) {
         emitToRoomUnion(io, patchStatusRooms, 'order:statusUpdated', payload);
@@ -1472,15 +1748,24 @@ app.patch('/orders/:orderId', requireAuth, async (req, res) => {
 
       if (isAccept) {
         const oidForChat = payload.orderId != null ? String(payload.orderId).trim() : '';
+        const cust = persisted.customerId != null ? String(persisted.customerId).trim() : '';
         const ack = {
           orderId: payload.orderId,
           clientOrderId: payload.clientOrderId || '',
           tailorId: tId,
           status: payload.status,
-          chatEnabled: isOrderDocChatEnabled(updatedOrder),
-          conversationId: oidForChat ? `order_${oidForChat}` : '',
+          chatEnabled: isOrderDocChatEnabled(persisted),
+          conversationId: oidForChat || '',
+          customerId: cust,
         };
-        emitToRoomUnion(io, patchStatusRooms, 'orderAccepted', ack);
+        const orderAcceptedRooms = [...patchStatusRooms];
+        if (cust) {
+          orderAcceptedRooms.push(cust);
+          const uroom = userRoomName(cust);
+          if (uroom && uroom !== cust) orderAcceptedRooms.push(uroom);
+        }
+        console.log('[Socket Sync] orderAccepted rooms', orderAcceptedRooms.filter(Boolean), 'customerId', cust || '(none)');
+        emitToRoomUnion(io, orderAcceptedRooms, 'orderAccepted', ack);
       } else if (isReject) {
         const rej = {
           orderId: payload.orderId,
@@ -1493,16 +1778,42 @@ app.patch('/orders/:orderId', requireAuth, async (req, res) => {
     } catch (socketErr) {
       console.error('[Socket Sync] PATCH /orders emit error', socketErr);
     }
+
+    try {
+      await maybeEnsureConversationAfterOrderWrite(persisted, 'PATCH /orders');
+    } catch (convErr) {
+      console.error('[ChatSync] PATCH /orders conversation ensure failed', convErr);
+    }
+
     console.log(
       '[Workflow Engine] PATCH /orders',
-      String(updatedOrder._id),
-      updatedOrder.status,
-      updatedOrder.workflowStatus,
-      updatedOrder.currentStepIndex
+      String(persisted._id),
+      persisted.status,
+      persisted.workflowStatus,
+      persisted.currentStepIndex
     );
-    return res.status(200).json(updatedOrder);
+    let responseBody =
+      persisted && typeof persisted.toObject === 'function'
+        ? persisted.toObject({ flattenMaps: true, virtuals: true })
+        : persisted;
+    try {
+      responseBody = JSON.parse(JSON.stringify(responseBody));
+    } catch (serializeErr) {
+      console.error('[PATCH /orders] response JSON sanitize failed', serializeErr);
+      responseBody = {
+        _id: String(persisted._id),
+        status: persisted.status,
+        workflowStatus: persisted.workflowStatus,
+        currentStepIndex: persisted.currentStepIndex,
+        tailorId: persisted.tailorId,
+        customerId: persisted.customerId,
+        clientOrderId: persisted.clientOrderId,
+      };
+    }
+    return res.status(200).json(responseBody);
   } catch (error) {
-    console.error('ORDER PATCH ERROR', error);
+    console.error('ORDER PATCH ERROR', error && error.message);
+    if (error && error.stack) console.error(error.stack);
     return res.status(500).json({ message: 'Unable to update order.' });
   }
 });
@@ -1555,7 +1866,7 @@ app.put('/orders/:orderId', requireAuth, async (req, res) => {
       const shop = req.authUser.tailorShopId != null ? String(req.authUser.tailorShopId).trim() : '';
       if (!shop || tid !== shop) return res.status(403).json({ message: 'Forbidden.' });
     }
-    const unified = computeWorkflow({ ...existingOrder.toObject(), ...updatePayload });
+    const unified = computeWorkflow({ ...orderDocToPlainForWorkflow(existingOrder), ...updatePayload });
     updatePayload.status = unified.status;
     updatePayload.workflowStatus = unified.workflowStatus;
     updatePayload.currentStepIndex = unified.currentStepIndex;
@@ -1591,17 +1902,17 @@ const MAP_INTEREST_STAGGER_MS = 650;
 
 function orderIdFromOrderChatConversationId(conversationId) {
   const raw = String(conversationId || '').trim();
-  if (!raw.startsWith('order_')) return '';
-  return raw.slice('order_'.length).trim();
+  if (!raw) return '';
+  if (raw.startsWith('order_')) return raw.slice('order_'.length).trim();
+  return raw;
 }
 
 function isOrderDocChatEnabled(doc) {
   if (!doc) return false;
   const tid = doc.tailorId != null ? String(doc.tailorId).trim() : '';
-  if (!tid) return false;
+  if (!tid || isPlaceholderTailorShopId(tid)) return false;
   const v = normalizeOrderStatus(doc.status);
   if (v === 'rejected' || v === 'declined' || v === 'cancelled' || v === 'canceled') return false;
-  if (v === 'order_placed') return false;
   return true;
 }
 
@@ -1632,6 +1943,211 @@ function participantIdsMatchOrder(doc, senderId, receiverId) {
   const tid = String(doc.tailorId || '').trim();
   if (!s || !r || !cid || !tid) return false;
   return (s === cid && r === tid) || (s === tid && r === cid);
+}
+
+function userRoomName(userId) {
+  const id = userId != null ? String(userId).trim() : '';
+  if (!id) return '';
+  if (id.startsWith('user:')) return id;
+  return `user:${id}`;
+}
+
+function deriveOrderLinkagesForConversation(orderDoc) {
+  if (!orderDoc) {
+    return { oid: '', customerId: '', tailorId: '', plain: null };
+  }
+  const plain =
+    typeof orderDoc.toObject === 'function'
+      ? orderDoc.toObject({ depopulate: true })
+      : { ...orderDoc };
+  const oid =
+    plain._id != null
+      ? stringifyOrderIdField(plain._id)
+      : plain.id != null
+        ? stringifyOrderIdField(plain.id)
+        : '';
+  let customerId = stringifyOrderIdField(plain.customerId);
+  let tailorId = stringifyOrderIdField(plain.tailorId);
+  const payload = plain.orderPayload && typeof plain.orderPayload === 'object' ? plain.orderPayload : null;
+  if (!customerId && payload) {
+    const p =
+      payload.customerId ??
+      payload.customer?.id ??
+      payload.customer?._id ??
+      payload.userId ??
+      payload.user?.id;
+    if (p != null) customerId = stringifyOrderIdField(p);
+  }
+  if (!customerId && payload?.customer && typeof payload.customer === 'object') {
+    const p = payload.customer.id ?? payload.customer._id ?? payload.customer.customerId;
+    if (p != null) customerId = stringifyOrderIdField(p);
+  }
+  if (!tailorId && payload) {
+    const p =
+      payload.tailorId ??
+      payload.tailorShopId ??
+      payload.assignedTailorId ??
+      payload.tailor?.id ??
+      payload.tailor?._id;
+    if (p != null) tailorId = stringifyOrderIdField(p);
+  }
+  return { oid, customerId, tailorId, plain };
+}
+
+async function ensureConversationForOrder(orderDoc) {
+  if (!orderDoc) {
+    console.warn('[ensureConversationForOrder] missing orderDoc');
+    return null;
+  }
+  const { oid, customerId: cidRaw, tailorId: tidRaw, plain } = deriveOrderLinkagesForConversation(orderDoc);
+  const customerId = cidRaw ? String(cidRaw).trim() : '';
+  const tailorId = tidRaw ? String(tidRaw).trim() : '';
+  if (!oid) {
+    console.warn('[ensureConversationForOrder] missing order _id', {
+      keys: plain && typeof plain === 'object' ? Object.keys(plain) : [],
+    });
+    return null;
+  }
+  if (!customerId || !tailorId) {
+    console.warn('[ensureConversationForOrder] incomplete linkage — cannot upsert Conversation', {
+      orderId: oid,
+      customerId: customerId || '(missing)',
+      tailorId: tailorId || '(missing)',
+      status: plain?.status,
+      topCustomer: plain?.customerId,
+      topTailor: plain?.tailorId,
+      hasOrderPayload: Boolean(plain?.orderPayload),
+    });
+    return null;
+  }
+  if (isPlaceholderTailorShopId(tailorId)) {
+    console.warn('[ensureConversationForOrder] skip placeholder tailor', { orderId: oid, tailorId });
+    return null;
+  }
+
+  const internal = normalizeOrderStatus(plain?.status);
+  const status = internal === 'completed' ? 'completed' : 'active';
+
+  let existing = null;
+  try {
+    existing = await Conversation.findOne({ orderId: oid }).lean();
+  } catch (e) {
+    console.error('[ensureConversationForOrder] findOne', e);
+  }
+
+  const lastMessage = existing && existing.lastMessage != null ? String(existing.lastMessage) : '';
+  let lastMessageAt = null;
+  if (existing && existing.lastMessageAt != null) {
+    const d =
+      existing.lastMessageAt instanceof Date
+        ? existing.lastMessageAt
+        : new Date(existing.lastMessageAt);
+    lastMessageAt = Number.isNaN(d.getTime()) ? null : d;
+  }
+  const unreadCustomer = Math.max(0, Number(existing?.unreadCustomer ?? 0)) || 0;
+  const unreadTailor = Math.max(0, Number(existing?.unreadTailor ?? 0)) || 0;
+
+  const op = plain.orderPayload && typeof plain.orderPayload === 'object' ? plain.orderPayload : null;
+  const wizardTailorDisplay =
+    op && typeof op.assignedTailorDisplayName === 'string' && op.assignedTailorDisplayName.trim()
+      ? String(op.assignedTailorDisplayName).trim()
+      : '';
+  const nestedCustomerName =
+    op && op.customer && typeof op.customer === 'object' && typeof op.customer.name === 'string'
+      ? String(op.customer.name).trim()
+      : '';
+
+  let tailorDisplayName = String(existing?.tailorName || '').trim();
+  if (!tailorDisplayName && wizardTailorDisplay) tailorDisplayName = wizardTailorDisplay;
+  if (!tailorDisplayName && tailorId) {
+    try {
+      const tp = await TailorProfile.findOne({ tailorShopId: tailorId }).select('shopName displayName').lean();
+      if (tp) {
+        // Match public tailor list: displayName (card / person) first, then shop name.
+        tailorDisplayName = String(
+          (tp.displayName && String(tp.displayName).trim()) || tp.shopName || ''
+        ).trim();
+      }
+    } catch (e) {
+      /* ignore */
+    }
+  }
+
+  const customerDisplayName = String(
+    plain?.customerName || nestedCustomerName || existing?.customerName || ''
+  ).trim();
+
+  const full = {
+    conversationId: oid,
+    orderId: oid,
+    customerId,
+    tailorId,
+    customerName: customerDisplayName,
+    tailorName: tailorDisplayName,
+    garmentType: String(plain?.garmentType || existing?.garmentType || '').trim(),
+    status,
+    lastMessage,
+    lastMessageAt,
+    unreadCustomer,
+    unreadTailor,
+  };
+
+  try {
+    const doc = await Conversation.findOneAndUpdate(
+      { orderId: oid },
+      { $set: { ...full, updatedAt: new Date() } },
+      { new: true, upsert: true, strict: false, setDefaultsOnInsert: true }
+    );
+    console.log('[ensureConversationForOrder] upsert OK', {
+      orderId: oid,
+      customerId,
+      tailorId,
+      conversationId: doc?.conversationId,
+    });
+    return doc;
+  } catch (e) {
+    console.error('[ensureConversationForOrder] upsert failed', { orderId: oid, customerId, tailorId, err: e });
+    return null;
+  }
+}
+
+/**
+ * Run after Order PATCH/PUT when linkage may be complete (idempotent upsert).
+ */
+async function maybeEnsureConversationAfterOrderWrite(orderDoc, contextLabel = 'order-write') {
+  if (!orderDoc) {
+    console.warn('[ChatSync] maybeEnsureConversationAfterOrderWrite: missing doc', contextLabel);
+    return null;
+  }
+  const link = deriveOrderLinkagesForConversation(orderDoc);
+  const st = normalizeOrderStatus(orderDoc.status);
+  const dead = ['rejected', 'declined', 'cancelled', 'canceled'].includes(st);
+  if (dead) {
+    console.log('[ChatSync] skip conversation (terminal negative status)', contextLabel, link.oid, st);
+    return null;
+  }
+  if (!link.customerId || !link.tailorId) {
+    console.warn('[ChatSync] skip conversation (incomplete linkage after write)', contextLabel, {
+      orderId: link.oid || '(no oid)',
+      customerId: link.customerId || '(missing)',
+      tailorId: link.tailorId || '(missing)',
+    });
+    return null;
+  }
+  if (isPlaceholderTailorShopId(link.tailorId)) {
+    console.log('[ChatSync] skip conversation (placeholder tailor)', contextLabel, link.oid, link.tailorId);
+    return null;
+  }
+  try {
+    const doc = await ensureConversationForOrder(orderDoc);
+    if (!doc) {
+      console.warn('[ChatSync] Conversation upsert returned null', contextLabel, link.oid);
+    }
+    return doc;
+  } catch (e) {
+    console.error('[ChatSync] Conversation upsert threw', contextLabel, link.oid, e);
+    return null;
+  }
 }
 
 io.use(async (socket, next) => {
@@ -1738,6 +2254,8 @@ io.on('connection', (socket) => {
     if (!room) return;
     console.log('JOIN USER', room);
     socket.join(room);
+    const uroom = userRoomName(room);
+    if (uroom && uroom !== room) socket.join(uroom);
   });
 
   socket.on('join_conversation', async ({ conversationId } = {}) => {
@@ -1745,15 +2263,77 @@ io.on('connection', (socket) => {
     if (!raw) return;
     const doc = await verifySocketOrderChatAccess(socket, raw);
     if (!doc) return;
-    const room = raw.startsWith('conversation:') ? raw : `conversation:${raw}`;
-    console.log('JOIN CONVERSATION', room);
+    const canonical = String(doc._id);
+    const room = `conversation:${canonical}`;
+    console.log('[ChatSync Socket] joined room', room);
     socket.join(room);
+  });
+
+  socket.on('leave_conversation', ({ conversationId } = {}) => {
+    const raw = conversationId != null ? String(conversationId).trim() : '';
+    if (!raw) return;
+    const orderKey = orderIdFromOrderChatConversationId(raw);
+    if (!orderKey) return;
+    void (async () => {
+      const doc = await findOrderDocByParam(orderKey);
+      if (!doc) return;
+      const room = `conversation:${String(doc._id)}`;
+      socket.leave(room);
+      console.log('[ChatSync Socket] left room', room);
+    })().catch(() => {});
+  });
+
+  socket.on('typing:start', ({ conversationId } = {}) => {
+    const raw = conversationId != null ? String(conversationId).trim() : '';
+    if (!raw) return;
+    void (async () => {
+      const doc = await verifySocketOrderChatAccess(socket, raw);
+      if (!doc) return;
+      const canonical = String(doc._id);
+      io.to(`conversation:${canonical}`).emit('typing:start', { conversationId: canonical, userId: socket.authUser?.id });
+    })().catch(() => {});
+  });
+
+  socket.on('typing:stop', ({ conversationId } = {}) => {
+    const raw = conversationId != null ? String(conversationId).trim() : '';
+    if (!raw) return;
+    void (async () => {
+      const doc = await verifySocketOrderChatAccess(socket, raw);
+      if (!doc) return;
+      const canonical = String(doc._id);
+      io.to(`conversation:${canonical}`).emit('typing:stop', { conversationId: canonical, userId: socket.authUser?.id });
+    })().catch(() => {});
+  });
+
+  socket.on('messages:read', async ({ conversationId } = {}) => {
+    const raw = conversationId != null ? String(conversationId).trim() : '';
+    if (!raw) return;
+    const doc = await verifySocketOrderChatAccess(socket, raw);
+    if (!doc) return;
+    const canonical = String(doc._id);
+    const u = socket.authUser;
+    try {
+      const c = await Conversation.findOne({ orderId: canonical });
+      if (!c) return;
+      if (u.role === 'customer') c.unreadCustomer = 0;
+      if (u.role === 'tailor') c.unreadTailor = 0;
+      c.lastMessageAt = c.lastMessageAt || new Date();
+      await c.save();
+      io.to(`conversation:${canonical}`).emit('messages:read', {
+        conversationId: canonical,
+        unreadCustomer: c.unreadCustomer,
+        unreadTailor: c.unreadTailor,
+      });
+    } catch (e) {
+      console.error('messages:read', e);
+    }
   });
 
   socket.on('join_order_room', (orderId) => {
     const room = orderId != null ? String(orderId).trim() : '';
     if (!room) return;
     socket.join(room);
+    socket.join(`map_order:${room}`);
   });
 
   socket.on('order:selected', (data = {}) => {
@@ -1822,8 +2402,10 @@ io.on('connection', (socket) => {
       return;
     }
     try {
-      console.log('FETCHING CHAT HISTORY FROM DB', cid);
-      const history = await Message.find({ conversationId: cid }).sort({ timestamp: 1 }).lean();
+      const canonical = String(doc._id);
+      const variants = [...new Set([canonical, `order_${canonical}`, cid])];
+      console.log('FETCHING CHAT HISTORY FROM DB', canonical);
+      const history = await Message.find({ conversationId: { $in: variants } }).sort({ timestamp: 1 }).lean();
       socket.emit('chat_history', { messages: history });
     } catch (error) {
       console.error('REQUEST_HISTORY ERROR', error);
@@ -1861,10 +2443,11 @@ io.on('connection', (socket) => {
       if (Number.isNaN(ts.getTime())) {
         return;
       }
+      const canonical = String(doc._id);
       const savedMessage = await Message.create({
         senderId,
         receiverId,
-        conversationId,
+        conversationId: canonical,
         content,
         timestamp: ts,
         status: status || 'sent',
@@ -1888,20 +2471,49 @@ io.on('connection', (socket) => {
         receiverId: message.receiverId,
         conversationId: message.conversationId,
       });
-      const convRoom =
-        String(conversationId).trim().startsWith('conversation:')
-          ? String(conversationId).trim()
-          : `conversation:${String(conversationId).trim()}`;
+      const convRoom = `conversation:${canonical}`;
       console.log('EMITTING TO CONVERSATION ROOM', convRoom);
       io.to(convRoom).emit('message_received', message);
-      console.log('EMITTING new_notification TO CONVERSATION ROOM', convRoom);
-      io.to(convRoom).emit('new_notification', {
-        conversationId,
-        senderId,
-        content: message.content,
-        timestamp: message.timestamp,
-        type: 'new_message',
-      });
+      try {
+        let convo = await Conversation.findOne({ orderId: canonical });
+        if (!convo) {
+          console.warn('[send_message] Conversation missing; ensuring from order', canonical);
+          await ensureConversationForOrder(doc);
+          convo = await Conversation.findOne({ orderId: canonical });
+        }
+        if (convo) {
+          convo.lastMessage = String(message.content || '').slice(0, 400);
+          convo.lastMessageAt = new Date(message.timestamp);
+          if (socket.authUser?.role === 'customer') convo.unreadTailor = Math.max(0, Number(convo.unreadTailor || 0) + 1);
+          if (socket.authUser?.role === 'tailor') convo.unreadCustomer = Math.max(0, Number(convo.unreadCustomer || 0) + 1);
+          convo.status = normalizeOrderStatus(doc.status) === 'completed' ? 'completed' : convo.status || 'active';
+          await convo.save();
+          io.to(convRoom).emit('conversation:updated', {
+            conversationId: canonical,
+            lastMessage: convo.lastMessage,
+            lastMessageAt: convo.lastMessageAt,
+            unreadCustomer: convo.unreadCustomer,
+            unreadTailor: convo.unreadTailor,
+            status: convo.status,
+            customerId: String(convo.customerId || '').trim(),
+            tailorId: String(convo.tailorId || '').trim(),
+            orderId: canonical,
+          });
+          const notifyRoom =
+            socket.authUser?.role === 'customer' ? userRoomName(doc.tailorId) : userRoomName(doc.customerId);
+          if (notifyRoom) {
+            io.to(notifyRoom).emit('new_notification', {
+              conversationId: canonical,
+              senderId,
+              content: message.content,
+              timestamp: message.timestamp,
+              type: 'new_message',
+            });
+          }
+        }
+      } catch (e) {
+        console.error('Conversation update after send_message', e);
+      }
     } catch (error) {
       console.error('SEND_MESSAGE ERROR', error);
     }

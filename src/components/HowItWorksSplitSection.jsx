@@ -2,6 +2,7 @@ import React, { useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import { useNavigate } from "react-router-dom";
 import { Check, FileText, PackageCheck, Shirt, UserPlus } from "lucide-react";
+import { api } from "../api/client.js";
 
 const sectionReveal = {
   hidden: { opacity: 0, y: 20 },
@@ -129,6 +130,19 @@ function StepPill({ item, stepIndex, isActive, onSelect }) {
  */
 export default function HowItWorksSplitSection() {
   const navigate = useNavigate();
+  const goToMeasurementWizard = async () => {
+    try {
+      const data = await api("/api/auth/me");
+      const role = data?.user?.role ? String(data.user.role).trim() : "";
+      if (data?.user && role === "customer") {
+        navigate("/features/measurement-wizard");
+        return;
+      }
+    } catch {
+      // ignore
+    }
+    navigate("/login", { state: { from: "/features/measurement-wizard" } });
+  };
   const [activeId, setActiveId] = useState(() => HOW_IT_WORKS_ITEMS[0].id);
   const active =
     HOW_IT_WORKS_ITEMS.find((x) => x.id === activeId) ?? HOW_IT_WORKS_ITEMS[0];
@@ -225,7 +239,7 @@ export default function HowItWorksSplitSection() {
                   <div className="mt-10 border-t border-slate-200/60 pt-8 sm:mt-12">
                     <button
                       type="button"
-                      onClick={() => navigate("/features/measurement-wizard")}
+                      onClick={goToMeasurementWizard}
                       className="hero-cta rounded-apple bg-gradient-to-b from-[#4a7c59] to-[#355542] px-6 py-2.5 text-sm font-semibold text-white shadow-md shadow-emerald-900/20 transition-all duration-200 ease-out hover:-translate-y-0.5 hover:brightness-[1.04] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-600/45 focus-visible:ring-offset-2"
                     >
                       <span className="relative z-10">Open Measurement Experience</span>

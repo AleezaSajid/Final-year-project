@@ -1,109 +1,12 @@
-import React, { useEffect, useRef, useState } from "react";
-import { buildOutgoingChatMessage, normalizeChatId } from "./chatUtils";
-import { ensureSocketThen, socket } from "./socket";
-
-const formatTime = (timestamp) => {
-  const date = new Date(timestamp);
-  if (Number.isNaN(date.getTime())) return "";
-  return date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-};
-
-function belongsToConversation(message, conversationId) {
-  return normalizeChatId(message?.conversationId) === normalizeChatId(conversationId);
-}
+import React from "react";
+import { normalizeChatId, normalizeConversationId } from "./chatUtils";
+import { socket } from "./socket";
+import OrderChatThread from "./components/chat/OrderChatThread.jsx";
 
 export default function ChatWindow({ isOpen, onClose, senderId, receiverId, receiverName, conversationId }) {
   const sId = normalizeChatId(senderId);
   const rId = normalizeChatId(receiverId);
-  const cId = normalizeChatId(conversationId);
-  const [messages, setMessages] = useState([]);
-  const [inputValue, setInputValue] = useState("");
-  const endOfMessagesRef = useRef(null);
-  const activeConversationRef = useRef(conversationId);
-
-  useEffect(() => {
-    activeConversationRef.current = cId;
-  }, [cId]);
-
-  useEffect(() => {
-    const handleChatHistory = (payload) => {
-      const history = Array.isArray(payload?.messages) ? payload.messages : [];
-      const activeConversationId = activeConversationRef.current;
-      if (!activeConversationId) {
-        setMessages([]);
-        return;
-      }
-      setMessages(history.filter((message) => belongsToConversation(message, activeConversationId)));
-    };
-
-    const handleMessageReceived = (message) => {
-      const activeConversationId = activeConversationRef.current;
-      if (
-        !normalizeChatId(message?.conversationId) ||
-        !activeConversationId ||
-        normalizeChatId(message.conversationId) !== activeConversationId
-      ) {
-        return;
-      }
-
-      setMessages((prev) => {
-        const exists = prev.some(
-          (m) =>
-            (m.id && message.id && m.id === message.id) ||
-            (belongsToConversation(m, activeConversationId) &&
-              m.timestamp === message.timestamp &&
-              m.content === message.content)
-        );
-        return exists ? prev : [...prev, message];
-      });
-    };
-
-    socket.on("chat_history", handleChatHistory);
-    socket.on("message_received", handleMessageReceived);
-
-    return () => {
-      socket.off("chat_history", handleChatHistory);
-      socket.off("message_received", handleMessageReceived);
-    };
-  }, []);
-
-  useEffect(() => {
-    if (!isOpen || !cId) return;
-    const runJoin = () => {
-      activeConversationRef.current = cId;
-      if (sId) {
-        socket.emit("join_user", { userId: sId });
-      }
-      socket.emit("join_conversation", { conversationId: cId });
-      setMessages([]);
-      socket.emit("request_history", { conversationId: cId });
-    };
-    ensureSocketThen(runJoin);
-  }, [cId, isOpen, sId]);
-
-  useEffect(() => {
-    if (!isOpen) return;
-    endOfMessagesRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [isOpen, messages]);
-
-  const handleSend = () => {
-    const content = inputValue.trim();
-    if (!content) return;
-    if (!cId || !sId || !rId) return;
-
-    const newMessage = buildOutgoingChatMessage({
-      senderId: sId,
-      receiverId: rId,
-      conversationId: cId,
-      content,
-      status: "sent",
-    });
-    setMessages((prev) => [...prev, newMessage]);
-    setInputValue("");
-    ensureSocketThen(() => {
-      socket.emit("send_message", newMessage);
-    });
-  };
+  const cId = normalizeConversationId(conversationId);
 
   return (
     <div
@@ -113,7 +16,7 @@ export default function ChatWindow({ isOpen, onClose, senderId, receiverId, rece
       aria-hidden={!isOpen}
     >
       <div
-        className="w-full max-w-xl overflow-hidden rounded-2xl border border-white/40 shadow-[0_20px_50px_-12px_rgba(15,23,42,0.2)] ring-1 ring-white/30"
+        className="flex h-[min(90vh,640px)] w-full max-w-xl flex-col overflow-hidden rounded-2xl border border-white/40 shadow-[0_20px_50px_-12px_rgba(15,23,42,0.2)] ring-1 ring-white/30"
         style={{
           background:
             "linear-gradient(180deg, rgba(255, 255, 255, 0.72) 0%, rgba(255, 255, 255, 0.38) 100%)",
@@ -123,7 +26,7 @@ export default function ChatWindow({ isOpen, onClose, senderId, receiverId, rece
             "inset 0 1px 0 rgba(255, 255, 255, 0.5), 0 8px 32px -10px rgba(15, 23, 42, 0.15)",
         }}
       >
-        <div className="flex items-center justify-between border-b border-white/35 bg-gradient-to-r from-emerald-50/50 via-white/20 to-sky-50/30 px-5 py-4">
+        <div className="flex shrink-0 items-center justify-between border-b border-white/35 bg-gradient-to-r from-emerald-50/50 via-white/20 to-sky-50/30 px-5 py-4">
           <div>
             <h3 className="text-lg font-semibold tracking-tight text-slate-900">
               Chat with {receiverName || "Customer"}
@@ -143,59 +46,16 @@ export default function ChatWindow({ isOpen, onClose, senderId, receiverId, rece
             Close
           </button>
         </div>
-
-        <div className="max-h-[55vh] min-h-[280px] space-y-3 overflow-y-auto bg-gradient-to-b from-slate-50/60 to-white/30 px-5 py-4">
-          {messages.length === 0 ? (
-            <p className="text-center text-sm text-slate-500">No messages yet. Start the conversation.</p>
-          ) : (
-            messages.map((message) => {
-              const isSent = normalizeChatId(message.senderId) === sId;
-              return (
-                <div
-                  key={message.id || `${message.timestamp}-${message.content}`}
-                  className={`flex ${isSent ? "justify-end" : "justify-start"}`}
-                >
-                  <div
-                    className={`max-w-[80%] rounded-2xl px-3 py-2 text-sm shadow-sm ${
-                      isSent
-                        ? "bg-gradient-to-b from-[#4a7c59] to-[#3d5d48] text-white shadow-emerald-900/15"
-                        : "border border-slate-200/90 bg-white/90 text-slate-800 shadow-[0_1px_3px_rgba(15,23,42,0.06)]"
-                    }`}
-                  >
-                    <p>{message.content}</p>
-                    <p className={`mt-1 text-[10px] ${isSent ? "text-white/85" : "text-slate-500"}`}>
-                      {formatTime(message.timestamp)} · {message.status || "sent"}
-                    </p>
-                  </div>
-                </div>
-              );
-            })
-          )}
-          <div ref={endOfMessagesRef} />
-        </div>
-
-        <div className="flex items-center gap-2 border-t border-white/35 bg-white/25 px-5 py-4 backdrop-blur-md">
-          <input
-            type="text"
-            value={inputValue}
-            onChange={(event) => setInputValue(event.target.value)}
-            onKeyDown={(event) => {
-              if (event.key === "Enter") {
-                event.preventDefault();
-                handleSend();
-              }
-            }}
-            placeholder="Type your message…"
-            className="w-full rounded-xl border border-slate-200/90 bg-white/70 px-3 py-2.5 text-sm text-slate-800 shadow-inner shadow-slate-900/5 placeholder:text-slate-400 focus:border-emerald-300/80 focus:outline-none focus:ring-2 focus:ring-emerald-600/20"
-          />
-          <button
-            type="button"
-            onClick={handleSend}
-            className="shrink-0 rounded-xl bg-gradient-to-b from-[#4a7c59] to-[#3d5d48] px-4 py-2.5 text-sm font-semibold text-white shadow-md shadow-emerald-900/20 transition duration-200 hover:brightness-105 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-600/40 active:scale-[0.98]"
-          >
-            Send
-          </button>
-        </div>
+        <OrderChatThread
+          isActive={isOpen && Boolean(cId && sId && rId)}
+          mode="tailor"
+          senderId={sId}
+          receiverId={rId}
+          peerDisplayName={receiverName || "Customer"}
+          conversationId={cId}
+          theme="glass"
+          className="min-h-0 flex-1"
+        />
       </div>
     </div>
   );

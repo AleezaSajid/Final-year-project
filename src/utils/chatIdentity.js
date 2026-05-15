@@ -49,19 +49,29 @@ export function resolveTailorIdWhenViewingAsTailor(user) {
 }
 
 /**
- * Reject values that are clearly not a tailor shop id (e.g. numeric user ids written by mistake).
- * Prevents "3" as tailor + "3" as customer -> broken room "3-3".
+ * Generic demo shop ids (T-A1, T-A2, …) — must not be used for order linkage, conversations, or chat routing.
+ */
+export function isPlaceholderTailorShopId(value) {
+  const s = String(value ?? "").trim();
+  if (!s) return true;
+  return /^T-A\d+$/i.test(s);
+}
+
+/**
+ * True when value looks like a real persisted tailor shop id (e.g. T-U17, SCH-…).
+ * Excludes T-A* placeholders and non-shop values (e.g. numeric user ids).
  */
 export function looksLikeTailorShopId(value) {
   const s = String(value ?? "").trim();
   if (!s) return false;
+  if (isPlaceholderTailorShopId(s)) return false;
   if (/^T-[A-Z0-9-]+$/i.test(s)) return true;
   if (/^SCH-/i.test(s)) return true;
   return false;
 }
 
 /**
- * Tailor shop id for customer-side chat: same-session tailor id, then optional user hints, then default.
+ * Tailor shop id for customer-side orders/chat: session hint or user-assigned shop only — never a demo placeholder.
  * @param {object | null | undefined} user
  */
 export function resolveTailorIdForCustomerChat(user) {
@@ -77,7 +87,7 @@ export function resolveTailorIdForCustomerChat(user) {
       return String(id).trim();
     }
   }
-  return DEFAULT_TAILOR_CHAT_ID;
+  return "";
 }
 
 /** Persist resolved tailor id so customer chat uses the same shop id on this device. */
@@ -89,4 +99,16 @@ export function syncTailorSessionFromTailorUser(user) {
     /* ignore */
   }
   return id;
+}
+
+/** Persist a real customer-selected / order-linked shop id for wizard + chat session hint. */
+export function persistCustomerTailorShopSession(shopId) {
+  const s = shopId != null ? String(shopId).trim() : "";
+  if (!looksLikeTailorShopId(s)) return false;
+  try {
+    localStorage.setItem(TAILOR_SESSION_STORAGE_KEY, s);
+    return true;
+  } catch {
+    return false;
+  }
 }

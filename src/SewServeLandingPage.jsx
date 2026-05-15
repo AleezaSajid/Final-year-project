@@ -21,6 +21,7 @@ import LandingNavbar from "./components/LandingNavbar.jsx";
 import HowItWorksSplitSection from "./components/HowItWorksSplitSection.jsx";
 import { useSewServeLogoProcessedSrc } from "./hooks/useSewServeLogoProcessedSrc";
 import { fetchTestimonials } from "./api/testimonialsApi.js";
+import { api } from "./api/client.js";
 const navLinks = [
   { label: "Home", sectionId: "home" },
   { label: "About", sectionId: "about" },
@@ -121,6 +122,20 @@ export default function SewServeLandingPage() {
   const logoDisplaySrc = useSewServeLogoProcessedSrc(LOGO_SRC);
   const [newsletterEmail, setNewsletterEmail] = useState("");
   const [storedTestimonials, setStoredTestimonials] = useState([]);
+
+  const goToMeasurementWizard = async () => {
+    try {
+      const data = await api("/api/auth/me");
+      const role = data?.user?.role ? String(data.user.role).trim() : "";
+      if (data?.user && role === "customer") {
+        navigate("/features/measurement-wizard");
+        return;
+      }
+    } catch {
+      // ignore
+    }
+    navigate("/login", { state: { from: "/features/measurement-wizard" } });
+  };
 
   useEffect(() => {
     let cancelled = false;
@@ -546,7 +561,7 @@ export default function SewServeLandingPage() {
                 >
                   <button
                     type="button"
-                    onClick={() => navigate("/features/measurement-wizard")}
+                    onClick={goToMeasurementWizard}
                     aria-label="Book a fitting — open measurement wizard"
                     className="hero-cta rounded-apple bg-gradient-to-b from-[#4a7c59] to-[#355542] px-[18px] py-2.5 text-base font-semibold text-white transition-all duration-200 ease-out hover:-translate-y-1 hover:brightness-[1.04] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-600/45 focus-visible:ring-offset-2"
                   >

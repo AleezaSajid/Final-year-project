@@ -1,4 +1,6 @@
-const DEFAULT_TAILOR_FOR_PAIR = "T-A1";
+import { isPlaceholderTailorShopId, looksLikeTailorShopId } from "./utils/chatIdentity.js";
+
+const DEFAULT_TAILOR_FOR_PAIR = "order-peer";
 
 /**
  * Deterministic id for the 1:1 room (both ids required; no duplicate self-pair).
@@ -20,21 +22,66 @@ export const getConversationId = (userA, userB) => {
     .join("-");
 };
 
-/** Private chat room id for an accepted order (matches persisted `Message.conversationId`). */
+/** Private chat room id for an accepted order (plain Mongo order id; matches `Conversation.orderId`). */
 export function getOrderChatConversationId(orderId) {
-  const id = orderId != null ? String(orderId).trim() : "";
-  if (!id) return "";
-  return `order_${id}`;
+  return normalizeConversationId(orderId);
 }
 
-export function isOrderEligibleForChat(order) {
+/** Strip legacy `order_` prefix from stored message `conversationId` values. */
+export function canonicalOrderIdFromChatConversationId(conversationId) {
+  const raw = conversationId != null ? String(conversationId).trim() : "";
+  if (!raw) return "";
+  if (raw.startsWith("order_")) return raw.slice("order_".length).trim();
+  return raw;
+}
+
+/**
+ * Single canonical order id for conversations, socket rooms, and state keys.
+ * `order_abc` → `abc`; plain ids unchanged.
+ */
+export function normalizeConversationId(id) {
+  return canonicalOrderIdFromChatConversationId(normalizeChatId(id));
+}
+
+/** True if a message belongs to this order’s chat (canonical id or legacy `order_${id}`). */
+export function messageBelongsToOrderChat(message, orderIdCanonical) {
+  const mid = normalizeConversationId(message?.conversationId);
+  const want = normalizeConversationId(orderIdCanonical);
+  if (!mid || !want) return false;
+  if (mid === want) return true;
+  if (normalizeChatId(message?.conversationId) === `order_${want}`) return true;
+  return false;
+}
+
+/** Prefer a human-readable label; never show internal shop/user ids in chat UI. */
+export function displayChatActorName(...candidates) {
+  for (const c of candidates) {
+    const s = c != null ? String(c).trim() : "";
+    if (!s) continue;
+    if (/^T-[A-Z0-9-]+$/i.test(s)) continue;
+    if (/^SCH-/i.test(s)) continue;
+    if (/^CU-\d+$/i.test(s)) continue;
+    if (/^\d+$/.test(s)) continue;
+    return s;
+  }
+  return "";
+}
+
+/**
+ * @param {object} order
+ * @param {{ allowLegacyPlaceholderTailor?: boolean }} [options] — when true, still allow chat for legacy rows
+ *   whose `tailorId` is a demo shop id (e.g. T-A1). Order creation APIs remain strict elsewhere.
+ */
+export function isOrderEligibleForChat(order, options = {}) {
   if (!order || typeof order !== "object") return false;
+  const allowLegacy = Boolean(options.allowLegacyPlaceholderTailor);
   const tid = order.tailorId != null ? String(order.tailorId).trim() : "";
   if (!tid) return false;
+  const tailorOk = looksLikeTailorShopId(tid) || (allowLegacy && isPlaceholderTailorShopId(tid));
+  if (!tailorOk) return false;
   const raw = order.status ?? order.workflowStatus ?? "";
   const s = String(raw).trim().toLowerCase().replace(/\s+/g, "_");
   if (["rejected", "declined", "cancelled", "canceled"].includes(s)) return false;
-  if (s === "order_placed") return false;
   return true;
 }
 
@@ -80,12 +127,47 @@ export function normalizeChatId(v) {
   return String(v).trim();
 }
 
+/** Log malformed conversation rows (does not throw). */
+export function logConversationRowsValidation(rows, label) {
+  const list = Array.isArray(rows) ? rows : [];
+  const seen = new Set();
+  for (let i = 0; i < list.length; i += 1) {
+    const r = list[i];
+    if (!r || typeof r !== "object") {
+      console.warn("[ChatSync Validation]", label, "malformed row at index", i, r);
+      continue;
+    }
+    const oid = normalizeConversationId(r.orderId ?? r.conversationId);
+    if (!oid) console.warn("[ChatSync Validation]", label, "missing orderId/conversationId", r);
+    const tid = normalizeChatId(r.tailorId);
+    const cid = normalizeChatId(r.customerId);
+    if (!tid) console.warn("[ChatSync Validation]", label, "missing tailorId", r);
+    if (!cid) console.warn("[ChatSync Validation]", label, "missing customerId", r);
+    if (oid && seen.has(oid)) console.warn("[ChatSync Validation]", label, "duplicate conversationId", oid);
+    if (oid) seen.add(oid);
+  }
+}
+
+/** Dedupe by normalized order id; keeps first occurrence. */
+export function dedupeConversationsByOrderId(rows) {
+  const list = Array.isArray(rows) ? rows : [];
+  const out = [];
+  const seen = new Set();
+  for (const r of list) {
+    const oid = normalizeConversationId(r?.orderId ?? r?.conversationId);
+    if (!oid || seen.has(oid)) continue;
+    seen.add(oid);
+    out.push(r);
+  }
+  return out;
+}
+
 /** Payload the server and clients both understand (string ids only). */
 export function buildOutgoingChatMessage({ senderId, receiverId, conversationId, content, status }) {
   return {
     senderId: normalizeChatId(senderId),
     receiverId: normalizeChatId(receiverId),
-    conversationId: normalizeChatId(conversationId),
+    conversationId: normalizeConversationId(conversationId),
     content: String(content || "").trim(),
     timestamp: new Date().toISOString(),
     status: status || "sent",

@@ -7,6 +7,7 @@ import { clearUserRole } from "../utils/userRole";
 import { TAILOR_SESSION_STORAGE_KEY } from "../utils/chatIdentity.js";
 import { useCustomerChat } from "../context/CustomerChatContext.jsx";
 import { useTailorDashboardChat } from "../context/TailorDashboardChatContext.jsx";
+import { useAuth } from "../context/AuthContext.jsx";
 
 function isDashboardRoute(pathname) {
   if (["/select-workspace", "/workspace"].includes(pathname)) return true;
@@ -38,6 +39,7 @@ export default function DashboardNavbar() {
   const navigate = useNavigate();
   const location = useLocation();
   const [mobileOpen, setMobileOpen] = useState(false);
+  const { logout } = useAuth();
   const customerChat = useCustomerChat();
   const tailorDashChat = useTailorDashboardChat();
   const tailorChatRef = useRef(tailorDashChat);
@@ -54,6 +56,12 @@ export default function DashboardNavbar() {
       console.log("OPENING CONVERSATION", { role: "tailor", via: "openChatFromActiveOrder" });
       tailorDashChat.openChatFromActiveOrder();
       handleCloseMobileMenu();
+      window.requestAnimationFrame(() => {
+        document.getElementById("tailor-chat-workspace")?.scrollIntoView({
+          behavior: "smooth",
+          block: "start",
+        });
+      });
       window.setTimeout(() => {
         const t = tailorChatRef.current;
         const receiverId = t?.activeChatCustomer?.id;
@@ -67,23 +75,25 @@ export default function DashboardNavbar() {
       const senderId = customerChat.customerId;
       const receiverId = customerChat.tailorIdForChat;
       const conv = customerChat.conversationId;
-      console.log("OPENING CONVERSATION", { role: "customer", via: "openCustomerChat" });
+      console.log("OPENING CONVERSATION", { role: "customer", via: "scrollToWorkspace" });
       console.log("CONVERSATION ID", conv);
       console.log("SENDER / RECEIVER IDS", { senderId, receiverId });
-      customerChat.openCustomerChat();
       handleCloseMobileMenu();
-      window.setTimeout(() => {
-        const c = customerChatRef.current;
-        console.log("CONVERSATION ID (post-open)", c?.conversationId);
-        console.log("SENDER / RECEIVER IDS (post-open)", { senderId: c?.customerId, receiverId: c?.tailorIdForChat });
-      }, 0);
+      window.requestAnimationFrame(() => {
+        const el = document.getElementById("customer-chat-workspace");
+        if (el) {
+          el.scrollIntoView({ behavior: "smooth", block: "start" });
+        } else {
+          customerChat.openCustomerChat?.();
+        }
+      });
       return;
     }
     navigate("/select-workspace");
     handleCloseMobileMenu();
   };
 
-  const handleLogout = () => {
+  const handleLogout = async () => {
     localStorage.removeItem("sewserve_auth_token");
     sessionStorage.removeItem("sewserve_auth_token");
     localStorage.removeItem("currentUser");
@@ -93,6 +103,11 @@ export default function DashboardNavbar() {
       /* ignore */
     }
     clearUserRole();
+    try {
+      await logout();
+    } catch {
+      /* ignore */
+    }
     navigate("/");
     handleCloseMobileMenu();
   };

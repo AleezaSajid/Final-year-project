@@ -6,13 +6,25 @@ import { getUserRole } from "../../utils/userRole.js";
 import { canUpdateWorkflowStatus, resolveWorkflowControlRole } from "../../utils/workflowRole.js";
 import { buildViewModelFromFullWizardData } from "../../utils/wizardDataToReviewViewModel.js";
 import { ensureSocketThen, socket } from "../../socket";
-import { getOrderChatConversationId, isOrderEligibleForChat, normalizeChatId } from "../../chatUtils";
+import {
+  dedupeConversationsByOrderId,
+  getOrderChatConversationId,
+  isOrderEligibleForChat,
+  logConversationRowsValidation,
+  messageBelongsToOrderChat,
+  normalizeChatId,
+  normalizeConversationId,
+} from "../../chatUtils";
+import {
+  clearConversationJoinRegistry,
+  isConversationRoomJoined,
+  notifyConversationRoomJoined,
+} from "../../conversationJoinRegistry.js";
 import {
   resolveTailorIdWhenViewingAsTailor,
   syncTailorSessionFromTailorUser,
 } from "../../utils/chatIdentity.js";
 import {
-  API_BASE_URL,
   DEFAULT_CUSTOMER_ID,
   defaultProfiles,
   GARMENT_REGEX,
@@ -25,6 +37,7 @@ import {
   workflowStages,
 } from "../constants";
 import { getTailorProfileSelf, patchTailorProfileSelf } from "../../api/accountApi.js";
+import { getApiBaseUrl } from "../../api/client.js";
 import { getPriorityScore, isTailorActiveTask } from "../../utils/workflowEngine.js";
 
 function isPlainOrderObject(v) {
@@ -87,6 +100,21 @@ function orderIsActiveCurrentTask(order) {
   return isTailorActiveTask(order) && w.internalStatus !== "completed";
 }
 
+function sortTailorConversationsDesc(rows) {
+  const deduped = dedupeConversationsByOrderId(rows);
+  return [...deduped].sort((a, b) => {
+    const ta = new Date(a?.lastMessageAt || a?.updatedAt || 0).getTime();
+    const tb = new Date(b?.lastMessageAt || b?.updatedAt || 0).getTime();
+    return tb - ta;
+  });
+}
+
+function tailorConvRowIndex(list, rawId) {
+  const n = normalizeConversationId(rawId);
+  if (!n) return -1;
+  return list.findIndex((r) => normalizeConversationId(r?.orderId ?? r?.conversationId) === n);
+}
+
 export function useTailorDashboard() {
   const { user } = useAuth();
   const navigate = useNavigate();
@@ -136,12 +164,15 @@ export function useTailorDashboard() {
   const [unreadChatCount, setUnreadChatCount] = useState(0);
   const [activeChatCustomer, setActiveChatCustomer] = useState({ id: "", name: "Customer" });
   const [activeConversationId, setActiveConversationId] = useState("");
+  /** From GET /conversations/tailor/:id — source for dashboard chat list + unread. */
+  const [tailorChatConversations, setTailorChatConversations] = useState([]);
   const [reviewModalOpen, setReviewModalOpen] = useState(false);
   const [reviewModalOrder, setReviewModalOrder] = useState(null);
   /** Latest `wizardData` from `measurement:reviewed` (includes normalized `image`). */
   const [reviewCardData, setReviewCardData] = useState(null);
   /** Dedupe when server emits to both tailor room + order room (same socket may be in both). */
   const measurementReviewDedupeRef = useRef("");
+  const tailorReconcileRefetchAtRef = useRef(0);
 
   useEffect(() => {
     setOrders([]);
@@ -160,10 +191,17 @@ export function useTailorDashboard() {
   }, [isChatOpen]);
 
   const fetchOrders = useCallback(async () => {
+    const base = getApiBaseUrl();
+    const tid = String(activeTailorShopId || "").trim();
+    if (!base || !tid) return null;
     try {
-      const url = `${API_BASE_URL}/orders?tailorId=${encodeURIComponent(activeTailorShopId)}`;
-      const res = await fetch(url);
-      const data = await res.json();
+      const url = `${base}/orders?tailorId=${encodeURIComponent(tid)}`;
+      const res = await fetch(url, { credentials: "include" });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        console.error("[TailorDashboard] fetchOrders failed", res.status, data);
+        return null;
+      }
       if (!Array.isArray(data)) return null;
       const normalizedData = data.map(toStoreOrder);
 
@@ -175,9 +213,59 @@ export function useTailorDashboard() {
     }
   }, [activeTailorShopId]);
 
+  const fetchTailorConversations = useCallback(async () => {
+    const tid = String(activeTailorShopId || "").trim();
+    if (!tid || user?.role !== "tailor") return;
+    const base = getApiBaseUrl();
+    if (!base) return;
+    try {
+      const res = await fetch(`${base}/conversations/tailor/${encodeURIComponent(tid)}`, {
+        credentials: "include",
+      });
+      const data = await res.json().catch(() => ({}));
+      const list = Array.isArray(data?.conversations) ? data.conversations : [];
+      logConversationRowsValidation(list, "tailor fetch");
+      console.log("[ChatSync tailor] fetched conversations", list.length, list);
+      setTailorChatConversations(sortTailorConversationsDesc(list));
+    } catch (e) {
+      console.error("[ChatSync tailor] fetch conversations failed", e);
+    }
+  }, [activeTailorShopId, user?.role]);
+
+  const scheduleTailorConversationsReconcile = useCallback(
+    (reason) => {
+      const now = Date.now();
+      if (now - tailorReconcileRefetchAtRef.current < 1600) return;
+      tailorReconcileRefetchAtRef.current = now;
+      console.log("[ChatSync] reconcile refetch tailor conversations", reason);
+      void fetchTailorConversations();
+    },
+    [fetchTailorConversations]
+  );
+
   useEffect(() => {
     void fetchOrders();
   }, [fetchOrders]);
+
+  useEffect(() => {
+    void fetchTailorConversations();
+  }, [fetchTailorConversations]);
+
+  const tailorSidebarUnread = useMemo(
+    () =>
+      tailorChatConversations.reduce((n, c) => n + Math.max(0, Number(c.unreadTailor || 0)), 0),
+    [tailorChatConversations]
+  );
+
+  useEffect(() => {
+    if (user?.role !== "tailor") return;
+    const convOpen = Boolean(String(activeConversationId || "").trim());
+    if (isChatOpen || convOpen) {
+      setUnreadChatCount(0);
+      return;
+    }
+    setUnreadChatCount(Math.min(tailorSidebarUnread, 999));
+  }, [tailorSidebarUnread, isChatOpen, activeConversationId, user?.role]);
 
   useEffect(() => {
     // Remove legacy "New order from ..." noise from existing in-memory notifications.
@@ -227,9 +315,112 @@ export function useTailorDashboard() {
         ...prev,
         `New message from ${payload?.senderId || "Customer"}: ${payload?.content || ""}`,
       ]);
-      if (!isChatOpenRef.current) {
-        setUnreadChatCount((c) => Math.min(c + 1, 999));
+      const nCid = normalizeConversationId(payload?.conversationId);
+      if (nCid) {
+        setTailorChatConversations((prev) => {
+          const list = Array.isArray(prev) ? [...prev] : [];
+          const i = tailorConvRowIndex(list, nCid);
+          if (i < 0) {
+            const stub = {
+              orderId: nCid,
+              conversationId: nCid,
+              tailorId: String(activeTailorShopId || "").trim(),
+              customerId: normalizeChatId(payload?.senderId) || "",
+              lastMessage: String(payload?.content || "").slice(0, 400),
+              lastMessageAt: payload?.timestamp || new Date().toISOString(),
+              unreadTailor: Math.max(0, Number(payload?.unreadTailor ?? 1)),
+              unreadCustomer: Math.max(0, Number(payload?.unreadCustomer ?? 0)),
+              status: "active",
+            };
+            list.unshift(stub);
+            scheduleTailorConversationsReconcile("new_notification_missing_row");
+            return sortTailorConversationsDesc(list);
+          }
+          const row = { ...list[i] };
+          row.lastMessage = String(payload?.content || "").slice(0, 400);
+          row.lastMessageAt = payload?.timestamp || new Date().toISOString();
+          list.splice(i, 1);
+          list.unshift(row);
+          return sortTailorConversationsDesc(list);
+        });
       }
+    };
+
+    const onConversationUpdated = (payload) => {
+      console.log("[ChatSync] conversation:updated", payload);
+      const nCid = normalizeConversationId(payload?.conversationId);
+      if (!nCid) return;
+      setTailorChatConversations((prev) => {
+        const list = Array.isArray(prev) ? [...prev] : [];
+        const i = tailorConvRowIndex(list, nCid);
+        const base =
+          i >= 0
+            ? { ...list[i] }
+            : {
+                orderId: nCid,
+                conversationId: nCid,
+                tailorId: normalizeChatId(payload?.tailorId) || String(activeTailorShopId || "").trim(),
+                customerId: normalizeChatId(payload?.customerId) || "",
+                lastMessage: "",
+                lastMessageAt: null,
+                unreadCustomer: 0,
+                unreadTailor: 0,
+                status: "active",
+              };
+        const merged = {
+          ...base,
+          ...payload,
+          conversationId: nCid,
+          orderId: nCid,
+        };
+        if (payload.lastMessage != null) merged.lastMessage = payload.lastMessage;
+        if (payload.lastMessageAt != null) merged.lastMessageAt = payload.lastMessageAt;
+        if (payload.unreadCustomer != null) merged.unreadCustomer = payload.unreadCustomer;
+        if (payload.unreadTailor != null) merged.unreadTailor = payload.unreadTailor;
+        if (payload.status != null) merged.status = payload.status;
+        if (normalizeChatId(payload?.tailorId)) merged.tailorId = normalizeChatId(payload.tailorId);
+        if (normalizeChatId(payload?.customerId)) merged.customerId = normalizeChatId(payload.customerId);
+        if (i >= 0) list.splice(i, 1);
+        list.unshift(merged);
+        return sortTailorConversationsDesc(list);
+      });
+    };
+
+    const onMessageReceivedSidebar = (message) => {
+      console.log("[ChatSync] message_received (tailor sidebar)", message);
+      const nCid = normalizeConversationId(message?.conversationId);
+      if (!nCid) return;
+      setTailorChatConversations((prev) => {
+        const list = Array.isArray(prev) ? [...prev] : [];
+        const i = list.findIndex((r) => {
+          const rid = normalizeConversationId(r?.orderId ?? r?.conversationId);
+          return rid && (rid === nCid || messageBelongsToOrderChat(message, rid));
+        });
+        if (i < 0) {
+          const text = String(message?.content ?? "").trim();
+          const stub = {
+            orderId: nCid,
+            conversationId: nCid,
+            tailorId: String(activeTailorShopId || "").trim(),
+            customerId: normalizeChatId(message?.senderId) || "",
+            lastMessage: text ? text.slice(0, 400) : "",
+            lastMessageAt: message?.timestamp || new Date().toISOString(),
+            unreadTailor: 0,
+            unreadCustomer: 0,
+            status: "active",
+          };
+          list.unshift(stub);
+          scheduleTailorConversationsReconcile("message_received_missing_row");
+          return sortTailorConversationsDesc(list);
+        }
+        const row = { ...list[i] };
+        const text = String(message?.content ?? "").trim();
+        if (text) row.lastMessage = text.slice(0, 400);
+        row.lastMessageAt = message?.timestamp || new Date().toISOString();
+        list.splice(i, 1);
+        list.unshift(row);
+        return sortTailorConversationsDesc(list);
+      });
     };
 
     const onMeasurementUpdated = (payload) => {
@@ -385,6 +576,8 @@ export function useTailorDashboard() {
     socket.on("connect", joinRoom);
     if (socket.connected) joinRoom();
     socket.on("new_notification", handleNewNotification);
+    socket.on("conversation:updated", onConversationUpdated);
+    socket.on("message_received", onMessageReceivedSidebar);
     socket.on("measurement:updated", onMeasurementUpdated);
     socket.on("measurement:reviewed", onMeasurementReviewed);
     socket.on("order:new", onOrderNew);
@@ -393,12 +586,14 @@ export function useTailorDashboard() {
     return () => {
       socket.off("connect", joinRoom);
       socket.off("new_notification", handleNewNotification);
+      socket.off("conversation:updated", onConversationUpdated);
+      socket.off("message_received", onMessageReceivedSidebar);
       socket.off("measurement:updated", onMeasurementUpdated);
       socket.off("measurement:reviewed", onMeasurementReviewed);
       socket.off("order:new", onOrderNew);
       socket.off("order:statusUpdated", onOrderStatusUpdatedRelay);
     };
-  }, [fetchOrders, activeTailorShopId]);
+  }, [fetchOrders, fetchTailorConversations, scheduleTailorConversationsReconcile, activeTailorShopId]);
 
   useEffect(() => {
     console.log("[TailorDashboard] isChatOpen:", isChatOpen);
@@ -415,22 +610,33 @@ export function useTailorDashboard() {
 
   useEffect(() => {
     if (!activeTailorShopId) return;
-    const joinOrderConversations = () => {
-      const seen = new Set();
+    const joinOrderConversations = (isReconnect) => {
+      if (isReconnect) {
+        clearConversationJoinRegistry();
+        console.log("[ChatSync Socket] rejoined room (connect)");
+      }
+      const tryJoin = (raw, reason) => {
+        const n = normalizeConversationId(raw);
+        if (!n) return;
+        if (isConversationRoomJoined(n)) return;
+        notifyConversationRoomJoined(n);
+        console.log("[ChatSync Socket] joined room", n, reason);
+        socket.emit("join_conversation", { conversationId: n });
+      };
       for (const order of tailorOrders) {
         if (!isOrderEligibleForChat(order)) continue;
         const oid = order.id ?? order._id;
-        const conv = getOrderChatConversationId(oid);
-        const n = normalizeChatId(conv);
-        if (!n || seen.has(n)) continue;
-        seen.add(n);
-        socket.emit("join_conversation", { conversationId: n });
+        tryJoin(getOrderChatConversationId(oid), "from_order");
+      }
+      for (const row of tailorChatConversations) {
+        tryJoin(row?.orderId ?? row?.conversationId, "from_conversation_row");
       }
     };
-    joinOrderConversations();
-    socket.on("connect", joinOrderConversations);
-    return () => socket.off("connect", joinOrderConversations);
-  }, [activeTailorShopId, tailorOrders]);
+    joinOrderConversations(false);
+    const onConnect = () => joinOrderConversations(true);
+    socket.on("connect", onConnect);
+    return () => socket.off("connect", onConnect);
+  }, [activeTailorShopId, tailorOrders, tailorChatConversations]);
 
   const activeOrder = useMemo(() => {
     if (tailorOrders.length === 0) return null;
@@ -628,12 +834,21 @@ export function useTailorDashboard() {
           status: "pending",
         });
         await fetchOrders();
-      } catch {
+        await fetchTailorConversations();
+        window.setTimeout(() => {
+          console.log("[ChatSync] reconcile refetch tailor conversations (accept_order_delayed)");
+          void fetchTailorConversations();
+        }, 1500);
+      } catch (e) {
+        console.error("ACCEPT ORDER ERROR", e);
         await fetchOrders();
-        setNotifications((prev) => ["Could not accept the order right now.", ...prev]);
+        const msg =
+          (e && typeof e === "object" && "message" in e && e.message ? String(e.message) : "") ||
+          "Could not accept the order right now.";
+        setNotifications((prev) => [msg, ...prev]);
       }
     },
-    [activeTailorShopId, fetchOrders, setNotifications, setOrders]
+    [activeTailorShopId, fetchOrders, fetchTailorConversations]
   );
 
   const advanceWorkflow = async () => {
@@ -680,7 +895,7 @@ export function useTailorDashboard() {
     }
     const targetCustomerId = normalizeChatId(order.customerId) || DEFAULT_CUSTOMER_ID;
     const oid = String(order.id ?? order._id ?? "").trim();
-    const conversationId = getOrderChatConversationId(oid);
+    const conversationId = normalizeConversationId(getOrderChatConversationId(oid));
 
     setActiveChatCustomer({
       id: targetCustomerId,
@@ -689,7 +904,6 @@ export function useTailorDashboard() {
     setActiveConversationId(conversationId);
 
     setActiveOrderId(order.id);
-    setIsChatOpen(true);
   };
 
   const openChatFromActiveOrder = () => {
@@ -714,8 +928,14 @@ export function useTailorDashboard() {
     if (Object.keys(nextErrors).length > 0) return;
 
     try {
-      const response = await fetch(`${API_BASE_URL}/orders`, {
+      const base = getApiBaseUrl();
+      if (!base) {
+        setNotifications((prev) => ["API base URL is not configured.", ...prev]);
+        return;
+      }
+      const response = await fetch(`${base}/orders`, {
         method: "POST",
+        credentials: "include",
         headers: {
           "Content-Type": "application/json",
         },
@@ -901,6 +1121,8 @@ export function useTailorDashboard() {
     unreadChatCount,
     activeChatCustomer,
     activeConversationId,
+    tailorChatConversations,
+    fetchTailorConversations,
     tailorOrders,
     activeOrder,
     upcomingOrders,

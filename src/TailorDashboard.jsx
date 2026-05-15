@@ -3,11 +3,10 @@ import { createPortal } from "react-dom";
 import { useLocation } from "react-router-dom";
 import DashboardNavbar from "./components/DashboardNavbar";
 import { LandingStylePageBackground } from "./components/LandingStylePageBackground.jsx";
-import ChatWindow from "./ChatWindow";
 import TdDashboardOverview from "./tailorDashboard/components/TdDashboardOverview";
+import TailorWhatsAppWorkspace from "./components/chat/TailorWhatsAppWorkspace.jsx";
 import OrderPopup from "./tailorDashboard/components/OrderPopup.jsx";
 import { TailorDashboardChatContext } from "./context/TailorDashboardChatContext.jsx";
-import { DEFAULT_CUSTOMER_ID } from "./tailorDashboard/constants";
 import { useTailorDashboard } from "./tailorDashboard/hooks/useTailorDashboard";
 import { ensureSocketThen, socket } from "./socket.js";
 import { useAuth } from "./context/AuthContext.jsx";
@@ -121,16 +120,17 @@ export default function TailorDashboard() {
             )
           : null}
         <div className="relative z-10 mx-auto max-w-7xl space-y-10 px-4 pb-16 pt-6 sm:px-6 lg:px-8">
+          <TailorWhatsAppWorkspace
+            tailorChatConversations={dash.tailorChatConversations}
+            orders={dash.orders}
+            openChatForOrder={dash.openChatForOrder}
+            activeConversationId={dash.activeConversationId}
+            activeChatCustomer={dash.activeChatCustomer}
+            activeTailorShopId={dash.activeTailorShopId}
+            setActiveOrderId={dash.setActiveOrderId}
+          />
           <TdDashboardOverview {...dash} />
         </div>
-        <ChatWindow
-          isOpen={dash.isChatOpen}
-          onClose={() => dash.setIsChatOpen(false)}
-          senderId={dash.activeTailorShopId}
-          receiverId={dash.activeChatCustomer.id || DEFAULT_CUSTOMER_ID}
-          receiverName={dash.activeChatCustomer.name || "Customer"}
-          conversationId={dash.activeConversationId}
-        />
         {/** Temporarily disabled to avoid double popups (keep logic untouched). */}
         {null}
       </div>

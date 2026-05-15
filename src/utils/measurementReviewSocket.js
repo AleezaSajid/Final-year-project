@@ -1,7 +1,7 @@
 import { ensureSocketThen, socket } from "../socket.js";
 import { resolveTailorIdForCustomerChat } from "./chatIdentity.js";
-import { DEFAULT_TAILOR_SHOP_ID } from "../tailorDashboard/constants.js";
 import { patchOrderWizardFields } from "../api/ordersApi.js";
+import { resolveOrderCustomerId, resolveWizardTailorShopIdForOrder } from "./measurementOrderPayload.js";
 import { getLinkedWizardOrderId, syncWizardOrderToServer } from "./measurementWizardOrderSync.js";
 
 function cloneWizardState(wizardData) {
@@ -121,17 +121,37 @@ function buildMapNewOrderPayload(orderId, full) {
  * measurement:review with a single unfiltered `wizardData` object.
  * @param {Record<string, unknown>} wizardData — entire wizard state (no field picking)
  * @param {object | null} authUser
+ * @param {{ tailorResolutionHints?: { activeChatTailorShopId?: string; latestConversationTailorShopId?: string } }} [emitOptions]
  */
-export async function emitWizardMeasurementReview(wizardData, authUser) {
+export async function emitWizardMeasurementReview(wizardData, authUser, emitOptions = {}) {
+  const tailorResolutionHints = emitOptions.tailorResolutionHints;
   if (typeof window === "undefined" || !wizardData || typeof wizardData !== "object") {
     return { ok: false, orderId: null };
   }
   const full = cloneWizardState(wizardData);
   normalizeWizardImageForEmit(full);
-  const syncedOrderId = await syncWizardOrderToServer(full, authUser);
+  const cid = resolveOrderCustomerId(authUser);
+  const tid = resolveWizardTailorShopIdForOrder(full, authUser, tailorResolutionHints);
+  if (!cid) {
+    throw new Error("Please sign in to place an order.");
+  }
+  if (!tid) {
+    console.warn("[measurement:review emit] blocked: no tailor id after resolve", {
+      tailorResolutionHints,
+      assignedInPayload: full?.assignedTailorShopId,
+    });
+    throw new Error("Please select a tailor before placing order.");
+  }
+  full.assignedTailorShopId = tid;
+  const syncedOrderId = await syncWizardOrderToServer(full, authUser, {
+    rejectOnCreateFailure: true,
+    tailorResolutionHints,
+  });
   const orderId = syncedOrderId || getLinkedWizardOrderId();
   if (!orderId) {
-    throw new Error("Could not create order from wizard. Please try again.");
+    throw new Error(
+      "Could not create your order. Choose a tailor (from the map or tailor list) before finishing, then try again."
+    );
   }
   try {
     await patchOrderWizardFields(orderId, { orderPayload: full });
@@ -142,9 +162,10 @@ export async function emitWizardMeasurementReview(wizardData, authUser) {
     full && typeof full.assignedTailorShopId === "string" && full.assignedTailorShopId.trim()
       ? full.assignedTailorShopId.trim()
       : "";
-  const tailorId = String(
-    assigned || resolveTailorIdForCustomerChat(authUser) || DEFAULT_TAILOR_SHOP_ID
-  );
+  const tailorId = String(assigned || resolveTailorIdForCustomerChat(authUser) || "").trim();
+  if (!tailorId) {
+    console.warn("[measurement:review emit] missing tailor shop id; socket payload may not route to a shop.");
+  }
   const socketPayload = buildMeasurementReviewSocketPayload(orderId, tailorId, full);
   console.log("[measurement:review emit] wizardData.image:", socketPayload?.wizardData?.image);
   socket.emit("measurement:review", socketPayload);

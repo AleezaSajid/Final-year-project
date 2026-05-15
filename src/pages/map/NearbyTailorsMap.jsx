@@ -13,7 +13,7 @@ import NearbyTailorsSection from "./components/NearbyTailorsSection";
 import TailorCard from "./components/TailorCard";
 import { distanceKm, formatDistance } from "./utils/haversine";
 import { useAuth } from "../../context/AuthContext.jsx";
-import { resolveCustomerIdForChat } from "../../utils/chatIdentity.js";
+import { isPlaceholderTailorShopId, resolveCustomerIdForChat } from "../../utils/chatIdentity.js";
 import { getCustomerMeta, putCustomerMeta } from "../../api/accountApi.js";
 import { tailorMarkerIcon, userMarkerIcon } from "./markerIcons.js";
 import { normalizeWorkflowStatus } from "../../utils/workflowEngine.js";
@@ -100,6 +100,8 @@ function orderEventMatches(orderEvent, oid) {
   if (!o) return false;
   const direct = orderEvent.orderId != null ? String(orderEvent.orderId).trim() : "";
   if (direct && orderIdsMatch(direct, o)) return true;
+  const clientDirect = orderEvent.clientOrderId != null ? String(orderEvent.clientOrderId).trim() : "";
+  if (clientDirect && orderIdsMatch(clientDirect, o)) return true;
   const full = orderEvent.fullOrder || orderEvent.order || null;
   if (full && typeof full === "object") {
     const id = full.id != null ? String(full.id).trim() : "";
@@ -378,30 +380,18 @@ export default function NearbyTailorsMap() {
         "";
       if (st) setOrderLiveHint(`Latest: ${st}`);
 
-      // Tailor "accept" updates order status via order:statusUpdated.
-      // Redirect customer to dashboard once we can infer the order is accepted/assigned.
+      // Tailor accept keeps workflow at "pending" but assigns a real shop id (T-U…); T-A* are demo placeholders only.
+      // Do not require matchStatus === "confirmed" or lastMapTailorRequest — customer may only have ?orderId= in the URL.
       if (!redirectedRef.current) {
         const internal = normalizeWorkflowStatus(st);
         const orderObj = data.fullOrder || data.order || null;
         const orderTailorId =
           orderObj && orderObj.tailorId != null ? String(orderObj.tailorId).trim() : "";
-        const last = lastMapTailorRequestRef.current;
-        const requestedTailorId = last?.tailorId != null ? String(last.tailorId).trim() : "";
-        const requestedOrderId = last?.orderId != null ? String(last.orderId).trim() : "";
-
-        // Only redirect if this browser actually sent a request for this order.
-        if (!requestedOrderId || !orderIdsMatch(requestedOrderId, oid)) return;
-
-        // Consider "accepted" if either:
-        // - status advanced past pending, OR
-        // - backend attached a tailorId (assignment) for this order.
-        // We don't require id equality here because some environments store
-        // tailor id as Mongo _id vs tailorShopId.
-        const isAssigned = Boolean(orderTailorId);
-        if (
-          matchStatusRef.current === "confirmed" &&
-          ((internal && internal !== "pending") || isAssigned)
-        ) {
+        const topTailorId = data.tailorId != null ? String(data.tailorId).trim() : "";
+        const effectiveTailorId = orderTailorId || topTailorId;
+        const assignedToRealTailor = Boolean(effectiveTailorId) && !isPlaceholderTailorShopId(effectiveTailorId);
+        const statusAdvanced = Boolean(internal && internal !== "pending");
+        if (assignedToRealTailor || statusAdvanced) {
           redirectedRef.current = true;
           navigate("/customer/dashboard", { replace: true });
         }
@@ -713,6 +703,7 @@ export default function NearbyTailorsMap() {
                 className="mt-6 rounded-apple-card border border-emerald-200/70 bg-emerald-50/85 px-4 py-3 text-emerald-950 shadow-sm sm:px-5 sm:py-4"
                 role="status"
               >
+              
                 {matchStatus === "confirmed" ? (
                   <div>
                     <p className="text-sm font-semibold">Request sent</p>

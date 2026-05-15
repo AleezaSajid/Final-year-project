@@ -7,8 +7,9 @@ import { TAILOR_SESSION_STORAGE_KEY } from "./utils/chatIdentity.js";
 import { useAuth } from "./context/AuthContext.jsx";
 import { useCustomerChat } from "./context/CustomerChatContext.jsx";
 import { createTestimonial } from "./api/testimonialsApi.js";
+import { getApiBaseUrl } from "./api/client.js";
 
-const API_BASE_URL = "http://localhost:5000";
+const API_BASE_URL = getApiBaseUrl() || "http://localhost:5000";
 
 const C = {
   heading: "#1a1a1a",
@@ -60,7 +61,7 @@ export default function CustomerReviewPage() {
 
     const fetchOrder = async () => {
       try {
-        const response = await fetch(`${API_BASE_URL}/orders/${orderId}`);
+        const response = await fetch(`${API_BASE_URL}/orders/${orderId}`, { credentials: "include" });
         if (!response.ok) {
           if (isMounted) setOrder(null);
           return;
@@ -123,6 +124,7 @@ export default function CustomerReviewPage() {
     try {
       const response = await fetch(`${API_BASE_URL}/orders/${safeOrder.id}`, {
         method: "PUT",
+        credentials: "include",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           customerReview: {
@@ -143,20 +145,19 @@ export default function CustomerReviewPage() {
           (typeof safeOrder.customerName === "string" && safeOrder.customerName.trim()) || "Customer";
         const feedback = String(customerComment || "").trim();
         if (feedback) {
-          const avatarSeed = encodeURIComponent(String(safeOrder.id || "review"));
           await createTestimonial({
             orderId: String(safeOrder.id || ""),
             name,
             feedback,
-            avatar: `https://i.pravatar.cc/64?u=${avatarSeed}`,
+            avatar: "",
             rating: Number(customerRating) || 0,
             customerUserId: user?.id,
             customerEmail: user?.email,
           });
           window.dispatchEvent(new CustomEvent("sewserve:testimonials-updated"));
         }
-      } catch {
-        /* ignore */
+      } catch (e) {
+        console.error("CREATE TESTIMONIAL ERROR", e);
       }
 
       alert("Review submitted successfully");
