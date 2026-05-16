@@ -15,10 +15,21 @@ import {
   isOrderEligibleForChat,
   normalizeConversationId,
 } from "../../chatUtils.js";
-import { DEFAULT_AVATAR, resolveOrderWorkflowState } from "../../tailorDashboard/constants.js";
+import { resolveOrderWorkflowState } from "../../tailorDashboard/constants.js";
 import { resolveConversationPeers } from "../../utils/orderChatParticipants.js";
 import OrderChatThread from "./OrderChatThread.jsx";
 import { mergeSidebarRowsWithInjected } from "./workspaceSidebarMerge.js";
+import {
+  avatarClassName,
+  chatInitials,
+  chatStatusBadge,
+  shortOrderId,
+  sidebarNameClass,
+  sidebarPreviewClass,
+  sidebarRowClassName,
+  sidebarTimeClass,
+  sidebarUnreadClass,
+} from "./chatWorkspaceUi.js";
 
 function conversationRowCompleted(conv, orderList) {
   if (conv?.status === "completed") return true;
@@ -93,6 +104,7 @@ export default function CustomerWhatsAppWorkspace({
   );
 
   const peerTailorName = peers?.peerDisplayName || "Your tailor";
+  const headerOrderShort = shortOrderId(normalizedActive);
 
   const filteredConversations = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -179,6 +191,7 @@ export default function CustomerWhatsAppWorkspace({
   const isChatEnabled = Boolean(
     chatStub && peers?.senderId && peers?.receiverId && isOrderChatEnabled(chatStub)
   );
+  const headerBadge = chatStatusBadge(activeRow, chatStub || activeOrder);
   const canSelect = Boolean(
     chatStub && peers?.tailorId && isOrderEligibleForChat(chatStub, { allowLegacyPlaceholderTailor: true })
   );
@@ -278,28 +291,34 @@ export default function CustomerWhatsAppWorkspace({
                       <button
                         type="button"
                         onClick={() => selectConversation(conv)}
-                        className={`flex w-full gap-3 px-3 py-3 text-left transition hover:bg-slate-50 ${
-                          selected ? "bg-emerald-50/80" : "bg-white"
-                        }`}
+                        className={sidebarRowClassName(selected)}
                       >
-                        <img
-                          src={DEFAULT_AVATAR}
-                          alt=""
-                          className="h-12 w-12 shrink-0 rounded-full object-cover ring-2 ring-white shadow-sm"
-                        />
+                        <div className={avatarClassName("md")} aria-hidden>
+                          {chatInitials(tailorLabel)}
+                        </div>
                         <div className="min-w-0 flex-1">
                           <div className="flex items-center justify-between gap-2">
-                            <span className="truncate font-medium text-slate-900">{tailorLabel}</span>
-                            <span className="shrink-0 text-[11px] text-slate-400">{timeLabel}</span>
+                            <span className={sidebarNameClass}>{tailorLabel}</span>
+                            <span className={sidebarTimeClass}>{timeLabel}</span>
                           </div>
-                          <div className="mt-0.5 flex items-center justify-between gap-2">
-                            <p className="truncate text-sm text-slate-600">{preview}</p>
+                          {shortOrderId(oid) ? (
+                            <p className="mt-0.5 truncate font-mono text-[10px] text-slate-400">
+                              {shortOrderId(oid)}
+                            </p>
+                          ) : null}
+                          <div className="mt-1 flex items-center gap-2">
+                            <p className={sidebarPreviewClass}>{preview}</p>
                             {unread > 0 ? (
-                              <span className="shrink-0 rounded-full bg-[#25d366] px-1.5 py-0.5 text-[10px] font-bold text-white">
+                              <span className={sidebarUnreadClass}>
                                 {unread > 99 ? "99+" : unread}
                               </span>
                             ) : null}
                           </div>
+                          <span
+                            className={`mt-1.5 inline-block ${chatStatusBadge(conv, order).className}`}
+                          >
+                            {chatStatusBadge(conv, order).label}
+                          </span>
                         </div>
                       </button>
                     </li>
@@ -326,15 +345,20 @@ export default function CustomerWhatsAppWorkspace({
                 >
                   <ArrowLeft className="h-5 w-5" />
                 </button>
-                <img
-                  src={DEFAULT_AVATAR}
-                  alt=""
-                  className="h-10 w-10 shrink-0 rounded-full object-cover"
-                />
+                <div className={avatarClassName("sm")} aria-hidden>
+                  {chatInitials(peerTailorName)}
+                </div>
                 <div className="min-w-0 flex-1">
-                  <p className="truncate font-semibold text-slate-900">{peerTailorName}</p>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <p className="truncate text-base font-bold text-slate-900">{peerTailorName}</p>
+                    <span className={`shrink-0 ${headerBadge.className}`}>
+                      {headerBadge.label}
+                    </span>
+                  </div>
                   <p className="truncate text-xs text-slate-500">
-                    {activeOrder?.garmentType ? String(activeOrder.garmentType) : "Order chat"} ·{" "}
+                    {headerOrderShort ? `Order ${headerOrderShort}` : "Order chat"}
+                    {activeOrder?.garmentType ? ` · ${String(activeOrder.garmentType)}` : ""}
+                    {" · "}
                     <span className={socket.connected ? "text-emerald-700" : "text-amber-700"}>
                       {socket.connected ? "Online" : "Connecting…"}
                     </span>
@@ -421,11 +445,9 @@ export default function CustomerWhatsAppWorkspace({
                 >
                   <ArrowLeft className="h-5 w-5" />
                 </button>
-                <img
-                  src={DEFAULT_AVATAR}
-                  alt=""
-                  className="h-28 w-28 rounded-full object-cover shadow-md ring-4 ring-white"
-                />
+                <div className={avatarClassName("lg", "h-28 w-28 text-xl shadow-md ring-4 ring-white")} aria-hidden>
+                  {chatInitials(peerTailorName)}
+                </div>
                 <h3 className="mt-4 text-center text-xl font-semibold text-slate-900">{peerTailorName}</h3>
                 {activeOrder?.tailorId ? (
                   <p className="mt-1 text-center text-sm text-slate-500">Tailor ID: {String(activeOrder.tailorId)}</p>
