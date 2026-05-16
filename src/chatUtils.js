@@ -68,6 +68,42 @@ export function displayChatActorName(...candidates) {
 }
 
 /**
+ * True when tailor must accept before chat (customer selected tailor, not yet accepted).
+ */
+export function isOrderAwaitingTailorAccept(order) {
+  if (!order || typeof order !== "object") return false;
+  if (order.isActive === true || order.acceptedAt) return false;
+  const raw = order.status ?? order.workflowStatus ?? "";
+  const s = String(raw).trim().toLowerCase().replace(/\s+/g, "_");
+  if (s === "accepted" || s === "active") return false;
+  if (s === "awaiting_tailor_selection" || s === "draft") return false;
+  return s === "pending" || s === "awaiting_acceptance" || s === "order_placed";
+}
+
+/**
+ * Per-order chat unlock (matches backend `isOrderDocChatEnabled`).
+ * @param {object} order
+ * @param {{ conversationStatus?: string }} [options]
+ */
+export function isOrderChatEnabled(order, options = {}) {
+  if (!order || typeof order !== "object") return false;
+  const convSt =
+    options.conversationStatus != null
+      ? String(options.conversationStatus).trim().toLowerCase().replace(/\s+/g, "_")
+      : "";
+  if (convSt === "accepted") return true;
+  const tid = order.tailorId != null ? String(order.tailorId).trim() : "";
+  if (!tid || isPlaceholderTailorShopId(tid)) return false;
+  const raw = order.status ?? order.workflowStatus ?? "";
+  const s = String(raw).trim().toLowerCase().replace(/\s+/g, "_");
+  if (["rejected", "declined", "cancelled", "canceled"].includes(s)) return false;
+  if (order.isActive === true || order.acceptedAt) return true;
+  if (order.chatEnabled === false) return false;
+  if (s === "awaiting_tailor_selection" || s === "draft") return false;
+  return s === "accepted" || s === "active";
+}
+
+/**
  * @param {object} order
  * @param {{ allowLegacyPlaceholderTailor?: boolean }} [options] — when true, still allow chat for legacy rows
  *   whose `tailorId` is a demo shop id (e.g. T-A1). Order creation APIs remain strict elsewhere.
@@ -79,10 +115,7 @@ export function isOrderEligibleForChat(order, options = {}) {
   if (!tid) return false;
   const tailorOk = looksLikeTailorShopId(tid) || (allowLegacy && isPlaceholderTailorShopId(tid));
   if (!tailorOk) return false;
-  const raw = order.status ?? order.workflowStatus ?? "";
-  const s = String(raw).trim().toLowerCase().replace(/\s+/g, "_");
-  if (["rejected", "declined", "cancelled", "canceled"].includes(s)) return false;
-  return true;
+  return isOrderChatEnabled(order);
 }
 
 /** Keeps customer chat `customerId` aligned with `order.customerId` (tailor uses the same field). */

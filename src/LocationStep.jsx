@@ -108,7 +108,7 @@ export default function LocationStep() {
       }
     }
 
-    let pendingOrderId = normalizeText(location.state?.orderId);
+    let pendingOrderId = normalizeText(location.state?.wizardOrderId || location.state?.orderId);
     if (!pendingOrderId && user?.id && user.role === "customer") {
       try {
         const meta = await getCustomerMeta(user);
@@ -118,8 +118,20 @@ export default function LocationStep() {
       }
     }
 
-    navigate(pendingOrderId ? `/map?orderId=${encodeURIComponent(pendingOrderId)}` : "/map");
+    const mapState = {
+      fromWizard: Boolean(location.state?.fromWizard),
+      wizardOrderId: pendingOrderId,
+      returnAfterSelect: location.state?.returnAfterSelect || "",
+      wizardNotice: location.state?.wizardNotice || "",
+    };
+    if (pendingOrderId) {
+      navigate(`/map?orderId=${encodeURIComponent(pendingOrderId)}`, { state: mapState });
+    } else {
+      navigate("/map", { state: mapState });
+    }
   }, [address, lat, lng, navigate, location.state, user]);
+
+  const wizardNotice = normalizeText(location.state?.wizardNotice);
 
   return (
     <div
@@ -144,6 +156,12 @@ export default function LocationStep() {
               </p>
             </div>
           </div>
+
+          {wizardNotice ? (
+            <div className="mt-4 rounded-xl border border-emerald-200 bg-emerald-50/90 px-4 py-3 text-sm font-medium text-emerald-900">
+              {wizardNotice}
+            </div>
+          ) : null}
 
           {error ? (
             <div className="mt-4 rounded-xl border border-amber-200 bg-amber-50/80 px-4 py-3 text-sm font-medium text-amber-900">

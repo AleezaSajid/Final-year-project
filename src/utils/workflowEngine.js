@@ -76,6 +76,7 @@ function socketEnumToInternal(raw, currentStepIndex) {
 
 export function normalizeWorkflowStatus(value) {
   let s = toSnake(value || "pending");
+  if (s === "accepted" || s === "active") return "accepted";
   if (s === "inprogress") s = "in_progress";
   if (s === "orderplaced" || s === "order_placed") s = "pending";
   if (s === "new") s = "pending";

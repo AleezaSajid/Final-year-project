@@ -9,8 +9,15 @@ import {
   Video,
 } from "lucide-react";
 import { socket } from "../../socket.js";
-import { isOrderEligibleForChat, normalizeConversationId, displayChatActorName } from "../../chatUtils.js";
+import {
+  displayChatActorName,
+  isOrderAwaitingTailorAccept,
+  isOrderChatEnabled,
+  isOrderEligibleForChat,
+  normalizeConversationId,
+} from "../../chatUtils.js";
 import { DEFAULT_AVATAR, resolveOrderWorkflowState } from "../../tailorDashboard/constants.js";
+import { resolveConversationPeers } from "../../utils/orderChatParticipants.js";
 import OrderChatThread from "./OrderChatThread.jsx";
 import { mergeSidebarRowsWithInjected } from "./workspaceSidebarMerge.js";
 
@@ -50,11 +57,13 @@ export default function TailorWhatsAppWorkspace({
   tailorChatConversations = [],
   orders = [],
   openChatForOrder,
+  acceptOrderIntoCurrentTasks,
   activeConversationId = "",
   activeChatCustomer = { id: "", name: "Customer" },
   activeTailorShopId = "",
   setActiveOrderId,
 }) {
+  const [acceptBusy, setAcceptBusy] = useState(false);
   const [filter, setFilter] = useState("all");
   const [search, setSearch] = useState("");
   const [mobilePanel, setMobilePanel] = useState("list");
@@ -68,25 +77,61 @@ export default function TailorWhatsAppWorkspace({
 
   /** Ensures the open order chat always has a sidebar row (API list may be empty or not yet hydrated). */
   const injectedSidebarRow = useMemo(() => {
-    if (!normalizedActive || !activeTailorShopId || !activeChatCustomer?.id) return null;
+    if (!normalizedActive || !activeTailorShopId) return null;
+    const fromApi = tailorChatConversations.find(
+      (c) => normalizeConversationId(c.orderId ?? c.conversationId) === normalizedActive
+    );
+    const customerId =
+      fromApi?.customerId || activeOrder?.customerId || activeChatCustomer?.id || "";
+    if (!customerId) return null;
     return {
       orderId: normalizedActive,
       conversationId: normalizedActive,
-      customerId: activeChatCustomer.id,
-      customerName: activeChatCustomer.name || "Customer",
-      tailorId: activeTailorShopId,
-      garmentType: activeOrder?.garmentType || "",
-      lastMessage: "",
-      lastMessageAt: activeOrder?.updatedAt || activeOrder?.createdAt || new Date().toISOString(),
-      unreadTailor: 0,
-      status: "active",
+      customerId,
+      customerName:
+        fromApi?.customerName || activeOrder?.customerName || activeChatCustomer?.name || "Customer",
+      tailorId: fromApi?.tailorId || activeOrder?.tailorId || activeTailorShopId,
+      garmentType: activeOrder?.garmentType || fromApi?.garmentType || "",
+      lastMessage: fromApi?.lastMessage || "",
+      lastMessageAt:
+        fromApi?.lastMessageAt ||
+        activeOrder?.updatedAt ||
+        activeOrder?.createdAt ||
+        new Date().toISOString(),
+      unreadTailor: fromApi != null ? Number(fromApi.unreadTailor || 0) : 0,
+      status: fromApi?.status || "active",
     };
-  }, [normalizedActive, activeTailorShopId, activeChatCustomer, activeOrder]);
+  }, [
+    normalizedActive,
+    activeTailorShopId,
+    activeChatCustomer,
+    activeOrder,
+    tailorChatConversations,
+  ]);
 
   const sidebarRows = useMemo(
     () => mergeSidebarRowsWithInjected(tailorChatConversations, injectedSidebarRow),
     [tailorChatConversations, injectedSidebarRow]
   );
+
+  const activeRow = useMemo(() => {
+    if (!normalizedActive) return null;
+    return (
+      sidebarRows.find(
+        (c) => normalizeConversationId(c.orderId ?? c.conversationId) === normalizedActive
+      ) || null
+    );
+  }, [sidebarRows, normalizedActive]);
+
+  const peers = useMemo(
+    () =>
+      activeRow && activeTailorShopId
+        ? resolveConversationPeers({ row: activeRow, currentUserId: activeTailorShopId, mode: "tailor" })
+        : null,
+    [activeRow, activeTailorShopId]
+  );
+
+  const peerCustomerName = peers?.peerDisplayName || activeChatCustomer?.name || "Customer";
 
   const filteredConversations = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -139,39 +184,41 @@ export default function TailorWhatsAppWorkspace({
   ]);
 
   const chatStub = useMemo(() => {
-    if (!normalizedActive || !activeChatCustomer?.id || !activeTailorShopId) return null;
+    if (!normalizedActive || !activeTailorShopId) return null;
     if (activeOrder) return activeOrder;
-    return buildOrderStubFromConv(
-      {
-        orderId: normalizedActive,
-        conversationId: normalizedActive,
-        customerId: activeChatCustomer.id,
-        customerName: activeChatCustomer.name,
-        tailorId: activeTailorShopId,
-        status: "processing",
-      },
-      activeTailorShopId
-    );
-  }, [normalizedActive, activeOrder, activeChatCustomer, activeTailorShopId]);
+    if (activeRow) return buildOrderStubFromConv(activeRow, activeTailorShopId);
+    return null;
+  }, [normalizedActive, activeOrder, activeRow, activeTailorShopId]);
 
-  const canSend = Boolean(chatStub && isOrderEligibleForChat(chatStub));
+  const chatUnlocked = Boolean(
+    chatStub && isOrderChatEnabled(chatStub, { conversationStatus: activeRow?.status })
+  );
+  const awaitingAccept = Boolean(chatStub && isOrderAwaitingTailorAccept(chatStub));
+  const canSelect = Boolean(chatStub && peers?.customerId);
 
   const selectConversation = useCallback(
     (conv) => {
       const oid = normalizeConversationId(conv.orderId ?? conv.conversationId ?? "");
       const order = orders.find((o) => String(o.id ?? o._id) === oid);
-      const stub =
-        order && isOrderEligibleForChat(order)
-          ? order
-          : isOrderEligibleForChat(buildOrderStubFromConv(conv, activeTailorShopId))
-            ? buildOrderStubFromConv(conv, activeTailorShopId)
-            : null;
-      if (!stub) return;
-      openChatForOrder?.(stub);
+      const stub = order || buildOrderStubFromConv(conv, activeTailorShopId);
+      if (!stub || !conv.customerId) return;
+      const locked = !isOrderEligibleForChat(stub);
+      openChatForOrder?.(stub, { allowLocked: locked });
       setMobilePanel("chat");
     },
     [orders, openChatForOrder, activeTailorShopId]
   );
+
+  const handleAcceptActiveOrder = useCallback(async () => {
+    const oid = normalizeConversationId(normalizedActive);
+    if (!oid || !acceptOrderIntoCurrentTasks || acceptBusy) return;
+    setAcceptBusy(true);
+    try {
+      await acceptOrderIntoCurrentTasks(oid, chatStub || activeOrder);
+    } finally {
+      setAcceptBusy(false);
+    }
+  }, [normalizedActive, acceptOrderIntoCurrentTasks, acceptBusy, chatStub, activeOrder]);
 
   const filterBtn = (id, label) => (
     <button
@@ -281,7 +328,7 @@ export default function TailorWhatsAppWorkspace({
             mobilePanel === "list" ? "hidden lg:flex" : "flex"
           }`}
         >
-          {normalizedActive && canSend ? (
+          {normalizedActive ? (
             <>
               <header className="flex shrink-0 items-center gap-3 border-b border-slate-200/80 bg-[#f0f2f5] px-2 py-2 sm:px-4">
                 <button
@@ -298,9 +345,7 @@ export default function TailorWhatsAppWorkspace({
                   className="h-10 w-10 shrink-0 rounded-full object-cover"
                 />
                 <div className="min-w-0 flex-1">
-                  <p className="truncate font-semibold text-slate-900">
-                    {activeChatCustomer?.name || "Customer"}
-                  </p>
+                  <p className="truncate font-semibold text-slate-900">{peerCustomerName}</p>
                   <p className="truncate text-xs text-slate-500">
                     {activeOrder?.garmentType ? String(activeOrder.garmentType) : "Order chat"} ·{" "}
                     <span className={socket.connected ? "text-emerald-700" : "text-amber-700"}>
@@ -343,12 +388,32 @@ export default function TailorWhatsAppWorkspace({
                   <ImageIcon className="h-5 w-5" />
                 </button>
               </header>
+              {awaitingAccept ? (
+                <div className="shrink-0 border-b border-amber-200/80 bg-amber-50/95 px-4 py-3 sm:px-5">
+                  <p className="text-sm font-semibold text-amber-950">Accept this order to unlock chat</p>
+                  <p className="mt-1 text-xs text-amber-900/85">
+                    The customer assigned you on the map. Accept to start messaging.
+                  </p>
+                  <button
+                    type="button"
+                    disabled={acceptBusy}
+                    onClick={() => void handleAcceptActiveOrder()}
+                    className="mt-3 rounded-xl bg-gradient-to-b from-[#4a7c59] to-[#355542] px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:brightness-105 disabled:opacity-60"
+                  >
+                    {acceptBusy ? "Accepting…" : "Accept order"}
+                  </button>
+                </div>
+              ) : null}
               <OrderChatThread
-                isActive={Boolean(canSend && normalizedActive)}
+                isActive={Boolean(normalizedActive && activeTailorShopId && peers?.conversationId && canSelect)}
+                isChatEnabled={chatUnlocked}
                 mode="tailor"
-                senderId={activeTailorShopId}
-                receiverId={activeChatCustomer?.id}
-                peerDisplayName={activeChatCustomer?.name || "Customer"}
+                senderId={peers?.senderId}
+                receiverId={peers?.receiverId}
+                customerId={peers?.customerId}
+                tailorId={peers?.tailorId}
+                orderId={peers?.orderId}
+                peerDisplayName={peerCustomerName}
                 conversationId={normalizedActive}
                 theme="whatsapp"
                 className="min-h-0 flex-1"
@@ -391,9 +456,7 @@ export default function TailorWhatsAppWorkspace({
                   alt=""
                   className="h-28 w-28 rounded-full object-cover shadow-md ring-4 ring-white"
                 />
-                <h3 className="mt-4 text-center text-xl font-semibold text-slate-900">
-                  {activeChatCustomer?.name || "Customer"}
-                </h3>
+                <h3 className="mt-4 text-center text-xl font-semibold text-slate-900">{peerCustomerName}</h3>
                 <p className="mt-1 text-center text-sm text-slate-500">
                   {activeOrder?.garmentType ? String(activeOrder.garmentType) : "Order conversation"}
                 </p>

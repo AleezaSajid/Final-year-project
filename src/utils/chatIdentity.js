@@ -112,3 +112,12 @@ export function persistCustomerTailorShopSession(shopId) {
     return false;
   }
 }
+
+/** Clear stale tailor session when starting a new wizard order. */
+export function clearCustomerTailorShopSession() {
+  try {
+    localStorage.removeItem(TAILOR_SESSION_STORAGE_KEY);
+  } catch {
+    /* ignore */
+  }
+}

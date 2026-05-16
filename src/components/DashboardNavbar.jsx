@@ -72,12 +72,7 @@ export default function DashboardNavbar() {
       return;
     }
     if (isCustomerChatRoute(location.pathname) && customerChat?.openCustomerChat) {
-      const senderId = customerChat.customerId;
-      const receiverId = customerChat.tailorIdForChat;
-      const conv = customerChat.conversationId;
       console.log("OPENING CONVERSATION", { role: "customer", via: "scrollToWorkspace" });
-      console.log("CONVERSATION ID", conv);
-      console.log("SENDER / RECEIVER IDS", { senderId, receiverId });
       handleCloseMobileMenu();
       window.requestAnimationFrame(() => {
         const el = document.getElementById("customer-chat-workspace");

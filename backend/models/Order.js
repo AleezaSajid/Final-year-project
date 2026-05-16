@@ -10,7 +10,7 @@ const orderSchema = new mongoose.Schema(
     },
     tailorId: {
       type: String,
-      required: true,
+      default: '',
       index: true,
       trim: true,
     },
@@ -87,6 +87,16 @@ const orderSchema = new mongoose.Schema(
       type: Boolean,
       default: false,
       index: true,
+    },
+    /** Customer↔tailor messaging allowed only after tailor accepts. */
+    chatEnabled: {
+      type: Boolean,
+      default: false,
+      index: true,
+    },
+    acceptedAt: {
+      type: Date,
+      default: null,
     },
     dueDate: {
       type: Date,

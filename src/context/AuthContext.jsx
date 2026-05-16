@@ -1,5 +1,18 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
 import { api } from "../api/client.js";
+import { reconnectSocketSession } from "../socket.js";
+import { clearLinkedWizardOrderId } from "../utils/measurementWizardOrderSync.js";
+
+function authIdsMatch(a, b) {
+  const sa = a != null ? String(a).trim() : "";
+  const sb = b != null ? String(b).trim() : "";
+  if (!sa || !sb) return false;
+  if (sa === sb) return true;
+  const na = Number(sa);
+  const nb = Number(sb);
+  if (!Number.isNaN(na) && !Number.isNaN(nb) && na === nb) return true;
+  return false;
+}
 
 const AuthContext = createContext(null);
 const CURRENT_USER_KEY = "currentUser";
@@ -59,12 +72,19 @@ export function AuthProvider({ children }) {
 
   /** JWT is issued by the server in an HTTP-only cookie; credentials: include sends it on /api/* */
   const login = useCallback(async (email, password) => {
+    const prevUser = readStoredUser();
     const data = await api("/api/login", {
       method: "POST",
       json: { email: String(email || "").trim().toLowerCase(), password },
     });
+    const prevId = prevUser?.id != null ? String(prevUser.id).trim() : "";
+    const nextId = data.user?.id != null ? String(data.user.id).trim() : "";
+    if (prevId && nextId && !authIdsMatch(prevId, nextId)) {
+      clearLinkedWizardOrderId();
+    }
     setUser(data.user);
     writeStoredUser(data.user);
+    reconnectSocketSession();
     return data;
   }, []);
 
@@ -79,6 +99,7 @@ export function AuthProvider({ children }) {
     }
     setUser(data.user);
     writeStoredUser(data.user);
+    reconnectSocketSession();
     return data;
   }, []);
 

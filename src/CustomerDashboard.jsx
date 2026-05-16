@@ -864,15 +864,7 @@ function CustomerDashboardChatCard({ activeOrder, onOpenMessages }) {
 export default function CustomerDashboard() {
   const navigate = useNavigate();
   const { user } = useAuth();
-  const {
-    syncCustomerOrderChatFromOrder,
-    customerChatConversations,
-    customerId: chatCustomerId,
-    conversationId: activeConversationId,
-    tailorIdForChat,
-    isChatOpen,
-    lastChatPreview,
-  } = useCustomerChat();
+  const { customerChatConversations, customerId: chatCustomerId } = useCustomerChat();
   const [orders, setOrders] = useState([]);
   /** Selected order for details (workflow/profile); empty string = default to latest in list. */
   const [activeOrderId, setActiveOrderId] = useState("");
@@ -937,10 +929,6 @@ export default function CustomerDashboard() {
   useEffect(() => {
     void fetchOrders();
   }, [fetchOrders]);
-
-  useEffect(() => {
-    syncCustomerOrderChatFromOrder(activeOrder ?? null);
-  }, [activeOrder, syncCustomerOrderChatFromOrder]);
 
   useEffect(() => {
     const cid = String(resolveCustomerIdForChat(user) || "").trim();
@@ -1123,12 +1111,7 @@ export default function CustomerDashboard() {
                 customerChatConversations={customerChatConversations}
                 orders={orders}
                 customerId={chatCustomerId}
-                conversationId={activeConversationId}
-                tailorIdForChat={tailorIdForChat}
-                syncCustomerOrderChatFromOrder={syncCustomerOrderChatFromOrder}
                 setActiveOrderId={setActiveOrderId}
-                isChatOpen={isChatOpen}
-                lastChatPreview={lastChatPreview}
               />
             </div>
 

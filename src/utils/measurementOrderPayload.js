@@ -192,7 +192,12 @@ export function buildMeasurementOrderPayload(input) {
               : snapshotForTailorResolve.assignedTailorShopId,
         }
       : { assignedTailorShopId: tailorShopIdOverride };
-  const tailorId = resolveWizardTailorShopIdForOrder(snap, authUser, tailorResolutionHints) || "";
+  const overrideTrim =
+    tailorShopIdOverride != null ? String(tailorShopIdOverride).trim() : "";
+  const tailorId =
+    overrideTrim && looksLikeTailorShopId(overrideTrim)
+      ? overrideTrim
+      : resolveWizardTailorShopIdForOrder(snap, authUser, tailorResolutionHints) || "";
 
   const garmentLabel = garmentDisplayFromWizardPayload({
     selectedGarmentType,

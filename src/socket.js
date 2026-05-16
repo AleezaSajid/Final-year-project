@@ -33,7 +33,7 @@ if (typeof window !== "undefined") {
   if (process.env.NODE_ENV === "development") {
     socket.on("connect", () => {
       // eslint-disable-next-line no-console
-      console.info("[socket] connected", url, "id", socket.id);
+      console.info("[chat] socket connected", socket.id, url);
     });
     socket.on("connect_error", (e) => {
       // eslint-disable-next-line no-console
@@ -67,4 +67,21 @@ export function ensureSocketThen(fn) {
   };
   socket.once("connect", run);
   socket.connect();
+}
+
+/** Reconnect after login/register so the handshake sends the new session cookie. */
+export function reconnectSocketSession() {
+  if (typeof window === "undefined") return;
+
+  try {
+    if (socket.connected) {
+      socket.disconnect();
+    }
+
+    socket.connect();
+
+    console.log("[socket] reconnected after auth");
+  } catch (error) {
+    console.error("[socket] reconnectSocketSession failed", error);
+  }
 }

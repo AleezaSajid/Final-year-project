@@ -219,6 +219,135 @@ async function loadAuthedUser(req) {
   };
 }
 
+function normalizeAuthId(value) {
+  if (value == null) return '';
+  return String(value).trim();
+}
+
+function authIdsMatch(a, b) {
+  const sa = normalizeAuthId(a);
+  const sb = normalizeAuthId(b);
+  if (!sa || !sb) return false;
+  if (sa === sb) return true;
+  const na = Number(sa);
+  const nb = Number(sb);
+  if (!Number.isNaN(na) && !Number.isNaN(nb) && na === nb) return true;
+  return false;
+}
+
+/** True when the logged-in customer owns this order (numeric + body snapshot fallback). */
+function customerOwnsOrder(req, orderCustomerId, body = {}) {
+  if (!req.authUser || req.authUser.role !== 'customer') return false;
+  const authId = normalizeAuthId(req.authUser.id);
+  const orderCid = normalizeAuthId(orderCustomerId);
+  const bodyCid = body && body.customerId != null ? normalizeAuthId(body.customerId) : '';
+  if (authIdsMatch(orderCid, authId)) return true;
+  if (bodyCid && authIdsMatch(bodyCid, authId)) return true;
+  return false;
+}
+
+function tailorShopFromAuth(req) {
+  return req.authUser && req.authUser.tailorShopId != null
+    ? normalizeAuthId(req.authUser.tailorShopId)
+    : '';
+}
+
+async function resolveTailorShopId(req) {
+  if (req._resolvedTailorShopId !== undefined) return req._resolvedTailorShopId;
+  let shop = tailorShopFromAuth(req);
+  if (!shop && req.authUser && req.authUser.role === 'tailor') {
+    try {
+      const tp = await TailorProfile.findOne({ userId: req.authUser.id }).select('tailorShopId').lean();
+      if (tp && tp.tailorShopId) shop = normalizeAuthId(tp.tailorShopId);
+    } catch (e) {
+      console.error('[auth] resolveTailorShopId', e);
+    }
+  }
+  req._resolvedTailorShopId = shop || '';
+  return req._resolvedTailorShopId;
+}
+
+/**
+ * Tailor PATCH authorization: assigned shop, or explicit accept/claim on unassigned — never steal.
+ */
+function tailorMayPatchOrder(req, existingDoc, body, tailorPatch) {
+  const shop = tailorShopFromAuth(req);
+  if (!shop) return { ok: false, reason: 'no_tailor_shop' };
+  const orderTid = normalizeId(existingDoc?.tailorId);
+  const bodyTailor = body.tailorId != null ? normalizeId(body.tailorId) : '';
+  const explicitClaim = Boolean(tailorPatch && tailorPatch.explicitClaim);
+
+  if (orderTid && orderTid === shop) return { ok: true, kind: 'assigned' };
+
+  if (explicitClaim) {
+    if (orderTid && isRealTailorId(orderTid) && orderTid !== shop) {
+      return { ok: false, reason: 'other_tailor', orderTailorId: orderTid, loggedTailorId: shop };
+    }
+    if (bodyTailor === shop || !orderTid || isPlaceholderTailorIdForClaim(orderTid)) {
+      return { ok: true, kind: 'claim' };
+    }
+    return { ok: false, reason: 'claim_mismatch', orderTailorId: orderTid, loggedTailorId: shop };
+  }
+
+  if (!orderTid || isPlaceholderTailorIdForClaim(orderTid)) {
+    return { ok: false, reason: 'unassigned' };
+  }
+
+  return { ok: false, reason: 'other_tailor', orderTailorId: orderTid, loggedTailorId: shop };
+}
+
+function log403PatchOrder(req, existingDoc, body, extra = {}) {
+  console.warn('[403 PATCH order]', {
+    authUserId: normalizeAuthId(req.authUser && req.authUser.id),
+    authRole: req.authUser && req.authUser.role,
+    authTailorShopId: tailorShopFromAuth(req),
+    orderCustomerId: normalizeAuthId(existingDoc && existingDoc.customerId),
+    orderTailorId: normalizeAuthId(existingDoc && existingDoc.tailorId),
+    incomingTailorId: body && body.tailorId != null ? normalizeAuthId(body.tailorId) : '',
+    action: body && body.action,
+    path: req.path,
+    ...extra,
+  });
+}
+
+function log403Conversations(req, type, paramId, extra = {}) {
+  console.warn('[403 conversations]', {
+    type,
+    paramId: normalizeAuthId(paramId),
+    authUserId: normalizeAuthId(req.authUser && req.authUser.id),
+    authTailorId: tailorShopFromAuth(req),
+    path: req.path,
+    ...extra,
+  });
+}
+
+function log403AcceptOrder(orderId, orderTailorId, loggedTailorId, incomingTailorId) {
+  log403Details(null, {
+    endpoint: 'accept_order',
+    orderId,
+    orderTailorId,
+    loggedTailorId,
+    incomingTailorId,
+  });
+}
+
+/** Unified 403 diagnostic log (req optional for socket-only paths). */
+function log403Details(req, fields = {}) {
+  const authUser = req && req.authUser ? req.authUser : null;
+  console.warn('[403 details]', {
+    endpoint: (req && req.path) || fields.endpoint || '',
+    action: (req && req.body && req.body.action) || fields.action,
+    authUserId: normalizeAuthId(authUser && authUser.id),
+    authTailorId: tailorShopFromAuth(req || { authUser }),
+    customerId: fields.customerId,
+    tailorId: fields.tailorId,
+    orderCustomerId: fields.orderCustomerId,
+    orderTailorId: fields.orderTailorId,
+    conversationId: fields.conversationId,
+    ...fields,
+  });
+}
+
 /** Express 5 router waits on returned Promises; the old `void async IIFE` pattern can race ahead of `next()`. */
 async function requireAuth(req, res, next) {
   try {
@@ -673,7 +802,10 @@ async function fetchConversationRowsForTailorShop(shop) {
 app.get('/conversations/customer/:customerId', requireAuth, requireRole(['customer']), async (req, res) => {
   const cid = req.params.customerId != null ? String(req.params.customerId).trim() : '';
   if (!cid) return res.status(400).json({ conversations: [] });
-  if (String(req.authUser.id) !== cid) return res.status(403).json({ conversations: [] });
+  if (!authIdsMatch(req.authUser.id, cid)) {
+    log403Conversations(req, 'customer', cid);
+    return res.status(403).json({ conversations: [], message: 'Forbidden.' });
+  }
   try {
     const raw = await Conversation.find({ customerId: cid }).lean();
     const rows = sortConversationsByActivity(dedupeConversationsByOrderId(raw));
@@ -688,8 +820,11 @@ app.get('/conversations/customer/:customerId', requireAuth, requireRole(['custom
 
 app.get('/conversations/tailor/:tailorId', requireAuth, requireRole(['tailor']), async (req, res) => {
   const tid = req.params.tailorId != null ? String(req.params.tailorId).trim() : '';
-  const shop = req.authUser.tailorShopId != null ? String(req.authUser.tailorShopId).trim() : '';
-  if (!tid || !shop || tid !== shop) return res.status(403).json({ conversations: [] });
+  const shop = await resolveTailorShopId(req);
+  if (!tid || !shop || tid !== shop) {
+    log403Conversations(req, 'tailor', tid, { resolvedShop: shop || '(none)' });
+    return res.status(403).json({ conversations: [], message: 'Forbidden.' });
+  }
   try {
     const rows = await fetchConversationRowsForTailorShop(tid);
     const ids = rows.map((r) => String(r.orderId || r.conversationId || '').trim());
@@ -712,9 +847,9 @@ app.get('/messages/:conversationId', requireAuth, async (req, res) => {
     const cust = String(order.customerId || '').trim();
     const tail = String(order.tailorId || '').trim();
     if (u.role === 'customer') {
-      if (cust !== String(u.id)) return res.status(403).json({ messages: [] });
+      if (!authIdsMatch(cust, u.id)) return res.status(403).json({ messages: [] });
     } else if (u.role === 'tailor') {
-      const shopId = u.tailorShopId != null ? String(u.tailorShopId).trim() : '';
+      const shopId = await resolveTailorShopId(req);
       if (!shopId || tail !== shopId) return res.status(403).json({ messages: [] });
     } else {
       return res.status(403).json({ messages: [] });
@@ -851,7 +986,7 @@ app.post('/api/testimonials', requireAuth, requireRole(['customer']), async (req
     }
     const canonicalOrderId = String(order._id);
     // Enforce that the logged-in customer owns the order.
-    if (String(order.customerId).trim() !== String(req.authUser.id)) {
+    if (!customerOwnsOrder(req, order.customerId, b)) {
       console.warn('POST /api/testimonials forbidden (order not owned)', {
         canonicalOrderId,
         orderCustomerId: String(order.customerId).trim(),
@@ -1110,6 +1245,11 @@ app.get('/api/tailors/public/:idOrShopId', async (req, res) => {
 
 const normalizeOrderStatus = (status = '') => {
   const value = String(status).trim().toLowerCase().replace(/\s+/g, '_');
+  if (value === 'draft' || value === 'awaiting_tailor_selection') return value;
+  if (value === 'accepted' || value === 'active') return value;
+  if (value === 'rejected' || value === 'declined' || value === 'cancelled' || value === 'canceled') {
+    return value;
+  }
   if (value === 'in_progress' || value === 'inprogress') return 'in_progress';
   if (value === 'assigned') return 'assigned';
   if (
@@ -1277,6 +1417,59 @@ function isPlaceholderTailorIdForClaim(tailorId) {
   return isPlaceholderTailorShopId(tailorId);
 }
 
+function normalizeId(value) {
+  return stringifyOrderIdField(value).trim();
+}
+
+function isRealTailorId(tailorId) {
+  const t = normalizeId(tailorId);
+  return Boolean(t) && !isPlaceholderTailorShopId(t);
+}
+
+/**
+ * Decide whether PATCH may set order.tailorId (customer-selected id is sticky once set).
+ */
+function resolveTailorIdPatchDecision(existingDoc, body, authUser) {
+  const b = body && typeof body === 'object' ? body : {};
+  const existingTailorId = normalizeId(existingDoc?.tailorId);
+  const incomingTailorId = b.tailorId != null ? normalizeId(b.tailorId) : '';
+  const explicitClaim = b.action === 'accept_order' || b.action === 'claim_order';
+
+  let shouldUpdateTailorId = false;
+  if (incomingTailorId && isRealTailorId(incomingTailorId)) {
+    if (!existingTailorId || isPlaceholderTailorIdForClaim(existingTailorId)) {
+      shouldUpdateTailorId = true;
+    } else if (explicitClaim && authUser?.role === 'tailor') {
+      const shop = normalizeId(authUser.tailorShopId);
+      if (shop && incomingTailorId === shop && existingTailorId === shop) {
+        shouldUpdateTailorId = false;
+      } else if (shop && incomingTailorId === shop && existingTailorId !== shop) {
+        shouldUpdateTailorId = false;
+        console.warn('[Tailor Guard] claim rejected — order assigned to', existingTailorId);
+      }
+    } else if (authUser?.role === 'customer') {
+      shouldUpdateTailorId = false;
+    }
+  }
+
+  console.log('[Tailor Guard] existing', existingTailorId || '(none)');
+  console.log('[Tailor Guard] incoming', incomingTailorId || '(none)');
+  console.log('[Tailor Guard] allowed update', shouldUpdateTailorId);
+
+  return { shouldUpdateTailorId, incomingTailorId, existingTailorId, explicitClaim };
+}
+
+/**
+ * `orderAccepted` is for tailor claim / focus — not wizard autosave (name, measurements, etc.).
+ */
+function shouldEmitOrderAcceptedOnPatch(existingDoc, body) {
+  const b = body && typeof body === 'object' ? body : {};
+  if (b.action === 'accept_order') return true;
+  if (b.action === 'select_tailor') return false;
+  if (b.isActive === true) return true;
+  return false;
+}
+
 function emitOrderLiveToOrderRooms(ioInstance, canonicalOrderId, rawOrderId, payload, legacyStatusPayload) {
   const rooms = new Set([String(canonicalOrderId).trim()]);
   const raw = rawOrderId != null ? String(rawOrderId).trim() : '';
@@ -1403,21 +1596,64 @@ function emitMeasurementReviewedToTailorRoom(io, out) {
 
 app.post('/orders', requireAuth, async (req, res) => {
   const b = req.body || {};
-  const { customerId, tailorId, customerName, garmentType, measurements, price, status, dueDate } = b;
-  if (!customerId || !tailorId) {
+  const { customerId, customerName, garmentType, measurements, price, status, dueDate } = b;
+  const tailorIdRaw = b.tailorId != null ? String(b.tailorId).trim() : '';
+  const statusRaw =
+    status != null ? String(status).trim().toLowerCase().replace(/\s+/g, '_') : '';
+  const statusNorm = status != null ? normalizeOrderStatus(String(status)) : '';
+  const isAwaitingTailorDraft =
+    statusRaw === 'awaiting_tailor_selection' ||
+    statusRaw === 'draft' ||
+    statusNorm === 'awaiting_tailor_selection' ||
+    statusNorm === 'draft' ||
+    b.createDraft === true ||
+    b.awaitingTailorSelection === true;
+
+  if (!customerId) {
+    return res.status(400).json({ message: 'customerId is required.' });
+  }
+  if (!tailorIdRaw && !isAwaitingTailorDraft) {
     return res.status(400).json({ message: 'customerId and tailorId are required.' });
   }
 
   try {
     // Server-side safety: customers can only create orders for themselves.
-    if (req.authUser.role === 'customer' && String(customerId).trim() !== String(req.authUser.id)) {
+    if (req.authUser.role === 'customer' && !authIdsMatch(customerId, req.authUser.id)) {
+      log403PatchOrder(req, null, b, { phase: 'POST /orders create' });
       return res.status(403).json({ message: 'Forbidden.' });
     }
-    if (req.authUser.role === 'customer' && isPlaceholderTailorShopId(String(tailorId))) {
+    if (isAwaitingTailorDraft && req.authUser.role === 'customer') {
+      const draftStatus = 'draft';
+      const savedOrder = await Order.create({
+        clientOrderId: b.clientOrderId != null ? String(b.clientOrderId) : b.orderId != null ? String(b.orderId) : '',
+        source: b.source != null ? String(b.source) : 'measurement_wizard',
+        customerId: String(customerId),
+        tailorId: '',
+        customerName: customerName || '',
+        customerPhone: b.customerPhone != null ? String(b.customerPhone) : '',
+        garmentType: garmentType || '',
+        garmentCategory: b.garmentCategory != null ? String(b.garmentCategory) : '',
+        measurements: measurements && typeof measurements === 'object' ? measurements : {},
+        style: b.style && typeof b.style === 'object' ? b.style : null,
+        notes: b.notes && typeof b.notes === 'object' ? b.notes : null,
+        orderPayload: b.orderPayload != null ? b.orderPayload : null,
+        price: Number(price || 0),
+        status: draftStatus,
+        workflowStatus: draftStatus,
+        currentStepIndex: 0,
+        isActive: false,
+        chatEnabled: false,
+        dueDate: dueDate ? new Date(dueDate) : null,
+      });
+      console.log('DRAFT ORDER CREATED (awaiting tailor)', savedOrder._id.toString());
+      return res.status(201).json(savedOrder);
+    }
+    if (req.authUser.role === 'customer' && isPlaceholderTailorShopId(tailorIdRaw)) {
       return res.status(400).json({
         message: 'Select a tailor shop before placing your order.',
       });
     }
+    const tailorId = tailorIdRaw;
     // Tailors can only create orders for their own shop id.
     if (req.authUser.role === 'tailor') {
       const shop = req.authUser.tailorShopId != null ? String(req.authUser.tailorShopId).trim() : '';
@@ -1469,12 +1705,14 @@ app.get('/orders', requireAuth, async (req, res) => {
     const q = {};
     const customerId = req.query.customerId != null ? String(req.query.customerId).trim() : '';
     const tailorId = req.query.tailorId != null ? String(req.query.tailorId).trim() : '';
-    if (customerId && req.authUser.role === 'customer' && customerId !== String(req.authUser.id)) {
+    if (customerId && req.authUser.role === 'customer' && !authIdsMatch(customerId, req.authUser.id)) {
+      log403PatchOrder(req, null, req.query, { phase: 'GET /orders query' });
       return res.status(403).json({ message: 'Forbidden.' });
     }
     if (tailorId && req.authUser.role === 'tailor') {
-      const shop = req.authUser.tailorShopId != null ? String(req.authUser.tailorShopId).trim() : '';
+      const shop = await resolveTailorShopId(req);
       if (!shop || tailorId !== shop) {
+        log403PatchOrder(req, null, req.query, { phase: 'GET /orders query tailor' });
         return res.status(403).json({ message: 'Forbidden.' });
       }
     }
@@ -1491,7 +1729,8 @@ app.get('/orders', requireAuth, async (req, res) => {
 app.get('/orders/customer/:customerId', requireAuth, requireRole(['customer']), async (req, res) => {
   const { customerId } = req.params;
   try {
-    if (String(customerId).trim() !== String(req.authUser.id)) {
+    if (!authIdsMatch(customerId, req.authUser.id)) {
+      log403PatchOrder(req, null, { customerId }, { phase: 'GET /orders/customer/:id' });
       return res.status(403).json({ message: 'Forbidden.' });
     }
     console.log('FETCH CUSTOMER ORDERS', customerId);
@@ -1507,7 +1746,8 @@ app.get('/orders/customer/:customerId', requireAuth, requireRole(['customer']), 
 app.get('/orders/customer/:customerId/active', requireAuth, requireRole(['customer']), async (req, res) => {
   const { customerId } = req.params;
   try {
-    if (String(customerId).trim() !== String(req.authUser.id)) {
+    if (!authIdsMatch(customerId, req.authUser.id)) {
+      log403PatchOrder(req, null, { customerId }, { phase: 'GET /orders/customer/:id/active' });
       return res.status(403).json({ message: 'Forbidden.' });
     }
     const order = await Order.findOne({ customerId: String(customerId), isActive: true })
@@ -1526,8 +1766,9 @@ app.get('/orders/customer/:customerId/active', requireAuth, requireRole(['custom
 app.get('/orders/tailor/:tailorId', requireAuth, requireRole(['tailor']), async (req, res) => {
   const { tailorId } = req.params;
   try {
-    const shop = req.authUser.tailorShopId != null ? String(req.authUser.tailorShopId).trim() : '';
+    const shop = await resolveTailorShopId(req);
     if (!shop || String(tailorId).trim() !== shop) {
+      log403PatchOrder(req, null, { tailorId }, { phase: 'GET /orders/tailor/:id' });
       return res.status(403).json({ message: 'Forbidden.' });
     }
     console.log('FETCH TAILOR ORDERS', tailorId);
@@ -1556,13 +1797,18 @@ app.get('/orders/:orderId', requireAuth, async (req, res) => {
     // Only the owning customer or assigned tailor can read.
     const cid = order.customerId != null ? String(order.customerId).trim() : '';
     const tid = order.tailorId != null ? String(order.tailorId).trim() : '';
-    if (req.authUser.role === 'customer' && cid !== String(req.authUser.id)) {
+    if (req.authUser.role === 'customer' && !customerOwnsOrder(req, cid, req.body)) {
+      log403PatchOrder(req, order, req.body, { phase: 'GET /orders/:orderId' });
       return res.status(403).json({ message: 'Forbidden.' });
     }
     if (req.authUser.role === 'tailor') {
-      const shop = req.authUser.tailorShopId != null ? String(req.authUser.tailorShopId).trim() : '';
-      if (!shop) return res.status(403).json({ message: 'Forbidden.' });
-      if (tid !== shop) {
+      const shop = await resolveTailorShopId(req);
+      if (!shop) {
+        log403PatchOrder(req, order, req.body, { phase: 'GET /orders/:orderId no shop' });
+        return res.status(403).json({ message: 'Forbidden.' });
+      }
+      if (tid !== shop && !(isPlaceholderTailorIdForClaim(tid) || !tid)) {
+        log403PatchOrder(req, order, req.body, { phase: 'GET /orders/:orderId tailor mismatch' });
         return res.status(403).json({ message: 'Forbidden.' });
       }
     }
@@ -1603,9 +1849,15 @@ app.patch('/orders/:orderId', requireAuth, async (req, res) => {
   if (b.clientOrderId != null) updatePayload.clientOrderId = String(b.clientOrderId);
   else if (b.orderId != null) updatePayload.clientOrderId = String(b.orderId);
   if (b.price != null) updatePayload.price = Number(b.price) || 0;
-  if (b.tailorId != null) updatePayload.tailorId = String(b.tailorId);
   if (b.isActive === true || b.isActive === false) {
     updatePayload.isActive = Boolean(b.isActive);
+  }
+  if (b.chatEnabled === true || b.chatEnabled === false) {
+    updatePayload.chatEnabled = Boolean(b.chatEnabled);
+  }
+  if (b.acceptedAt != null) {
+    const d = new Date(b.acceptedAt);
+    updatePayload.acceptedAt = Number.isNaN(d.getTime()) ? new Date() : d;
   }
   if (b.status != null && String(b.status).trim() !== '') {
     updatePayload.status = normalizeOrderStatus(String(b.status));
@@ -1635,25 +1887,84 @@ app.patch('/orders/:orderId', requireAuth, async (req, res) => {
     if (!existing) {
       return res.status(404).json({ message: 'Order not found.' });
     }
-    // Only owning customer or assigned tailor can patch (tailor may claim if assigning self on placeholder).
-    const cid = existing.customerId != null ? String(existing.customerId).trim() : '';
-    const tid = existing.tailorId != null ? String(existing.tailorId).trim() : '';
-    if (req.authUser.role === 'customer' && cid !== String(req.authUser.id)) {
-      return res.status(403).json({ message: 'Forbidden.' });
-    }
-    if (req.authUser.role === 'tailor') {
-      const shop = req.authUser.tailorShopId != null ? String(req.authUser.tailorShopId).trim() : '';
-      if (!shop) return res.status(403).json({ message: 'Forbidden.' });
-      const bodyTailorId = b.tailorId != null ? String(b.tailorId).trim() : '';
-      const assignedToThisShop = tid === shop;
-      const claimingAsSelf =
-        bodyTailorId === shop && (assignedToThisShop || !tid || isPlaceholderTailorIdForClaim(tid));
-      if (!assignedToThisShop && !claimingAsSelf) {
-        console.warn('[PATCH /orders] tailor forbidden', { orderId: paramId, tid, shop, bodyTailorId });
+    const tailorPatch = resolveTailorIdPatchDecision(existing, b, req.authUser);
+    const explicitClaim = tailorPatch.explicitClaim;
+    const patchAction = b.action != null ? String(b.action).trim() : '';
+
+    if (req.authUser.role === 'customer') {
+      const authId = normalizeAuthId(req.authUser.id);
+      if (!authIdsMatch(existing.customerId, authId)) {
+        log403PatchOrder(req, existing, b);
         return res.status(403).json({ message: 'Forbidden.' });
       }
+      delete updatePayload.tailorId;
+
+      if (patchAction === 'select_tailor') {
+        const incomingTid = b.tailorId != null ? normalizeId(b.tailorId) : '';
+        const existingTid = normalizeId(existing.tailorId);
+        if (!incomingTid || !isRealTailorId(incomingTid)) {
+          return res.status(400).json({ message: 'A valid tailor shop id is required.' });
+        }
+        if (existingTid && isRealTailorId(existingTid) && existingTid !== incomingTid) {
+          return res.status(403).json({ message: 'This order is already assigned to another tailor.' });
+        }
+        updatePayload.tailorId = incomingTid;
+        updatePayload.status = 'pending';
+        updatePayload.workflowStatus = 'pending';
+        updatePayload.isActive = false;
+        updatePayload.chatEnabled = false;
+      } else if (tailorPatch.shouldUpdateTailorId && tailorPatch.incomingTailorId) {
+        updatePayload.tailorId = tailorPatch.incomingTailorId;
+      }
+      if (updatePayload.customerId != null && !authIdsMatch(updatePayload.customerId, authId)) {
+        delete updatePayload.customerId;
+      }
+    } else if (req.authUser.role === 'tailor') {
+      const shop = await resolveTailorShopId(req);
+      const orderTid = normalizeId(existing.tailorId);
+
+      if (patchAction === 'accept_order') {
+        if (!shop || !orderTid || orderTid !== shop) {
+          log403AcceptOrder(
+            paramId,
+            orderTid || '',
+            shop || tailorShopFromAuth(req),
+            b.tailorId != null ? normalizeAuthId(b.tailorId) : ''
+          );
+          return res.status(403).json({ message: 'Order belongs to another tailor.' });
+        }
+        updatePayload.tailorId = shop;
+        updatePayload.status = 'accepted';
+        updatePayload.workflowStatus = 'accepted';
+        updatePayload.isActive = true;
+        updatePayload.chatEnabled = true;
+        updatePayload.acceptedAt = new Date();
+      } else {
+        const access = tailorMayPatchOrder(req, existing, b, tailorPatch);
+        if (!access.ok) {
+          log403PatchOrder(req, existing, b, { reason: access.reason });
+          if (explicitClaim && access.reason === 'other_tailor') {
+            log403AcceptOrder(
+              paramId,
+              access.orderTailorId || normalizeAuthId(existing.tailorId),
+              access.loggedTailorId || tailorShopFromAuth(req),
+              b.tailorId != null ? normalizeAuthId(b.tailorId) : ''
+            );
+            return res.status(403).json({ message: 'Order belongs to another tailor.' });
+          }
+          return res.status(403).json({ message: 'Forbidden.' });
+        }
+      }
+    } else {
+      log403PatchOrder(req, existing, b, { reason: 'invalid_role' });
+      return res.status(403).json({ message: 'Forbidden.' });
     }
+
     const resolvedId = String(existing._id);
+
+    if (req.authUser.role === 'tailor' && tailorPatch.shouldUpdateTailorId) {
+      updatePayload.tailorId = tailorPatch.incomingTailorId;
+    }
 
     if (updatePayload.isActive === true) {
       await Order.updateMany(
@@ -1667,13 +1978,22 @@ app.patch('/orders/:orderId', requireAuth, async (req, res) => {
       updatePayload.customerId = linkBeforeWrite.customerId;
     }
     if (linkBeforeWrite.tailorId && updatePayload.tailorId == null && b.tailorId == null) {
-      updatePayload.tailorId = linkBeforeWrite.tailorId;
+      const linked = normalizeId(linkBeforeWrite.tailorId);
+      const existingTid = normalizeId(existing.tailorId);
+      if ((!existingTid || isPlaceholderTailorIdForClaim(existingTid)) && linked && isRealTailorId(linked)) {
+        updatePayload.tailorId = linked;
+      }
     }
 
-    const unified = computeWorkflow({ ...orderDocToPlainForWorkflow(existing), ...updatePayload });
-    updatePayload.status = unified.status;
-    updatePayload.workflowStatus = unified.workflowStatus;
-    updatePayload.currentStepIndex = unified.currentStepIndex;
+    if (patchAction !== 'accept_order') {
+      const unified = computeWorkflow({ ...orderDocToPlainForWorkflow(existing), ...updatePayload });
+      updatePayload.status = unified.status;
+      updatePayload.workflowStatus = unified.workflowStatus;
+      updatePayload.currentStepIndex = unified.currentStepIndex;
+    } else {
+      updatePayload.status = 'accepted';
+      updatePayload.workflowStatus = 'accepted';
+    }
 
     const updatedOrder = await Order.findByIdAndUpdate(
       resolvedId,
@@ -1744,9 +2064,9 @@ app.patch('/orders/:orderId', requireAuth, async (req, res) => {
       const s = payload.status != null ? String(payload.status).trim() : '';
       const isReject =
         s === 'rejected' || s === 'declined' || s === 'cancelled' || s === 'canceled';
-      const isAccept = Boolean(tId) && !isReject;
+      const emitAccepted = shouldEmitOrderAcceptedOnPatch(existing, b) && Boolean(tId) && !isReject;
 
-      if (isAccept) {
+      if (emitAccepted) {
         const oidForChat = payload.orderId != null ? String(payload.orderId).trim() : '';
         const cust = persisted.customerId != null ? String(persisted.customerId).trim() : '';
         const ack = {
@@ -1780,7 +2100,40 @@ app.patch('/orders/:orderId', requireAuth, async (req, res) => {
     }
 
     try {
-      await maybeEnsureConversationAfterOrderWrite(persisted, 'PATCH /orders');
+      const allowConv =
+        patchAction === 'accept_order' ||
+        (patchAction === 'select_tailor' && isRealTailorId(persisted.tailorId));
+      if (allowConv) {
+        await maybeEnsureConversationAfterOrderWrite(persisted, 'PATCH /orders', {
+          allowTailorReassign: explicitClaim || patchAction === 'select_tailor',
+        });
+      }
+      if (patchAction === 'accept_order') {
+        const oid = String(persisted._id);
+        const conv = await Conversation.findOneAndUpdate(
+          { orderId: oid },
+          { $set: { status: 'accepted', isActive: true, updatedAt: new Date() } },
+          { new: true }
+        );
+        if (conv) {
+          const cust = String(conv.customerId || persisted.customerId || '').trim();
+          const tid = String(conv.tailorId || persisted.tailorId || '').trim();
+          const convPayload = {
+            conversationId: oid,
+            orderId: oid,
+            customerId: cust,
+            tailorId: tid,
+            status: 'accepted',
+            isActive: true,
+            lastMessage: conv.lastMessage,
+            lastMessageAt: conv.lastMessageAt,
+            unreadCustomer: conv.unreadCustomer,
+            unreadTailor: conv.unreadTailor,
+          };
+          const convRooms = [oid, cust, userRoomName(cust), tid, userRoomName(tid)].filter(Boolean);
+          emitToRoomUnion(io, convRooms, 'conversation:updated', convPayload);
+        }
+      }
     } catch (convErr) {
       console.error('[ChatSync] PATCH /orders conversation ensure failed', convErr);
     }
@@ -1856,15 +2209,17 @@ app.put('/orders/:orderId', requireAuth, async (req, res) => {
     if (!existingOrder) {
       return res.status(404).json({ message: 'Order not found.' });
     }
-    // Only owning customer or assigned tailor can update.
-    const cid = existingOrder.customerId != null ? String(existingOrder.customerId).trim() : '';
-    const tid = existingOrder.tailorId != null ? String(existingOrder.tailorId).trim() : '';
-    if (req.authUser.role === 'customer' && cid !== String(req.authUser.id)) {
+    if (req.authUser.role === 'customer' && !customerOwnsOrder(req, existingOrder.customerId, req.body)) {
+      log403PatchOrder(req, existingOrder, req.body, { phase: 'PUT /orders/:orderId' });
       return res.status(403).json({ message: 'Forbidden.' });
     }
     if (req.authUser.role === 'tailor') {
-      const shop = req.authUser.tailorShopId != null ? String(req.authUser.tailorShopId).trim() : '';
-      if (!shop || tid !== shop) return res.status(403).json({ message: 'Forbidden.' });
+      const shop = await resolveTailorShopId(req);
+      const tid = existingOrder.tailorId != null ? String(existingOrder.tailorId).trim() : '';
+      if (!shop || tid !== shop) {
+        log403PatchOrder(req, existingOrder, req.body, { phase: 'PUT /orders/:orderId tailor' });
+        return res.status(403).json({ message: 'Forbidden.' });
+      }
     }
     const unified = computeWorkflow({ ...orderDocToPlainForWorkflow(existingOrder), ...updatePayload });
     updatePayload.status = unified.status;
@@ -1909,11 +2264,55 @@ function orderIdFromOrderChatConversationId(conversationId) {
 
 function isOrderDocChatEnabled(doc) {
   if (!doc) return false;
+  if (doc.chatEnabled === false) return false;
   const tid = doc.tailorId != null ? String(doc.tailorId).trim() : '';
   if (!tid || isPlaceholderTailorShopId(tid)) return false;
   const v = normalizeOrderStatus(doc.status);
   if (v === 'rejected' || v === 'declined' || v === 'cancelled' || v === 'canceled') return false;
-  return true;
+  if (v === 'awaiting_tailor_selection' || v === 'draft') return false;
+  if (doc.isActive === true || doc.acceptedAt) return true;
+  return v === 'accepted' || v === 'active';
+}
+
+/** Conversation upsert: order top-level ids only (no session/selected tailor). */
+function conversationLinkagesFromOrderDoc(orderDoc) {
+  if (!orderDoc) return { oid: '', customerId: '', tailorId: '', plain: null };
+  const plain =
+    typeof orderDoc.toObject === 'function'
+      ? orderDoc.toObject({ depopulate: true })
+      : { ...orderDoc };
+  const oid =
+    plain._id != null
+      ? stringifyOrderIdField(plain._id)
+      : plain.id != null
+        ? stringifyOrderIdField(plain.id)
+        : '';
+  const customerId = stringifyOrderIdField(plain.customerId);
+  const tailorId = stringifyOrderIdField(plain.tailorId);
+  return { oid, customerId, tailorId, plain };
+}
+
+function resolveParticipantsFromOrder(doc) {
+  const cid = String(doc?.customerId || '').trim();
+  const tid = String(doc?.tailorId || '').trim();
+  const orderId = doc?._id != null ? String(doc._id) : '';
+  return { customerId: cid, tailorId: tid, orderId };
+}
+
+function resolveExpectedReceiverId(senderId, customerId, tailorId) {
+  const s = String(senderId || '').trim();
+  const c = String(customerId || '').trim();
+  const t = String(tailorId || '').trim();
+  if (!s || !c || !t) return '';
+  if (s === c) return t;
+  if (s === t) return c;
+  return '';
+}
+
+function senderIsOrderParticipant(doc, senderId) {
+  const s = String(senderId || '').trim();
+  const { customerId, tailorId } = resolveParticipantsFromOrder(doc);
+  return Boolean(s && (authIdsMatch(s, customerId) || s === tailorId));
 }
 
 async function verifySocketOrderChatAccess(socket, conversationIdRaw) {
@@ -1926,23 +2325,22 @@ async function verifySocketOrderChatAccess(socket, conversationIdRaw) {
   const cid = String(doc.customerId || '').trim();
   const tid = String(doc.tailorId || '').trim();
   if (u.role === 'customer') {
-    if (cid !== String(u.id)) return null;
+    if (!authIdsMatch(cid, u.id)) return null;
   } else if (u.role === 'tailor') {
-    const shop = u.tailorShopId != null ? String(u.tailorShopId).trim() : '';
+    let shop = u.tailorShopId != null ? String(u.tailorShopId).trim() : '';
+    if (!shop) {
+      try {
+        const tp = await TailorProfile.findOne({ userId: u.id }).select('tailorShopId').lean();
+        if (tp && tp.tailorShopId) shop = String(tp.tailorShopId).trim();
+      } catch {
+        /* ignore */
+      }
+    }
     if (!shop || tid !== shop) return null;
   } else {
     return null;
   }
   return doc;
-}
-
-function participantIdsMatchOrder(doc, senderId, receiverId) {
-  const s = String(senderId || '').trim();
-  const r = String(receiverId || '').trim();
-  const cid = String(doc.customerId || '').trim();
-  const tid = String(doc.tailorId || '').trim();
-  if (!s || !r || !cid || !tid) return false;
-  return (s === cid && r === tid) || (s === tid && r === cid);
 }
 
 function userRoomName(userId) {
@@ -1982,24 +2380,20 @@ function deriveOrderLinkagesForConversation(orderDoc) {
     const p = payload.customer.id ?? payload.customer._id ?? payload.customer.customerId;
     if (p != null) customerId = stringifyOrderIdField(p);
   }
-  if (!tailorId && payload) {
-    const p =
-      payload.tailorId ??
-      payload.tailorShopId ??
-      payload.assignedTailorId ??
-      payload.tailor?.id ??
-      payload.tailor?._id;
-    if (p != null) tailorId = stringifyOrderIdField(p);
+  const topTailor = stringifyOrderIdField(plain.tailorId);
+  if (topTailor) {
+    tailorId = topTailor;
   }
   return { oid, customerId, tailorId, plain };
 }
 
-async function ensureConversationForOrder(orderDoc) {
+async function ensureConversationForOrder(orderDoc, options = {}) {
+  const allowTailorReassign = Boolean(options && options.allowTailorReassign);
   if (!orderDoc) {
     console.warn('[ensureConversationForOrder] missing orderDoc');
     return null;
   }
-  const { oid, customerId: cidRaw, tailorId: tidRaw, plain } = deriveOrderLinkagesForConversation(orderDoc);
+  const { oid, customerId: cidRaw, tailorId: tidRaw, plain } = conversationLinkagesFromOrderDoc(orderDoc);
   const customerId = cidRaw ? String(cidRaw).trim() : '';
   const tailorId = tidRaw ? String(tidRaw).trim() : '';
   if (!oid) {
@@ -2026,7 +2420,10 @@ async function ensureConversationForOrder(orderDoc) {
   }
 
   const internal = normalizeOrderStatus(plain?.status);
-  const status = internal === 'completed' ? 'completed' : 'active';
+  let status = internal === 'completed' ? 'completed' : 'active';
+  if (internal === 'accepted' || plain?.isActive === true || plain?.acceptedAt) {
+    status = 'accepted';
+  }
 
   let existing = null;
   try {
@@ -2077,20 +2474,31 @@ async function ensureConversationForOrder(orderDoc) {
     plain?.customerName || nestedCustomerName || existing?.customerName || ''
   ).trim();
 
+  const participants = [customerId, tailorId].filter(Boolean);
+  const orderIsActive = plain?.isActive === true;
   const full = {
     conversationId: oid,
     orderId: oid,
     customerId,
     tailorId,
+    participants,
     customerName: customerDisplayName,
     tailorName: tailorDisplayName,
     garmentType: String(plain?.garmentType || existing?.garmentType || '').trim(),
     status,
+    isActive: orderIsActive,
     lastMessage,
     lastMessageAt,
     unreadCustomer,
     unreadTailor,
   };
+
+  console.log('[conversation source of truth]', {
+    orderId: oid,
+    customerId,
+    tailorId,
+    participants,
+  });
 
   try {
     const doc = await Conversation.findOneAndUpdate(
@@ -2114,7 +2522,8 @@ async function ensureConversationForOrder(orderDoc) {
 /**
  * Run after Order PATCH/PUT when linkage may be complete (idempotent upsert).
  */
-async function maybeEnsureConversationAfterOrderWrite(orderDoc, contextLabel = 'order-write') {
+async function maybeEnsureConversationAfterOrderWrite(orderDoc, contextLabel = 'order-write', options = {}) {
+  const allowTailorReassign = Boolean(options && options.allowTailorReassign);
   if (!orderDoc) {
     console.warn('[ChatSync] maybeEnsureConversationAfterOrderWrite: missing doc', contextLabel);
     return null;
@@ -2139,7 +2548,7 @@ async function maybeEnsureConversationAfterOrderWrite(orderDoc, contextLabel = '
     return null;
   }
   try {
-    const doc = await ensureConversationForOrder(orderDoc);
+    const doc = await ensureConversationForOrder(orderDoc, { allowTailorReassign });
     if (!doc) {
       console.warn('[ChatSync] Conversation upsert returned null', contextLabel, link.oid);
     }
@@ -2415,14 +2824,13 @@ io.on('connection', (socket) => {
 
   socket.on('send_message', async (payload = {}) => {
     const senderId = String(payload?.senderId ?? '').trim();
-    const receiverId = String(payload?.receiverId ?? '').trim();
+    const clientReceiverId = String(payload?.receiverId ?? '').trim();
     const conversationId = String(payload?.conversationId ?? '').trim();
-    const content = String(payload?.content ?? '').trim();
+    const content = String(payload?.content ?? payload?.text ?? '').trim();
     const { timestamp, status } = payload;
-    if (!senderId || !receiverId || !conversationId || !content) {
+    if (!senderId || !conversationId || !content) {
       console.warn('SEND_MESSAGE rejected (missing field)', {
         hasSender: !!senderId,
-        hasReceiver: !!receiverId,
         hasConv: !!conversationId,
         hasContent: !!content,
       });
@@ -2435,10 +2843,36 @@ io.on('connection', (socket) => {
         console.warn('SEND_MESSAGE rejected (unauthorized or chat not enabled)');
         return;
       }
-      if (!participantIdsMatchOrder(doc, senderId, receiverId)) {
-        console.warn('SEND_MESSAGE rejected (participants mismatch)');
+      const { customerId: orderCustomerId, tailorId: orderTailorId } = resolveParticipantsFromOrder(doc);
+      if (!senderIsOrderParticipant(doc, senderId)) {
+        console.warn('[chat] participants mismatch — sender not on order', {
+          senderId,
+          orderCustomerId,
+          orderTailorId,
+          conversationId: canonicalOrderIdFromOrderChatConversationId(conversationId),
+        });
         return;
       }
+
+      const expected = resolveExpectedReceiverId(senderId, orderCustomerId, orderTailorId);
+      if (!expected) {
+        console.warn('[chat] participants mismatch — cannot compute receiver', {
+          senderId,
+          orderCustomerId,
+          orderTailorId,
+          conversationId: canonicalOrderIdFromOrderChatConversationId(conversationId),
+        });
+        return;
+      }
+      let finalReceiverId = expected;
+      if (clientReceiverId && clientReceiverId !== expected) {
+        console.log('[chat] corrected stale receiverId', {
+          from: clientReceiverId,
+          to: expected,
+          conversationId: canonicalOrderIdFromOrderChatConversationId(conversationId),
+        });
+      }
+
       const ts = timestamp ? new Date(timestamp) : new Date();
       if (Number.isNaN(ts.getTime())) {
         return;
@@ -2446,7 +2880,7 @@ io.on('connection', (socket) => {
       const canonical = String(doc._id);
       const savedMessage = await Message.create({
         senderId,
-        receiverId,
+        receiverId: finalReceiverId,
         conversationId: canonical,
         content,
         timestamp: ts,
@@ -2472,8 +2906,14 @@ io.on('connection', (socket) => {
         conversationId: message.conversationId,
       });
       const convRoom = `conversation:${canonical}`;
+      const customerUserRoom = userRoomName(orderCustomerId);
+      const tailorUserRoom = userRoomName(orderTailorId);
       console.log('EMITTING TO CONVERSATION ROOM', convRoom);
       io.to(convRoom).emit('message_received', message);
+      if (customerUserRoom) io.to(customerUserRoom).emit('message_received', message);
+      if (tailorUserRoom) io.to(tailorUserRoom).emit('message_received', message);
+      if (orderCustomerId) io.to(orderCustomerId).emit('message_received', message);
+      if (orderTailorId) io.to(orderTailorId).emit('message_received', message);
       try {
         let convo = await Conversation.findOne({ orderId: canonical });
         if (!convo) {

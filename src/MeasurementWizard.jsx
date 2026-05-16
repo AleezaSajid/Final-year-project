@@ -5,19 +5,21 @@ import { Check, ChevronLeft, ChevronRight, Upload } from "lucide-react";
 import WizardNavbar from "./components/WizardNavbar";
 import { saveWizardDraft, loadWizardDraft } from "./api/wizardDraftApi";
 import { putWizardDraft, putCustomerMeta } from "./api/accountApi.js";
-import { getOrderById } from "./api/ordersApi.js";
+import { createWizardDraftOrder } from "./api/wizardDraftOrderApi.js";
 import { useAuth } from "./context/AuthContext.jsx";
-import { useCustomerChat } from "./context/CustomerChatContext.jsx";
-import { normalizeConversationId } from "./chatUtils.js";
 import {
   clearLinkedWizardOrderId,
   getLinkedWizardOrderId,
   hydrateLinkedOrderIdFromDraft,
   syncWizardOrderToServer,
 } from "./utils/measurementWizardOrderSync.js";
-import { emitWizardMeasurementReview } from "./utils/measurementReviewSocket.js";
-import { resolveOrderCustomerId, resolveWizardTailorShopIdForOrder } from "./utils/measurementOrderPayload.js";
-import { looksLikeTailorShopId, isPlaceholderTailorShopId, persistCustomerTailorShopSession } from "./utils/chatIdentity.js";
+import { resolveOrderCustomerId } from "./utils/measurementOrderPayload.js";
+import {
+  clearCustomerTailorShopSession,
+  looksLikeTailorShopId,
+  isPlaceholderTailorShopId,
+  persistCustomerTailorShopSession,
+} from "./utils/chatIdentity.js";
 
 /** Browse/map navigation may send shop id under different keys. */
 function pickBrowseTailorShopIdFromState(bt) {
@@ -943,23 +945,6 @@ export default function MeasurementWizard() {
   const navigate = useNavigate();
   const location = useLocation();
   const { user, loading } = useAuth();
-  const { tailorIdForChat, customerChatConversations } = useCustomerChat();
-  const tailorResolutionHints = useMemo(() => {
-    let latestConv = "";
-    const list = Array.isArray(customerChatConversations) ? customerChatConversations : [];
-    for (const row of list) {
-      const t = row?.tailorId != null ? String(row.tailorId).trim() : "";
-      if (t && looksLikeTailorShopId(t)) {
-        latestConv = t;
-        break;
-      }
-    }
-    const active = typeof tailorIdForChat === "string" ? tailorIdForChat.trim() : "";
-    return {
-      activeChatTailorShopId: active,
-      latestConversationTailorShopId: latestConv,
-    };
-  }, [tailorIdForChat, customerChatConversations]);
   const [activeStep, setActiveStep] = useState(initialWizardFromDraft.activeStep);
   const [customerInfo, setCustomerInfo] = useState(initialWizardFromDraft.customerInfo);
   const [selectedGarmentType, setSelectedGarmentType] = useState(
@@ -992,28 +977,19 @@ export default function MeasurementWizard() {
   const browseLocationKeyHandledRef = useRef(null);
   const referenceFileInputRef = useRef(null);
 
+  /** Only hydrate assigned tailor from wizard `data` fields — never from chat/conversation hints. */
   useEffect(() => {
     if (loading || !user) return;
+    const current = String(assignedTailorShopId ?? "").trim();
+    if (current && looksLikeTailorShopId(current)) return;
     const d = data && typeof data === "object" && !Array.isArray(data) ? data : {};
-    const tailorShopIdData = d.tailorShopId != null ? String(d.tailorShopId).trim() : "";
-    const selectedTailorShopIdData = d.selectedTailorShopId != null ? String(d.selectedTailorShopId).trim() : "";
-    const merged = resolveWizardTailorShopIdForOrder(
-      {
-        assignedTailorShopId,
-        tailorShopId: tailorShopIdData,
-        selectedTailorShopId: selectedTailorShopIdData,
-      },
-      user,
-      tailorResolutionHints
-    );
-    if (!merged) return;
-    setAssignedTailorShopId((prev) => {
-      const p = String(prev ?? "").trim();
-      if (p && looksLikeTailorShopId(p)) return prev;
-      persistCustomerTailorShopSession(merged);
-      return merged;
-    });
-  }, [loading, user, data, assignedTailorShopId, tailorResolutionHints]);
+    const fromData = [d.selectedTailorShopId, d.tailorShopId]
+      .map((v) => (v != null ? String(v).trim() : ""))
+      .find((v) => v && looksLikeTailorShopId(v));
+    if (!fromData) return;
+    setAssignedTailorShopId(fromData);
+    persistCustomerTailorShopSession(fromData);
+  }, [loading, user, data, assignedTailorShopId]);
 
   useEffect(() => {
     if (loading) return;
@@ -1114,6 +1090,8 @@ export default function MeasurementWizard() {
     setDraftVersion(0);
     setAssignedTailorShopId("");
     setAssignedTailorDisplayName("");
+    clearCustomerTailorShopSession();
+    clearLinkedWizardOrderId();
     setBrowseTailorBanner(null);
     lastPersistedSnapshotRef.current = JSON.stringify({
       activeStep: 3,
@@ -1154,15 +1132,12 @@ export default function MeasurementWizard() {
     const tSpec = typeof bt.specialty === "string" ? bt.specialty : "";
     const tCity = typeof bt.city === "string" ? bt.city : "";
     const noteLine = `[Request via Browse — tailor: ${tName}${tSpec ? ` · ${tSpec}` : ""}${tCity ? ` · ${tCity}` : ""}]`;
-
-    setAssignedTailorShopId(shopId);
-    if (shopId) persistCustomerTailorShopSession(shopId);
     const cardDisplayName = typeof bt.name === "string" ? bt.name.trim() : "";
-    setAssignedTailorDisplayName(cardDisplayName);
-    setBrowseTailorBanner({ name: tName, specialty: tSpec, city: tCity });
+
+    clearLinkedWizardOrderId();
+    clearCustomerTailorShopSession();
 
     if (fresh) {
-      clearLinkedWizardOrderId();
       if (user?.id) {
         void putWizardDraft(user, null).catch(() => {});
       }
@@ -1193,7 +1168,14 @@ export default function MeasurementWizard() {
       });
       setError("");
       setFieldInsight(getAdaptiveHint(1));
-    } else {
+    }
+
+    setAssignedTailorShopId(shopId);
+    if (shopId) persistCustomerTailorShopSession(shopId);
+    setAssignedTailorDisplayName(cardDisplayName);
+    setBrowseTailorBanner({ name: tName, specialty: tSpec, city: tCity });
+
+    if (!fresh) {
       setDesignBrief((prev) => {
         const existing = typeof prev.designNotes === "string" ? prev.designNotes : "";
         if (existing.includes(tName) && existing.includes("Request via Browse")) return prev;
@@ -1322,8 +1304,7 @@ export default function MeasurementWizard() {
           assignedTailorShopId,
           assignedTailorDisplayName,
         },
-        user,
-        { tailorResolutionHints }
+        user
       );
     }, 1500);
     return () => clearTimeout(t);
@@ -1342,7 +1323,6 @@ export default function MeasurementWizard() {
     draftVersion,
     assignedTailorShopId,
     assignedTailorDisplayName,
-    tailorResolutionHints,
   ]);
 
   useEffect(() => {
@@ -1392,95 +1372,9 @@ export default function MeasurementWizard() {
       try {
         const customerId = resolveOrderCustomerId(user);
         if (!customerId) {
-          console.warn("[measurement wizard] submit blocked: not signed in", { hasUser: Boolean(user) });
           setError("Please sign in to place an order.");
           return;
         }
-        const incomingChatTailorId = typeof tailorIdForChat === "string" ? tailorIdForChat.trim() : "";
-        const incomingAssigned = String(assignedTailorShopId || "").trim();
-        if (incomingAssigned && isPlaceholderTailorShopId(incomingAssigned)) {
-          console.log("[measurement wizard] submit: legacy / placeholder tailor on snapshot (will not be sent to POST /orders)", {
-            incomingAssigned,
-            incomingChatTailorId: incomingChatTailorId || "(none)",
-          });
-        }
-
-        let mappedTailorFromLinkedOrder = "";
-        const linkedOrderId = getLinkedWizardOrderId();
-        if (linkedOrderId) {
-          try {
-            const doc = await getOrderById(String(linkedOrderId).trim());
-            const t = doc?.tailorId != null ? String(doc.tailorId).trim() : "";
-            if (looksLikeTailorShopId(t)) mappedTailorFromLinkedOrder = t;
-          } catch (e) {
-            console.warn("[measurement wizard] linked order tailor mapping skipped", String(linkedOrderId), e);
-          }
-        }
-
-        let mappedTailorFromConversationOrder = "";
-        const convList = Array.isArray(customerChatConversations) ? customerChatConversations : [];
-        const MAX_CONV_ORDER_LOOKUPS = 5;
-        let convLookups = 0;
-        for (const row of convList) {
-          if (convLookups >= MAX_CONV_ORDER_LOOKUPS) break;
-          const rowTid = row?.tailorId != null ? String(row.tailorId).trim() : "";
-          if (!rowTid || !isPlaceholderTailorShopId(rowTid)) continue;
-          const oid = normalizeConversationId(row?.orderId ?? row?.conversationId ?? "");
-          if (!oid) continue;
-          convLookups += 1;
-          try {
-            const doc = await getOrderById(oid);
-            const t = doc?.tailorId != null ? String(doc.tailorId).trim() : "";
-            if (looksLikeTailorShopId(t)) {
-              mappedTailorFromConversationOrder = t;
-              break;
-            }
-          } catch {
-            /* try next row */
-          }
-        }
-
-        const snapshotForResolve = {
-          assignedTailorShopId,
-          tailorShopId:
-            data && typeof data === "object" && data.tailorShopId != null ? String(data.tailorShopId).trim() : "",
-          selectedTailorShopId:
-            data && typeof data === "object" && data.selectedTailorShopId != null
-              ? String(data.selectedTailorShopId).trim()
-              : "",
-        };
-        const enrichedHints = {
-          ...tailorResolutionHints,
-          ...(mappedTailorFromLinkedOrder ? { mappedTailorFromLinkedOrder } : {}),
-          ...(mappedTailorFromConversationOrder ? { mappedTailorFromConversationOrder } : {}),
-        };
-        const tailorShopId = resolveWizardTailorShopIdForOrder(snapshotForResolve, user, enrichedHints);
-        console.log("[measurement wizard] submit tailor resolution", {
-          validationInputs: {
-            customerId,
-            snapshotTailorFields: snapshotForResolve,
-            incomingChatTailorId: incomingChatTailorId || "(none)",
-            mappedTailorFromLinkedOrder: mappedTailorFromLinkedOrder || "(none)",
-            mappedTailorFromConversationOrder: mappedTailorFromConversationOrder || "(none)",
-          },
-          resolvedRealTailorShopId: tailorShopId || "(none)",
-          finalPayloadTailorId: tailorShopId || "(blocked — POST will not run)",
-        });
-        if (!tailorShopId) {
-          console.warn("[measurement wizard] submit blocked: no real tailor after resolution + order mapping", {
-            reason: "no looksLikeTailorShopId from snapshot, mapped orders, chat hints, or session",
-            snapshotForResolve,
-            enrichedHints,
-          });
-          setError("Please select a tailor before placing order.");
-          return;
-        }
-        persistCustomerTailorShopSession(tailorShopId);
-        if (String(assignedTailorShopId || "").trim() !== tailorShopId) {
-          setAssignedTailorShopId(tailorShopId);
-        }
-        // Start a fresh order on final submit so completed/old linked orders are never reused.
-        clearLinkedWizardOrderId();
         const snapshot = {
           activeStep,
           customerInfo,
@@ -1493,33 +1387,30 @@ export default function MeasurementWizard() {
           designBrief,
           data,
           draftVersion,
-          assignedTailorShopId: tailorShopId,
-          assignedTailorDisplayName: String(assignedTailorDisplayName || "").trim(),
+          assignedTailorShopId: "",
+          assignedTailorDisplayName: "",
         };
-        console.log("[measurement wizard] final snapshot before emit", {
-          activeStep: snapshot.activeStep,
-          assignedTailorShopId: snapshot.assignedTailorShopId,
-          draftVersion: snapshot.draftVersion,
-          selectedGarmentType: snapshot.selectedGarmentType,
-          hasReferenceImage: Boolean(snapshot.referenceImage),
-        });
-        const result = await emitWizardMeasurementReview(snapshot, user, {
-          tailorResolutionHints: enrichedHints,
-        });
-        if (!result?.orderId) {
-          throw new Error("Order was not created. Please try Complete Setup again.");
+        const { orderId } = await createWizardDraftOrder(snapshot, user);
+        if (!orderId) {
+          throw new Error("Could not save your measurements. Please try again.");
         }
-        window.dispatchEvent(new CustomEvent("sewserve:orders-refresh"));
-        const oid = String(result.orderId);
         if (user?.id) {
           try {
-            await putCustomerMeta(user, { lastWizardOrderId: oid });
+            await putCustomerMeta(user, { lastWizardOrderId: orderId });
           } catch {
             /* non-fatal */
           }
         }
-        resetWizardProgress();
-        navigate("/location-step", { state: { orderId: oid } });
+        window.dispatchEvent(new CustomEvent("sewserve:orders-refresh"));
+        setError("");
+        navigate("/location-step", {
+          state: {
+            fromWizard: true,
+            wizardOrderId: orderId,
+            returnAfterSelect: "wait_for_acceptance",
+            wizardNotice: "Measurements saved. Now choose a nearby tailor.",
+          },
+        });
       } catch (e) {
         setError(e instanceof Error ? e.message : "Could not complete setup. Please try again.");
       }

@@ -21,7 +21,7 @@ import {
   TD_GLASS_CARD_COMPACT,
   TD_SECONDARY_NAVY_BTN,
 } from "../tailorDashboardClassNames";
-import { isOrderEligibleForChat } from "../../chatUtils.js";
+import { isOrderAwaitingTailorAccept, isOrderEligibleForChat } from "../../chatUtils.js";
 
 /** Matches customer dashboard chat card glass + footprint */
 const TD_CHAT_CARD_GLASS =
@@ -64,6 +64,7 @@ export default function TdDashboardOverview({
   openMeasurementsReview,
   fetchOrders,
   openChatForOrder,
+  acceptOrderIntoCurrentTasks,
 }) {
   const [expandedTaskId, setExpandedTaskId] = useState(null);
 
@@ -310,14 +311,27 @@ export default function TdDashboardOverview({
                                 );
                               })}
                             </ol>
-                            <div className="pt-1">
+                            <div className="flex flex-wrap gap-2 pt-1">
+                              {task.sourceOrder && isOrderAwaitingTailorAccept(task.sourceOrder) ? (
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    const oid = String(task._id ?? task.id ?? "").trim();
+                                    if (oid) void acceptOrderIntoCurrentTasks?.(oid, task.sourceOrder);
+                                  }}
+                                  className="rounded-lg bg-gradient-to-r from-[#166534] to-[#15803d] px-3 py-2 text-xs font-semibold text-white shadow-sm transition hover:brightness-105"
+                                >
+                                  Accept order
+                                </button>
+                              ) : null}
                               <button
                                 type="button"
                                 onClick={(e) => {
                                   e.stopPropagation();
                                   void handleMarkDone(rowKey);
                                 }}
-                                className="rounded-lg bg-gradient-to-r from-[#166534] to-[#15803d] px-3 py-2 text-xs font-semibold text-white shadow-sm transition hover:brightness-105"
+                                className="rounded-lg border border-slate-200/80 bg-white/80 px-3 py-2 text-xs font-semibold text-slate-800 shadow-sm transition hover:bg-white"
                               >
                                 Mark done
                               </button>
@@ -358,17 +372,32 @@ export default function TdDashboardOverview({
                         {order.garmentType ? order.garmentType : "New measurements"}
                       </p>
                     </div>
-                    <motion.button
-                      type="button"
-                      whileTap={{ scale: 0.97 }}
-                      onClick={() => {
-                        setActiveOrderId(order.id);
-                        openMeasurementsReview?.(order);
-                      }}
-                      className={secondaryNavyBtn}
-                    >
-                      Review
-                    </motion.button>
+                    <motion.div className="flex shrink-0 flex-col gap-2 sm:flex-row">
+                      {isOrderAwaitingTailorAccept(order) ? (
+                        <motion.button
+                          type="button"
+                          whileTap={{ scale: 0.97 }}
+                          onClick={() => {
+                            const oid = String(order.id ?? order._id ?? "").trim();
+                            if (oid) void acceptOrderIntoCurrentTasks?.(oid, order);
+                          }}
+                          className="rounded-xl bg-gradient-to-b from-[#4a7c59] to-[#355542] px-3 py-2 text-xs font-semibold text-white shadow-sm transition hover:brightness-105"
+                        >
+                          Accept order
+                        </motion.button>
+                      ) : null}
+                      <motion.button
+                        type="button"
+                        whileTap={{ scale: 0.97 }}
+                        onClick={() => {
+                          setActiveOrderId(order.id);
+                          openMeasurementsReview?.(order);
+                        }}
+                        className={secondaryNavyBtn}
+                      >
+                        Review
+                      </motion.button>
+                    </motion.div>
                   </li>
                 ))
               ) : (

@@ -9,8 +9,14 @@ import {
   Video,
 } from "lucide-react";
 import { socket } from "../../socket.js";
-import { displayChatActorName, isOrderEligibleForChat, normalizeConversationId } from "../../chatUtils.js";
+import {
+  displayChatActorName,
+  isOrderChatEnabled,
+  isOrderEligibleForChat,
+  normalizeConversationId,
+} from "../../chatUtils.js";
 import { DEFAULT_AVATAR, resolveOrderWorkflowState } from "../../tailorDashboard/constants.js";
+import { resolveConversationPeers } from "../../utils/orderChatParticipants.js";
 import OrderChatThread from "./OrderChatThread.jsx";
 import { mergeSidebarRowsWithInjected } from "./workspaceSidebarMerge.js";
 
@@ -44,89 +50,49 @@ function buildOrderStubFromConv(conv, authCustomerId) {
 }
 
 /**
- * WhatsApp Web–style layout for customer dashboard. Uses syncCustomerOrderChatFromOrder + OrderChatThread.
+ * WhatsApp Web–style layout for customer dashboard. Active thread peers come from the selected row only.
  */
 export default function CustomerWhatsAppWorkspace({
   customerChatConversations = [],
   orders = [],
   customerId = "",
-  conversationId = "",
-  tailorIdForChat = "",
-  syncCustomerOrderChatFromOrder,
   setActiveOrderId,
-  isChatOpen = false,
-  lastChatPreview = null,
 }) {
   const [filter, setFilter] = useState("all");
   const [search, setSearch] = useState("");
   const [mobilePanel, setMobilePanel] = useState("list");
+  const [selectedConversationId, setSelectedConversationId] = useState("");
 
-  const normalizedActive = normalizeConversationId(conversationId);
+  const normalizedActive = normalizeConversationId(selectedConversationId);
 
   const activeOrder = useMemo(() => {
     if (!normalizedActive) return null;
     return orders.find((o) => String(o.id ?? o._id) === normalizedActive) || null;
   }, [orders, normalizedActive]);
 
-  const injectedSidebarRow = useMemo(() => {
-    if (!normalizedActive || !customerId || !tailorIdForChat) return null;
-    const fromApi = customerChatConversations.find(
-      (c) => normalizeConversationId(c.orderId ?? c.conversationId) === normalizedActive
-    );
-    const tailorName =
-      fromApi?.tailorName ||
-      fromApi?.tailorShopName ||
-      activeOrder?.tailorName ||
-      activeOrder?.tailorShopName ||
-      "";
-    const previewText = lastChatPreview?.text ? String(lastChatPreview.text).trim().slice(0, 400) : "";
-    return {
-      orderId: normalizedActive,
-      conversationId: normalizedActive,
-      customerId,
-      tailorId: tailorIdForChat,
-      tailorName: tailorName || undefined,
-      tailorShopName: fromApi?.tailorShopName || activeOrder?.tailorShopName,
-      garmentType: activeOrder?.garmentType || fromApi?.garmentType,
-      lastMessage: previewText || fromApi?.lastMessage || "",
-      lastMessageAt:
-        fromApi?.lastMessageAt ||
-        fromApi?.updatedAt ||
-        (lastChatPreview?.at ? new Date(lastChatPreview.at).toISOString() : "") ||
-        activeOrder?.updatedAt ||
-        activeOrder?.createdAt ||
-        new Date().toISOString(),
-      unreadCustomer: fromApi != null ? Number(fromApi.unreadCustomer || 0) : 0,
-      status: fromApi?.status || "active",
-    };
-  }, [
-    normalizedActive,
-    customerId,
-    tailorIdForChat,
-    customerChatConversations,
-    activeOrder,
-    lastChatPreview,
-  ]);
-
   const sidebarRows = useMemo(
-    () => mergeSidebarRowsWithInjected(customerChatConversations, injectedSidebarRow),
-    [customerChatConversations, injectedSidebarRow]
+    () => mergeSidebarRowsWithInjected(customerChatConversations, null),
+    [customerChatConversations]
   );
 
-  const peerTailorName = useMemo(() => {
-    if (!normalizedActive) return "Your tailor";
-    const row = sidebarRows.find(
-      (c) => normalizeConversationId(c.orderId ?? c.conversationId) === normalizedActive
-    );
+  const activeRow = useMemo(() => {
+    if (!normalizedActive) return null;
     return (
-      displayChatActorName(
-        row?.tailorName,
-        row?.tailorShopName,
-        activeOrder?.tailorName,
-        activeOrder?.tailorShopName
-      ) || "Your tailor"
+      sidebarRows.find(
+        (c) => normalizeConversationId(c.orderId ?? c.conversationId) === normalizedActive
+      ) || null
     );
-  }, [sidebarRows, normalizedActive, activeOrder]);
+  }, [sidebarRows, normalizedActive]);
+
+  const peers = useMemo(
+    () =>
+      activeRow && customerId
+        ? resolveConversationPeers({ row: activeRow, currentUserId: customerId, mode: "customer" })
+        : null,
+    [activeRow, customerId]
+  );
+
+  const peerTailorName = peers?.peerDisplayName || "Your tailor";
 
   const filteredConversations = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -169,7 +135,6 @@ export default function CustomerWhatsAppWorkspace({
       activeConversationId: normalizedActive || null,
       filteredCount: filteredConversations.length,
       activeRowInFetchedList: activeInFetched,
-      syntheticRowForActive: Boolean(injectedSidebarRow),
       filter,
       searchSnippet: search.trim().slice(0, 32),
     });
@@ -178,28 +143,45 @@ export default function CustomerWhatsAppWorkspace({
     sidebarRows.length,
     normalizedActive,
     filteredConversations.length,
-    injectedSidebarRow,
     filter,
     search,
   ]);
 
-  const chatStub = useMemo(() => {
-    if (!normalizedActive || !customerId || !tailorIdForChat) return null;
-    if (activeOrder) return activeOrder;
-    const conv = sidebarRows.find(
-      (c) => normalizeConversationId(c.orderId ?? c.conversationId) === normalizedActive
-    );
-    if (conv) return buildOrderStubFromConv(conv, customerId);
-    return {
-      id: normalizedActive,
-      _id: normalizedActive,
-      customerId,
-      tailorId: tailorIdForChat,
-      status: "processing",
-    };
-  }, [normalizedActive, activeOrder, customerId, tailorIdForChat, sidebarRows]);
+  useEffect(() => {
+    if (selectedConversationId || !sidebarRows.length || !customerId) return;
+    const firstEligible = sidebarRows.find((conv) => {
+      const oid = normalizeConversationId(conv.orderId ?? conv.conversationId ?? "");
+      const order = orders.find((o) => String(o.id ?? o._id) === oid);
+      const stub =
+        order && isOrderEligibleForChat(order, { allowLegacyPlaceholderTailor: true })
+          ? order
+          : isOrderEligibleForChat(buildOrderStubFromConv(conv, customerId), {
+                allowLegacyPlaceholderTailor: true,
+              })
+            ? buildOrderStubFromConv(conv, customerId)
+            : null;
+      return Boolean(stub && conv.tailorId);
+    });
+    if (firstEligible) {
+      setSelectedConversationId(
+        normalizeConversationId(firstEligible.orderId ?? firstEligible.conversationId)
+      );
+    }
+  }, [sidebarRows, selectedConversationId, customerId, orders]);
 
-  const canSend = Boolean(chatStub && isOrderEligibleForChat(chatStub, { allowLegacyPlaceholderTailor: true }));
+  const chatStub = useMemo(() => {
+    if (!normalizedActive || !customerId) return null;
+    if (activeOrder) return activeOrder;
+    if (activeRow) return buildOrderStubFromConv(activeRow, customerId);
+    return null;
+  }, [normalizedActive, activeOrder, customerId, activeRow]);
+
+  const isChatEnabled = Boolean(
+    chatStub && peers?.senderId && peers?.receiverId && isOrderChatEnabled(chatStub)
+  );
+  const canSelect = Boolean(
+    chatStub && peers?.tailorId && isOrderEligibleForChat(chatStub, { allowLegacyPlaceholderTailor: true })
+  );
 
   const selectConversation = useCallback(
     (conv) => {
@@ -213,14 +195,14 @@ export default function CustomerWhatsAppWorkspace({
               })
             ? buildOrderStubFromConv(conv, customerId)
             : null;
-      if (!stub) return;
-      syncCustomerOrderChatFromOrder?.(stub);
+      if (!stub || !conv.tailorId) return;
+      setSelectedConversationId(oid);
       if (order) {
         setActiveOrderId?.(String(order.id ?? order._id ?? oid));
       }
       setMobilePanel("chat");
     },
-    [orders, customerId, syncCustomerOrderChatFromOrder, setActiveOrderId]
+    [orders, customerId, setActiveOrderId]
   );
 
   const filterBtn = (id, label) => (
@@ -238,7 +220,7 @@ export default function CustomerWhatsAppWorkspace({
     </button>
   );
 
-  const threadActive = Boolean(!isChatOpen && canSend && normalizedActive);
+  const threadActive = Boolean(normalizedActive && customerId && peers?.conversationId && canSelect);
 
   return (
     <section
@@ -333,7 +315,7 @@ export default function CustomerWhatsAppWorkspace({
             mobilePanel === "list" ? "hidden lg:flex" : "flex"
           }`}
         >
-          {normalizedActive && canSend ? (
+          {normalizedActive ? (
             <>
               <header className="flex shrink-0 items-center gap-3 border-b border-slate-200/80 bg-[#f0f2f5] px-2 py-2 sm:px-4">
                 <button
@@ -395,9 +377,13 @@ export default function CustomerWhatsAppWorkspace({
               </header>
               <OrderChatThread
                 isActive={threadActive}
+                isChatEnabled={isChatEnabled}
                 mode="customer"
-                senderId={customerId}
-                receiverId={tailorIdForChat}
+                senderId={peers?.senderId}
+                receiverId={peers?.receiverId}
+                customerId={peers?.customerId}
+                tailorId={peers?.tailorId}
+                orderId={peers?.orderId}
                 peerDisplayName={peerTailorName}
                 conversationId={normalizedActive}
                 theme="whatsapp"

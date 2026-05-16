@@ -128,7 +128,7 @@ function resolveWizardView(order) {
   };
 }
 
-export default function WizardOrderReviewModal({ order, open, onClose, updateOrderStatus }) {
+export default function WizardOrderReviewModal({ order, open, onClose, acceptOrderIntoCurrentTasks }) {
   useEffect(() => {
     if (!open) return;
     const onKey = (e) => {
@@ -354,14 +354,15 @@ export default function WizardOrderReviewModal({ order, open, onClose, updateOrd
               <button
                 type="button"
                 onClick={async () => {
-                  if (order?.id) {
-                    await updateOrderStatus(order.id, "measurements_verified");
+                  const oid = order?.id != null ? String(order.id).trim() : "";
+                  if (oid && acceptOrderIntoCurrentTasks) {
+                    await acceptOrderIntoCurrentTasks(oid, order);
                   }
                   onClose();
                 }}
                 className="rounded-xl bg-gradient-to-b from-[#4a7c59] to-[#3d5d48] px-4 py-2.5 text-sm font-semibold text-white shadow-md shadow-emerald-900/20 transition duration-200 hover:brightness-105 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-600/40 active:scale-[0.98]"
               >
-                Accept request
+                Accept order
               </button>
             </div>
           </div>

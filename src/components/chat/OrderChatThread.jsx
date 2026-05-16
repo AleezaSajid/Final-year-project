@@ -28,6 +28,9 @@ export default function OrderChatThread({
   mode = "tailor",
   senderId,
   receiverId,
+  customerId: orderCustomerId,
+  tailorId: orderTailorId,
+  orderId,
   peerDisplayName = "",
   conversationId,
   /** 'whatsapp' | 'glass' — glass matches legacy modal look */
@@ -37,10 +40,17 @@ export default function OrderChatThread({
   showInnerHeader = false,
   innerHeaderTitle,
   innerHeaderSubtitle,
+  /** When true, show thread but block sending (e.g. until tailor accepts). */
+  chatLocked = false,
+  lockedMessage = "Chat unlocks after tailor accepts this order.",
+  /** Per-order unlock from order row (not global session). */
+  isChatEnabled = true,
 }) {
   const sId = normalizeChatId(senderId);
   const rId = normalizeChatId(receiverId);
   const cId = normalizeConversationId(conversationId);
+  const oId = normalizeConversationId(orderId) || cId;
+  const locked = chatLocked || !isChatEnabled;
   const [messages, setMessages] = useState([]);
   const [inputValue, setInputValue] = useState("");
   const endOfMessagesRef = useRef(null);
@@ -112,7 +122,11 @@ export default function OrderChatThread({
     if (mode === "customer" && (!sId || !rId)) return;
     const runJoin = () => {
       activeConversationRef.current = cId;
+      if (socket.connected) {
+        console.log("[chat] socket connected", socket.id);
+      }
       if (sId) {
+        console.log("[chat] joining room", sId);
         socket.emit("join_user", { userId: sId });
       }
       notifyConversationRoomJoined(cId);
@@ -128,10 +142,23 @@ export default function OrderChatThread({
     endOfMessagesRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [isActive, messages]);
 
+  const inputDisabled = locked || !cId || !sId || !rId;
+
   const handleSend = () => {
+    if (locked) return;
     const content = inputValue.trim();
     if (!content) return;
     if (!cId || !sId || !rId) return;
+
+    console.log("[chat send computed]", {
+      conversationId: cId,
+      orderId: oId,
+      senderId: sId,
+      receiverId: rId,
+      customerId: normalizeChatId(orderCustomerId),
+      tailorId: normalizeChatId(orderTailorId),
+      mode,
+    });
 
     const newMessage = buildOutgoingChatMessage({
       senderId: sId,
@@ -203,6 +230,11 @@ export default function OrderChatThread({
           theme === "whatsapp" ? "border-slate-200/80 bg-[#f0f2f5]" : "border-white/35 bg-white/25 px-5 py-4 backdrop-blur-md"
         }`}
       >
+        {locked ? (
+          <p className="mb-2 rounded-lg bg-amber-50 px-3 py-2 text-center text-xs font-medium text-amber-900 ring-1 ring-amber-200/80">
+            {lockedMessage}
+          </p>
+        ) : null}
         {theme === "whatsapp" ? (
           <div className="flex items-end gap-1.5 rounded-xl border border-slate-200/90 bg-white px-1 py-1 shadow-inner shadow-slate-900/5 sm:gap-2">
             <button
@@ -229,24 +261,25 @@ export default function OrderChatThread({
             >
               <ImageIcon className="h-5 w-5" />
             </button>
-            <input
-              type="text"
+            <textarea
+              rows={1}
               value={inputValue}
               onChange={(e) => setInputValue(e.target.value)}
               onKeyDown={(e) => {
-                if (e.key === "Enter") {
+                if (e.key === "Enter" && !e.shiftKey) {
                   e.preventDefault();
                   handleSend();
                 }
               }}
-              placeholder="Type a message"
-              className="min-w-0 flex-1 border-0 bg-transparent py-2 text-sm text-slate-800 placeholder:text-slate-400 focus:outline-none focus:ring-0"
+              placeholder={locked ? lockedMessage : "Type a message"}
+              disabled={inputDisabled}
+              className="min-w-0 flex-1 resize-none border-0 bg-transparent py-2 text-sm text-slate-800 placeholder:text-slate-400 focus:outline-none focus:ring-0 disabled:cursor-not-allowed disabled:opacity-60"
             />
             <button
               type="button"
               onClick={handleSend}
               className="shrink-0 rounded-xl bg-[#00a884] p-2.5 text-white shadow-sm transition hover:bg-[#008f6f] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/50 disabled:opacity-40"
-              disabled={!cId || !sId || !rId}
+              disabled={inputDisabled}
               aria-label="Send"
             >
               <Send className="h-5 w-5" />
@@ -254,23 +287,25 @@ export default function OrderChatThread({
           </div>
         ) : (
           <div className="flex items-center gap-2">
-            <input
-              type="text"
+            <textarea
+              rows={2}
               value={inputValue}
               onChange={(e) => setInputValue(e.target.value)}
               onKeyDown={(e) => {
-                if (e.key === "Enter") {
+                if (e.key === "Enter" && !e.shiftKey) {
                   e.preventDefault();
                   handleSend();
                 }
               }}
-              placeholder="Type your message…"
-              className="w-full rounded-xl border border-slate-200/90 bg-white/70 px-3 py-2.5 text-sm text-slate-800 shadow-inner shadow-slate-900/5 placeholder:text-slate-400 focus:border-emerald-300/80 focus:outline-none focus:ring-2 focus:ring-emerald-600/20"
+              placeholder={locked ? lockedMessage : "Type your message…"}
+              disabled={inputDisabled}
+              className="w-full resize-none rounded-xl border border-slate-200/90 bg-white/70 px-3 py-2.5 text-sm text-slate-800 shadow-inner shadow-slate-900/5 placeholder:text-slate-400 focus:border-emerald-300/80 focus:outline-none focus:ring-2 focus:ring-emerald-600/20 disabled:cursor-not-allowed disabled:opacity-60"
             />
             <button
               type="button"
               onClick={handleSend}
-              className="shrink-0 rounded-xl bg-gradient-to-b from-[#4a7c59] to-[#3d5d48] px-4 py-2.5 text-sm font-semibold text-white shadow-md shadow-emerald-900/20 transition duration-200 hover:brightness-105 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-600/40 active:scale-[0.98]"
+              disabled={inputDisabled}
+              className="shrink-0 rounded-xl bg-gradient-to-b from-[#4a7c59] to-[#3d5d48] px-4 py-2.5 text-sm font-semibold text-white shadow-md shadow-emerald-900/20 transition duration-200 hover:brightness-105 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-600/40 active:scale-[0.98] disabled:opacity-50"
             >
               Send
             </button>

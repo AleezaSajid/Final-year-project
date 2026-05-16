@@ -182,7 +182,15 @@ export async function getActiveOrderForCustomer(customerId) {
  * @param {string} orderId Mongo _id
  * @param {Record<string, unknown>} body
  */
-export async function patchOrderWizardFields(orderId, body) {
+function orderApiErrorMessage(res, data, operation) {
+  const base = data.message || data.error || res.statusText || "Request failed.";
+  if (res.status === 403) {
+    return `${operation} failed: Forbidden (${base})`;
+  }
+  return `${operation} failed: ${base}`;
+}
+
+export async function patchOrderWizardFields(orderId, body, options = {}) {
   const id = String(orderId || "").trim();
   if (!id) {
     throw new Error("Order id is required.");
@@ -191,6 +199,15 @@ export async function patchOrderWizardFields(orderId, body) {
   if (!base) {
     throw new Error("API base URL is not configured.");
   }
+  const operation =
+    options.operation ||
+    (body && body.action === "accept_order"
+      ? "Accept order"
+      : body && body.action === "select_tailor"
+        ? "Select tailor"
+        : body && body.action === "claim_order"
+          ? "Claim order"
+          : "Order update");
   const res = await fetch(`${base}/orders/${encodeURIComponent(id)}`, {
     method: "PATCH",
     credentials: "include",
@@ -207,7 +224,7 @@ export async function patchOrderWizardFields(orderId, body) {
     }
   }
   if (!res.ok) {
-    const msg = data.message || data.error || res.statusText || "Could not update order.";
+    const msg = orderApiErrorMessage(res, data, operation);
     const e = new Error(msg);
     e.status = res.status;
     throw e;

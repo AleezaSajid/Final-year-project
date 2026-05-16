@@ -3,25 +3,26 @@ import { useLocation, useNavigate } from "react-router-dom";
 import CustomerChatWindow from "../CustomerChatWindow.jsx";
 import { ensureSocketThen, socket } from "../socket.js";
 import {
-  CHAT_IDS_FROM_ORDER_EVENT,
   CHAT_ROOM_CUSTOMER_SYNC_EVENT,
   dedupeConversationsByOrderId,
   getOrderChatConversationId,
-  isOrderEligibleForChat,
   logConversationRowsValidation,
   messageBelongsToOrderChat,
   normalizeChatId,
   normalizeConversationId,
   readChatRoomCustomerIdFromStorage,
 } from "../chatUtils.js";
+import { resolveCustomerIdForChat } from "../utils/chatIdentity.js";
 import {
-  looksLikeTailorShopId,
-  resolveCustomerIdForChat,
-  resolveTailorIdForCustomerChat,
-  TAILOR_SESSION_STORAGE_KEY,
-} from "../utils/chatIdentity.js";
+  inferPeerIdFromMessage,
+  resolveConversationPeers,
+} from "../utils/orderChatParticipants.js";
+import { getApiBaseUrl } from "../api/client.js";
+import {
+  getLinkedWizardOrderId,
+  wizardOrderAcceptMatches,
+} from "../utils/measurementWizardOrderSync.js";
 import { useAuth } from "./AuthContext.jsx";
-import { API_BASE_URL } from "../tailorDashboard/constants.js";
 
 const PREVIEW_SESSION_KEY = "sewserve_customer_chat_last_preview";
 
@@ -64,6 +65,31 @@ function isCustomerChatPath(pathname) {
   return pathname === "/customer/dashboard" || pathname.startsWith("/customer/review");
 }
 
+function isWizardRoute(pathname) {
+  return (
+    pathname.includes("measurement") ||
+    pathname.includes("wizard") ||
+    pathname.includes("/map") ||
+    pathname.includes("location-step")
+  );
+}
+
+function resolveCurrentWizardOrderId() {
+  return normalizeConversationId(getLinkedWizardOrderId() || "");
+}
+
+function resolveAcceptedOrderId(payload) {
+  return normalizeConversationId(payload?.orderId ?? payload?.conversationId ?? "");
+}
+
+function customerMatchesOrderAcceptedPayload(payload, authCustomerIdForApi, user) {
+  const pid = payload?.customerId != null ? String(payload.customerId).trim() : "";
+  if (!pid) return true;
+  const a = authCustomerIdForApi ? String(authCustomerIdForApi).trim() : "";
+  const b = user ? String(resolveCustomerIdForChat(user)).trim() : "";
+  return (!a && !b) || pid === a || pid === b;
+}
+
 export function CustomerChatProvider({ children }) {
   const { user } = useAuth();
   const location = useLocation();
@@ -73,28 +99,37 @@ export function CustomerChatProvider({ children }) {
   const [unreadChatCount, setUnreadChatCount] = useState(0);
   const [lastChatPreview, setLastChatPreview] = useState(() => readStoredChatPreview());
   const [orderRoomCustomerId, setOrderRoomCustomerId] = useState(() => readChatRoomCustomerIdFromStorage());
-  const [orderLinkedIdsVersion, setOrderLinkedIdsVersion] = useState(0);
-  const [orderChatBinding, setOrderChatBinding] = useState(null);
   const [customerChatConversations, setCustomerChatConversations] = useState([]);
+  const [modalChatRow, setModalChatRow] = useState(null);
   const customerReconcileRefetchAtRef = useRef(0);
 
-  const syncCustomerOrderChatFromOrder = useCallback((order) => {
-    if (!order || !isOrderEligibleForChat(order, { allowLegacyPlaceholderTailor: true })) {
-      setOrderChatBinding(null);
-      return;
-    }
-    const oid = order.id ?? order._id;
-    const oidStr = oid != null ? String(oid).trim() : "";
-    if (!oidStr) {
-      setOrderChatBinding(null);
-      return;
-    }
-    setOrderChatBinding({
-      customerId: normalizeChatId(order.customerId),
-      tailorId: normalizeChatId(order.tailorId),
-      conversationId: normalizeConversationId(getOrderChatConversationId(oidStr)),
-    });
-  }, []);
+  /** Legacy hook for review pages — sets modal thread from order row only (no global tailor). */
+  const syncCustomerOrderChatFromOrder = useCallback(
+    (order) => {
+      if (!order || !order.tailorId) {
+        setModalChatRow(null);
+        return;
+      }
+      const oid = order.id ?? order._id;
+      const oidStr = oid != null ? String(oid).trim() : "";
+      if (!oidStr) {
+        setModalChatRow(null);
+        return;
+      }
+      setModalChatRow({
+        orderId: oidStr,
+        conversationId: normalizeConversationId(getOrderChatConversationId(oidStr)),
+        customerId: normalizeChatId(order.customerId),
+        tailorId: normalizeChatId(order.tailorId),
+        tailorName: order.tailorName || order.tailorShopName,
+        customerName: order.customerName,
+        status: order.status,
+        isActive: order.isActive,
+        acceptedAt: order.acceptedAt,
+      });
+    },
+    []
+  );
 
   useEffect(() => {
     isChatOpenRef.current = isChatOpen;
@@ -115,49 +150,26 @@ export function CustomerChatProvider({ children }) {
     return () => window.removeEventListener(CHAT_ROOM_CUSTOMER_SYNC_EVENT, onRoomSync);
   }, []);
 
-  useEffect(() => {
-    const bump = () => setOrderLinkedIdsVersion((v) => v + 1);
-    window.addEventListener(CHAT_IDS_FROM_ORDER_EVENT, bump);
-    return () => window.removeEventListener(CHAT_IDS_FROM_ORDER_EVENT, bump);
-  }, []);
-
-  const customerId = useMemo(() => {
-    if (orderChatBinding?.customerId) return orderChatBinding.customerId;
-    const raw = orderRoomCustomerId || resolveCustomerIdForChat(user);
-    return normalizeChatId(raw) || "CU-001";
-  }, [orderChatBinding, orderRoomCustomerId, user]);
-
-  const tailorIdForChat = useMemo(() => {
-    void orderLinkedIdsVersion;
-    const fromOrder = orderChatBinding?.tailorId != null ? normalizeChatId(orderChatBinding.tailorId) : "";
-    if (fromOrder && looksLikeTailorShopId(fromOrder)) return fromOrder;
-    const r = normalizeChatId(resolveTailorIdForCustomerChat(user));
-    if (looksLikeTailorShopId(r)) return r;
-    if (fromOrder) return fromOrder;
-    try {
-      const raw = localStorage.getItem(TAILOR_SESSION_STORAGE_KEY);
-      const s = raw != null ? String(raw).trim() : "";
-      if (s) return normalizeChatId(s);
-    } catch {
-      /* ignore */
-    }
-    return "";
-  }, [orderChatBinding, user, orderLinkedIdsVersion]);
-
-  const conversationId = useMemo(
-    () => normalizeConversationId(orderChatBinding?.conversationId || ""),
-    [orderChatBinding]
-  );
-
-  useEffect(() => {
-    if (conversationId) console.log("[ChatSync customer] active conversationId", conversationId);
-  }, [conversationId]);
-
   const authCustomerIdForApi = useMemo(() => {
     if (!user || user.role !== "customer") return "";
     const id = user.id ?? user.customerId ?? user._id;
     return id != null ? String(id).trim() : "";
   }, [user]);
+
+  const customerId = authCustomerIdForApi;
+
+  const modalPeers = useMemo(() => {
+    if (!modalChatRow || !authCustomerIdForApi) return null;
+    return resolveConversationPeers({
+      row: modalChatRow,
+      currentUserId: authCustomerIdForApi,
+      mode: "customer",
+    });
+  }, [modalChatRow, authCustomerIdForApi]);
+
+  /** @deprecated Chat routing uses per-conversation rows; always empty for global send. */
+  const tailorIdForChat = "";
+  const conversationId = "";
 
   /** Join customer user socket rooms on every page — server emits orderAccepted to these rooms. */
   useEffect(() => {
@@ -165,8 +177,14 @@ export function CustomerChatProvider({ children }) {
     const joinCustomerRooms = () => {
       const primary = authCustomerIdForApi;
       const alt = resolveCustomerIdForChat(user);
-      if (primary) socket.emit("join_user", { userId: primary });
-      if (alt && alt !== primary) socket.emit("join_user", { userId: alt });
+      if (primary) {
+        console.log("[chat] joining room", primary);
+        socket.emit("join_user", { userId: primary });
+      }
+      if (alt && alt !== primary) {
+        console.log("[chat] joining room", alt);
+        socket.emit("join_user", { userId: alt });
+      }
     };
     ensureSocketThen(joinCustomerRooms);
     socket.on("connect", joinCustomerRooms);
@@ -175,18 +193,30 @@ export function CustomerChatProvider({ children }) {
     };
   }, [user, user?.role, authCustomerIdForApi]);
 
-  /** After tailor accepts, customer goes to dashboard (wizard, map, track-orders, etc.). */
+  /**
+   * After tailor accepts: on wizard, redirect only when THIS wizard order was accepted;
+   * elsewhere keep redirect-to-dashboard behavior for map / track flows.
+   */
   useEffect(() => {
     if (user?.role !== "customer") return undefined;
     const onOrderAccepted = (payload = {}) => {
-      if (location.pathname === "/customer/dashboard") return;
-      const pid = payload?.customerId != null ? String(payload.customerId).trim() : "";
-      if (pid) {
-        const a = authCustomerIdForApi ? String(authCustomerIdForApi).trim() : "";
-        const b = user ? String(resolveCustomerIdForChat(user)).trim() : "";
-        const match = (!a && !b) || pid === a || pid === b;
-        if (!match) return;
+      if (!customerMatchesOrderAcceptedPayload(payload, authCustomerIdForApi, user)) return;
+
+      const onWizard = isWizardRoute(location.pathname);
+      const currentWizardOrderId = resolveCurrentWizardOrderId();
+      const acceptedOrderId = resolveAcceptedOrderId(payload);
+
+      if (onWizard) {
+        console.log("[wizard] current order", currentWizardOrderId || "(none)");
+        console.log("[wizard] accepted order", acceptedOrderId || "(none)");
+        if (!currentWizardOrderId || !acceptedOrderId) return;
+        if (!wizardOrderAcceptMatches(payload, currentWizardOrderId)) return;
+        console.log("[Customer] orderAccepted (wizard match) → /customer/dashboard");
+        navigate("/customer/dashboard", { replace: true });
+        return;
       }
+
+      if (location.pathname === "/customer/dashboard") return;
       console.log("[Customer] orderAccepted → navigating to /customer/dashboard");
       navigate("/customer/dashboard", { replace: true });
     };
@@ -198,10 +228,15 @@ export function CustomerChatProvider({ children }) {
     const cid = authCustomerIdForApi;
     if (!cid) return;
     try {
-      const res = await fetch(`${API_BASE_URL}/conversations/customer/${encodeURIComponent(cid)}`, {
+      const base = getApiBaseUrl();
+      if (!base) return;
+      const res = await fetch(`${base}/conversations/customer/${encodeURIComponent(cid)}`, {
         credentials: "include",
       });
       const data = await res.json().catch(() => ({}));
+      if (res.status === 403) {
+        console.warn("[ChatSync customer] Conversation fetch failed: Forbidden", { cid, data });
+      }
       const list = Array.isArray(data?.conversations) ? data.conversations : [];
       logConversationRowsValidation(list, "customer fetch");
       console.log("[ChatSync customer] fetched conversations", list.length, list);
@@ -306,7 +341,7 @@ export function CustomerChatProvider({ children }) {
             orderId: nCid,
             conversationId: nCid,
             customerId: authCustomerIdForApi,
-            tailorId: normalizeChatId(message?.senderId) || "",
+            tailorId: inferPeerIdFromMessage(message, authCustomerIdForApi) || "",
             lastMessage: text ? text.slice(0, 400) : "",
             lastMessageAt: message?.timestamp || new Date().toISOString(),
             unreadCustomer: 0,
@@ -347,14 +382,8 @@ export function CustomerChatProvider({ children }) {
     }
 
     const joinRoom = () => {
-      if (customerId) {
-        socket.emit("join_user", { userId: customerId });
-      }
-      if (conversationId) {
-        const n = normalizeConversationId(conversationId);
-        console.log("[ChatSync Socket] joined room (customer dashboard path)", n);
-        socket.emit("join_conversation", { conversationId: n });
-        socket.emit("request_history", { conversationId: n });
+      if (authCustomerIdForApi) {
+        socket.emit("join_user", { userId: authCustomerIdForApi });
       }
     };
     const handleNewNotification = (payload) => {
@@ -371,7 +400,10 @@ export function CustomerChatProvider({ children }) {
               orderId: nCid,
               conversationId: nCid,
               customerId: authCustomerIdForApi,
-              tailorId: normalizeChatId(tailorIdForChat) || "",
+              tailorId:
+                inferPeerIdFromMessage(payload, authCustomerIdForApi) ||
+                normalizeChatId(payload?.tailorId) ||
+                "",
               lastMessage: String(payload?.content || "").slice(0, 400),
               lastMessageAt: payload?.timestamp || new Date().toISOString(),
               unreadCustomer: 1,
@@ -404,20 +436,12 @@ export function CustomerChatProvider({ children }) {
       socket.off("connect", joinRoom);
       socket.off("new_notification", handleNewNotification);
     };
-  }, [
-    authCustomerIdForApi,
-    customerId,
-    conversationId,
-    fetchCustomerConversations,
-    location.pathname,
-    scheduleCustomerConversationsReconcile,
-    tailorIdForChat,
-  ]);
+  }, [authCustomerIdForApi, fetchCustomerConversations, location.pathname, scheduleCustomerConversationsReconcile]);
 
   useEffect(() => {
     if (!isCustomerChatPath(location.pathname)) return undefined;
 
-    const conv = normalizeConversationId(conversationId);
+    const conv = normalizeConversationId(modalPeers?.conversationId);
 
     const persistPreview = (text, at) => {
       const next = { text: String(text).trim().slice(0, 200), at: at || Date.now() };
@@ -452,7 +476,7 @@ export function CustomerChatProvider({ children }) {
       socket.off("message_received", handleMessageReceived);
       socket.off("chat_history", handleChatHistory);
     };
-  }, [location.pathname, conversationId]);
+  }, [location.pathname, modalPeers?.conversationId]);
 
   const openCustomerChat = useCallback(() => {
     setIsChatOpen(true);
@@ -495,12 +519,16 @@ export function CustomerChatProvider({ children }) {
     <CustomerChatContext.Provider value={value}>
       {children}
       <CustomerChatWindow
-        isOpen={isChatOpen}
+        isOpen={isChatOpen && Boolean(modalPeers?.conversationId)}
         onClose={closeCustomerChat}
-        customerId={customerId}
-        tailorId={String(tailorIdForChat)}
-        tailorName="Your tailor"
-        conversationId={conversationId}
+        senderId={modalPeers?.senderId}
+        receiverId={modalPeers?.receiverId}
+        customerId={modalPeers?.customerId}
+        tailorId={modalPeers?.tailorId}
+        orderId={modalPeers?.orderId}
+        isChatEnabled={modalPeers?.isChatEnabled}
+        tailorName={modalPeers?.peerDisplayName || "Your tailor"}
+        conversationId={modalPeers?.conversationId}
       />
     </CustomerChatContext.Provider>
   );

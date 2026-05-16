@@ -3,11 +3,22 @@ import { normalizeChatId, normalizeConversationId } from "./chatUtils";
 import { socket } from "./socket";
 import OrderChatThread from "./components/chat/OrderChatThread.jsx";
 
-export default function CustomerChatWindow({ isOpen, onClose, customerId, tailorId, tailorName, conversationId }) {
-  const senderId = normalizeChatId(customerId);
-  const receiverId = normalizeChatId(tailorId);
+export default function CustomerChatWindow({
+  isOpen,
+  onClose,
+  senderId,
+  receiverId,
+  customerId,
+  tailorId,
+  orderId,
+  isChatEnabled = true,
+  tailorName,
+  conversationId,
+}) {
+  const sId = normalizeChatId(senderId || customerId);
+  const rId = normalizeChatId(receiverId || tailorId);
   const convId = normalizeConversationId(conversationId);
-  const receiverName = tailorName;
+  const receiverName = tailorName || "Your tailor";
 
   return (
     <div
@@ -48,11 +59,15 @@ export default function CustomerChatWindow({ isOpen, onClose, customerId, tailor
           </button>
         </div>
         <OrderChatThread
-          isActive={isOpen && Boolean(convId && senderId && receiverId)}
+          isActive={isOpen && Boolean(convId && sId && rId)}
+          isChatEnabled={isChatEnabled}
           mode="customer"
-          senderId={senderId}
-          receiverId={receiverId}
-          peerDisplayName={receiverName || "Tailor"}
+          senderId={sId}
+          receiverId={rId}
+          customerId={normalizeChatId(customerId)}
+          tailorId={normalizeChatId(tailorId)}
+          orderId={normalizeConversationId(orderId) || convId}
+          peerDisplayName={receiverName}
           conversationId={convId}
           theme="glass"
           className="min-h-0 flex-1"

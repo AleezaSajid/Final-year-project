@@ -13,10 +13,10 @@ import NearbyTailorsSection from "./components/NearbyTailorsSection";
 import TailorCard from "./components/TailorCard";
 import { distanceKm, formatDistance } from "./utils/haversine";
 import { useAuth } from "../../context/AuthContext.jsx";
-import { isPlaceholderTailorShopId, resolveCustomerIdForChat } from "../../utils/chatIdentity.js";
+import { looksLikeTailorShopId, resolveCustomerIdForChat } from "../../utils/chatIdentity.js";
+import { getLinkedWizardOrderId } from "../../utils/measurementWizardOrderSync.js";
 import { getCustomerMeta, putCustomerMeta } from "../../api/accountApi.js";
 import { tailorMarkerIcon, userMarkerIcon } from "./markerIcons.js";
-import { normalizeWorkflowStatus } from "../../utils/workflowEngine.js";
 
 /** Fallback center when geolocation is denied or unavailable */
 const FALLBACK_CENTER = [31.5204, 74.3587];
@@ -379,23 +379,6 @@ export default function NearbyTailorsMap() {
         (data.patch && data.patch.status && String(data.patch.status)) ||
         "";
       if (st) setOrderLiveHint(`Latest: ${st}`);
-
-      // Tailor accept keeps workflow at "pending" but assigns a real shop id (T-U…); T-A* are demo placeholders only.
-      // Do not require matchStatus === "confirmed" or lastMapTailorRequest — customer may only have ?orderId= in the URL.
-      if (!redirectedRef.current) {
-        const internal = normalizeWorkflowStatus(st);
-        const orderObj = data.fullOrder || data.order || null;
-        const orderTailorId =
-          orderObj && orderObj.tailorId != null ? String(orderObj.tailorId).trim() : "";
-        const topTailorId = data.tailorId != null ? String(data.tailorId).trim() : "";
-        const effectiveTailorId = orderTailorId || topTailorId;
-        const assignedToRealTailor = Boolean(effectiveTailorId) && !isPlaceholderTailorShopId(effectiveTailorId);
-        const statusAdvanced = Boolean(internal && internal !== "pending");
-        if (assignedToRealTailor || statusAdvanced) {
-          redirectedRef.current = true;
-          navigate("/customer/dashboard", { replace: true });
-        }
-      }
     };
 
     socket.on("order:statusUpdated", onOrderEvent);
@@ -516,21 +499,6 @@ export default function NearbyTailorsMap() {
       const tid = String(partial.id ?? payload.tailorId ?? "").trim();
       if (!tid) return;
 
-      const lastReq = lastMapTailorRequestRef.current;
-      const requestedOrderId = lastReq?.orderId != null ? String(lastReq.orderId).trim() : "";
-      const requestedTailorId = lastReq?.tailorId != null ? String(lastReq.tailorId).trim() : "";
-      if (
-        matchStatus === "confirmed" &&
-        requestedOrderId &&
-        activeOrderIdRef.current &&
-        orderIdsMatch(requestedOrderId, activeOrderIdRef.current) &&
-        requestedTailorId &&
-        requestedTailorId === tid
-      ) {
-        navigate("/customer/dashboard", { replace: true });
-        return;
-      }
-
       const full = mergeTailorFromInterest({ ...partial, id: tid }, allTailorsRef.current);
       if (!full) return;
       setInterestedTailors((prev) => {
@@ -547,36 +515,64 @@ export default function NearbyTailorsMap() {
   }, [matchStatus, navigate]);
 
   const handleSelectTailor = useCallback(
-    (tailor) => {
-      const oid = activeOrderIdRef.current;
-      const tailorId = tailor?.tailorShopId || tailor?.id;
-      const customerId = resolveCustomerIdForChat(user);
-      ensureSocketThen(() => {
-        socket.emit("tailor:selected", {
-          tailorId,
-          customerId,
-          orderId: oid,
-          location: { lat: userCenter[0], lng: userCenter[1] },
-          garmentType: tailor?.specialty || "—",
-          budget: "—",
-        });
-      });
-      setMatchStatus("confirmed");
-      const mapReq = {
-        orderId: oid != null ? String(oid) : "",
-        tailorId: tailorId != null ? String(tailorId) : "",
-        tailorName: tailor?.name != null ? String(tailor.name) : "",
-        sentAt: Date.now(),
-      };
-      lastMapTailorRequestRef.current = mapReq;
-      if (user?.id && user.role === "customer") {
-        void putCustomerMeta(user, { lastMapTailorRequest: mapReq }).catch(() => {});
+    async (tailor) => {
+      const oid = (wizardOrderId || activeOrderIdRef.current || getLinkedWizardOrderId() || "").trim();
+      const tailorShopId = String(tailor?.tailorShopId || "").trim();
+      if (!oid) {
+        setAssignError("Complete the measurement wizard before selecting a tailor.");
+        return;
       }
-      if (oid) {
-        navigate(`/map?orderId=${encodeURIComponent(String(oid))}`, { replace: true });
+      if (!tailorShopId || !looksLikeTailorShopId(tailorShopId)) {
+        setAssignError("Could not resolve a valid tailor shop for this selection.");
+        return;
+      }
+      setAssignBusy(true);
+      setAssignError("");
+      try {
+        await patchOrderWizardFields(
+          oid,
+          {
+            action: "select_tailor",
+            tailorId: tailorShopId,
+            status: "pending",
+            isActive: false,
+            chatEnabled: false,
+          },
+          { operation: "Select tailor" }
+        );
+        const customerId = resolveCustomerIdForChat(user);
+        ensureSocketThen(() => {
+          socket.emit("tailor:selected", {
+            tailorId: tailorShopId,
+            customerId,
+            orderId: oid,
+            location: { lat: userCenter[0], lng: userCenter[1] },
+            garmentType: tailor?.specialty || "—",
+            budget: "—",
+          });
+        });
+        setMatchStatus("confirmed");
+        setAssignSuccess(true);
+        const mapReq = {
+          orderId: oid,
+          tailorId: tailorShopId,
+          tailorName: tailor?.name != null ? String(tailor.name) : "",
+          sentAt: Date.now(),
+        };
+        lastMapTailorRequestRef.current = mapReq;
+        if (user?.id && user.role === "customer") {
+          void putCustomerMeta(user, { lastMapTailorRequest: mapReq }).catch(() => {});
+        }
+        window.dispatchEvent(new CustomEvent("sewserve:orders-refresh"));
+        navigate(`/map?orderId=${encodeURIComponent(oid)}`, { replace: true });
+      } catch (e) {
+        setAssignSuccess(false);
+        setAssignError(e instanceof Error ? e.message : "Could not send request to tailor.");
+      } finally {
+        setAssignBusy(false);
       }
     },
-    [user, userCenter, navigate]
+    [wizardOrderId, user, userCenter, navigate]
   );
 
   const handleConfirmWizardTailor = useCallback(async () => {
@@ -588,11 +584,21 @@ export default function NearbyTailorsMap() {
     setAssignError("");
     setAssignBusy(true);
     try {
-      await patchOrderWizardFields(wizardOrderId, {
-        tailorId: selectedTailor.id,
-        status: "Assigned",
-        workflowStatus: "Assigned",
-      });
+      const tailorShopId = String(selectedTailor.tailorShopId || "").trim();
+      if (!tailorShopId || !looksLikeTailorShopId(tailorShopId)) {
+        throw new Error("Could not resolve a valid tailor shop for this selection.");
+      }
+      await patchOrderWizardFields(
+        wizardOrderId,
+        {
+          action: "select_tailor",
+          tailorId: tailorShopId,
+          status: "pending",
+          isActive: false,
+          chatEnabled: false,
+        },
+        { operation: "Select tailor" }
+      );
       setAssignSuccess(true);
     } catch (e) {
       setAssignError(e instanceof Error ? e.message : "Could not assign tailor.");
@@ -661,7 +667,7 @@ export default function NearbyTailorsMap() {
             {isSelectMode ? (
               <section className="ss-glass-card relative overflow-hidden rounded-apple-card p-6 shadow-lg shadow-slate-900/5 sm:p-8">
                 <h1 className="font-['Playfair_Display',Georgia,serif] text-2xl font-bold leading-tight tracking-tight text-ink sm:text-3xl">
-                  Select a Tailor for Your Order
+                  {"Select a Tailor for Your Order"}
                 </h1>
                 <p className="mt-3 text-sm leading-relaxed text-ink-muted">
                   {geoStatus === "ok"
@@ -689,7 +695,7 @@ export default function NearbyTailorsMap() {
                 className="mt-6 rounded-apple-card border border-emerald-200/80 bg-emerald-50/90 px-4 py-3 text-center text-sm font-semibold text-emerald-900 shadow-sm"
                 role="status"
               >
-                Success — your order is assigned to the selected tailor and status is set to Assigned.
+                Request sent. Waiting for tailor acceptance.
               </div>
             ) : null}
             {isSelectMode && assignError ? (
@@ -706,9 +712,9 @@ export default function NearbyTailorsMap() {
               
                 {matchStatus === "confirmed" ? (
                   <div>
-                    <p className="text-sm font-semibold">Request sent</p>
+                    <p className="text-sm font-semibold">Request sent. Waiting for tailor acceptance.</p>
                     <p className="mt-1 text-sm text-emerald-900/85">
-                      The tailor has been notified. Stay on this page for live updates.
+                      You will be redirected to your dashboard once the tailor accepts.
                       {orderLiveHint ? (
                         <span className="mt-1 block text-xs font-medium text-emerald-800/90">{orderLiveHint}</span>
                       ) : null}

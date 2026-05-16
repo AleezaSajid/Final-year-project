@@ -175,13 +175,21 @@ export const seedOrders = [
 ];
 
 export const normalizeOrder = (order) => {
+  const rawStatus = order.status ?? order.workflowStatus ?? "";
+  const rawSnake = String(rawStatus).trim().toLowerCase().replace(/\s+/g, "_");
+  const accepted =
+    rawSnake === "accepted" ||
+    order.isActive === true ||
+    Boolean(order.acceptedAt);
   const { internalStatus: normalizedStatus, workflowIndex } = resolveOrderWorkflowState(order);
+  const displayStatus = accepted ? "accepted" : normalizedStatus;
   const idFromDoc =
     order.id != null && String(order.id).trim() !== ""
       ? String(order.id).trim()
       : mongoIdToString(order._id);
   return {
     id: idFromDoc || `ORD-${Date.now()}`,
+    _id: mongoIdToString(order._id) || idFromDoc,
     customerName: order.customerName || "Customer",
     customerId:
       order.customerId ||
@@ -190,7 +198,7 @@ export const normalizeOrder = (order) => {
         .replace(/\s+/g, "-")
         .toUpperCase()}`,
     garmentType: order.garmentType || "Garment",
-    status: normalizedStatus,
+    status: displayStatus,
     date: order.date || new Date().toISOString().slice(0, 10),
     createdAt: order.createdAt || order.date || new Date().toISOString(),
     dueDate: order.dueDate || order.date || new Date().toISOString().slice(0, 10),
@@ -211,8 +219,11 @@ export const normalizeOrder = (order) => {
       order.customerPhone != null && String(order.customerPhone).trim() !== "" ? String(order.customerPhone) : "",
     style: order.style && typeof order.style === "object" && !Array.isArray(order.style) ? order.style : null,
     notes: order.notes && typeof order.notes === "object" && !Array.isArray(order.notes) ? order.notes : null,
-    workflowStatus: normalizedStatus,
+    workflowStatus: accepted ? "accepted" : normalizedStatus,
     currentStepIndex: workflowIndex,
+    isActive: order.isActive === true,
+    chatEnabled: order.chatEnabled !== false,
+    acceptedAt: order.acceptedAt || null,
   };
 };
 

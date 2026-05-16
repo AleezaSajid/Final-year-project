@@ -4,6 +4,7 @@ import { useLocation } from "react-router-dom";
 import DashboardNavbar from "./components/DashboardNavbar";
 import { LandingStylePageBackground } from "./components/LandingStylePageBackground.jsx";
 import TdDashboardOverview from "./tailorDashboard/components/TdDashboardOverview";
+import WizardOrderReviewModal from "./tailorDashboard/components/WizardOrderReviewModal.jsx";
 import TailorWhatsAppWorkspace from "./components/chat/TailorWhatsAppWorkspace.jsx";
 import OrderPopup from "./tailorDashboard/components/OrderPopup.jsx";
 import { TailorDashboardChatContext } from "./context/TailorDashboardChatContext.jsx";
@@ -124,10 +125,17 @@ export default function TailorDashboard() {
             tailorChatConversations={dash.tailorChatConversations}
             orders={dash.orders}
             openChatForOrder={dash.openChatForOrder}
+            acceptOrderIntoCurrentTasks={dash.acceptOrderIntoCurrentTasks}
             activeConversationId={dash.activeConversationId}
             activeChatCustomer={dash.activeChatCustomer}
             activeTailorShopId={dash.activeTailorShopId}
             setActiveOrderId={dash.setActiveOrderId}
+          />
+          <WizardOrderReviewModal
+            order={dash.reviewModalDisplayOrder}
+            open={dash.reviewModalOpen}
+            onClose={dash.closeMeasurementsReview}
+            acceptOrderIntoCurrentTasks={dash.acceptOrderIntoCurrentTasks}
           />
           <TdDashboardOverview {...dash} />
         </div>
