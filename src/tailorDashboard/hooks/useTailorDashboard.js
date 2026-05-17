@@ -40,7 +40,12 @@ import {
 } from "../constants";
 import { getTailorProfileSelf, patchTailorProfileSelf } from "../../api/accountApi.js";
 import { getApiBaseUrl } from "../../api/client.js";
-import { getPriorityScore, isTailorActiveTask } from "../../utils/workflowEngine.js";
+import {
+  getPriorityScore,
+  getTrackingStatus,
+  getWorkflowIndex,
+  isTailorCurrentTaskOrder,
+} from "../../utils/workflowEngine.js";
 
 function isPlainOrderObject(v) {
   return v != null && typeof v === "object" && !Array.isArray(v);
@@ -98,8 +103,7 @@ function toStoreOrder(raw) {
 }
 
 function orderIsActiveCurrentTask(order) {
-  const w = resolveOrderWorkflowState(order);
-  return isTailorActiveTask(order) && w.internalStatus !== "completed";
+  return isTailorCurrentTaskOrder(order);
 }
 
 function sortTailorConversationsDesc(rows) {
@@ -744,6 +748,14 @@ export function useTailorDashboard() {
       .sort((a, b) => new Date(b.createdAt || b.date).getTime() - new Date(a.createdAt || a.date).getTime());
   }, [tailorOrders]);
 
+  const orderMatchesId = (order, orderId) => {
+    const target = String(orderId ?? "").trim();
+    if (!target) return false;
+    const a = String(order?.id ?? "").trim();
+    const b = String(order?._id ?? "").trim();
+    return a === target || b === target;
+  };
+
   const updateOrderStatus = async (orderId, newStatus) => {
     const fromAuth = resolveWorkflowControlRole(user);
     const fromStorage = getUserRole();
@@ -758,15 +770,22 @@ export function useTailorDashboard() {
     }
 
     const normalizedStatus = normalizeStatus(newStatus);
-    const resolvedPatch = resolveOrderWorkflowState({ status: normalizedStatus });
+    const resolvedPatch = resolveOrderWorkflowState({
+      status: normalizedStatus,
+      currentStepIndex: getWorkflowIndex(normalizedStatus),
+    });
+    const stepIndex = resolvedPatch.workflowIndex;
+    const trackingStatus = getTrackingStatus(normalizedStatus);
+
     setOrders((prev) =>
       prev.map((o) =>
-        String(o.id) === String(orderId)
+        orderMatchesId(o, orderId)
           ? toStoreOrder(
               mergeOrderPatch(o, {
                 status: normalizedStatus,
-                currentStepIndex: resolvedPatch.workflowIndex,
-                currentStep: resolvedPatch.workflowIndex,
+                workflowStatus: normalizedStatus,
+                currentStepIndex: stepIndex,
+                currentStep: stepIndex,
               })
             )
           : o
@@ -778,19 +797,37 @@ export function useTailorDashboard() {
         String(orderId),
         {
           status: normalizedStatus,
-          currentStep: resolvedPatch.workflowIndex,
-          currentStepIndex: resolvedPatch.workflowIndex,
+          workflowStatus: normalizedStatus,
+          currentStep: stepIndex,
+          currentStepIndex: stepIndex,
         },
         { operation: "Order update" }
       );
       const oid = String(updated._id ?? updated.id ?? orderId);
+      setOrders((prev) => {
+        const existing = prev.find((o) => orderMatchesId(o, orderId)) || { id: oid };
+        const merged = toStoreOrder(
+          mergeOrderPatch(existing, {
+            ...(updated && typeof updated === "object" ? updated : {}),
+            status: normalizedStatus,
+            workflowStatus: normalizedStatus,
+            currentStepIndex: stepIndex,
+            currentStep: stepIndex,
+          })
+        );
+        return prev.map((o) => (orderMatchesId(o, orderId) ? merged : o));
+      });
       ensureSocketThen(() => {
         socket.emit("join_order_room", oid);
         socket.emit("order:statusUpdated", {
           orderId: oid,
-          status: normalizedStatus,
+          status: trackingStatus,
+          currentStepIndex: stepIndex,
         });
       });
+      if (typeof window !== "undefined") {
+        window.dispatchEvent(new CustomEvent("sewserve:orders-refresh"));
+      }
       await fetchOrders();
     } catch {
       await fetchOrders();
@@ -815,8 +852,10 @@ export function useTailorDashboard() {
       const acceptedAtIso = new Date().toISOString();
       const acceptPatch = {
         tailorId,
-        status: "accepted",
-        workflowStatus: "accepted",
+        status: "pending",
+        workflowStatus: "pending",
+        currentStepIndex: 0,
+        currentStep: 0,
         isActive: true,
         chatEnabled: true,
         acceptedAt: acceptedAtIso,
@@ -883,8 +922,12 @@ export function useTailorDashboard() {
           mergeOrderPatch(existingRow || { id: oid }, {
             ...(updated && typeof updated === "object" ? updated : {}),
             tailorId,
-            status: "accepted",
-            workflowStatus: "accepted",
+            status: updated?.status ? normalizeStatus(updated.status) : "pending",
+            workflowStatus: updated?.workflowStatus
+              ? normalizeStatus(updated.workflowStatus)
+              : "pending",
+            currentStepIndex: 0,
+            currentStep: 0,
             isActive: true,
             chatEnabled: true,
             acceptedAt: updated?.acceptedAt || acceptedAtIso,

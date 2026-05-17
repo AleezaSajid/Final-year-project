@@ -5,6 +5,25 @@
 import { api, getApiBaseUrl } from "./client.js";
 import { measurementOrderPayloadToServerBody } from "../utils/measurementOrderPayload.js";
 import { mapApiOrderToRecentRow } from "../utils/mapApiOrderToRecentRow.js";
+import { pickLatestTrackableCustomerOrder } from "../utils/orderWorkflow.js";
+
+function customerIdsMatch(a, b) {
+  const sa = a != null ? String(a).trim() : "";
+  const sb = b != null ? String(b).trim() : "";
+  if (!sa || !sb) return false;
+  if (sa === sb) return true;
+  const na = Number(sa);
+  const nb = Number(sb);
+  if (!Number.isNaN(na) && !Number.isNaN(nb) && na === nb) return true;
+  return false;
+}
+
+function orderBelongsToCustomer(order, customerId) {
+  const cid = String(customerId || "").trim();
+  if (!cid || !order) return false;
+  const onOrder = order.customerId ?? order.customer?.id;
+  return customerIdsMatch(onOrder, cid);
+}
 
 function notifyOrderListsInvalidated() {
   if (typeof window === "undefined") return;
@@ -248,7 +267,7 @@ export async function listOrdersForCustomer(customerId) {
     if (!res.ok) throw new Error(`Orders request failed (${res.status})`);
     const data = await res.json();
     const list = Array.isArray(data) ? data : unwrapList(data);
-    return list.filter((o) => String(o.customerId || o.customer?.id || "") === cid);
+    return list.filter((o) => orderBelongsToCustomer(o, cid));
   } catch (e1) {
     try {
       const res = await fetch(`${base}/orders/customer/${encodeURIComponent(cid)}`, {
@@ -257,7 +276,7 @@ export async function listOrdersForCustomer(customerId) {
       if (!res.ok) throw new Error(`Orders request failed (${res.status})`);
       const data = await res.json();
       const list = Array.isArray(data) ? data : unwrapList(data);
-      return list.filter((o) => String(o.customerId || "") === cid);
+      return list.filter((o) => orderBelongsToCustomer(o, cid));
     } catch (e2) {
       const msg =
         (e1 instanceof Error && e1.message) ||
@@ -271,6 +290,30 @@ export async function listOrdersForCustomer(customerId) {
 export function mapOrdersToRecentRows(orders) {
   if (!Array.isArray(orders)) return [];
   return orders.map(mapApiOrderToRecentRow);
+}
+
+/** Resolve the order the customer should see on Track Order (API active, then list fallback). */
+export async function resolveCustomerTrackOrder(customerId, options = {}) {
+  const cid = String(customerId || "").trim();
+  if (!cid) return null;
+
+  const explicitId =
+    options.orderId != null ? String(options.orderId).trim() : "";
+  if (explicitId) {
+    const doc = await getOrderById(explicitId);
+    const normalized = normalizeApiOrderDoc(doc);
+    if (normalized && orderBelongsToCustomer(normalized, cid)) return normalized;
+  }
+
+  try {
+    const activeDoc = await getActiveOrderForCustomer(cid);
+    return normalizeApiOrderDoc(activeDoc);
+  } catch {
+    /* fall through to list */
+  }
+
+  const list = await listOrdersForCustomer(cid);
+  return normalizeApiOrderDoc(pickLatestTrackableCustomerOrder(list));
 }
 
 /**

@@ -20,12 +20,24 @@ const CANONICAL = new Set([
 ]);
 
 const TAILOR_ACTIVE_SET = new Set([
+  "accepted",
   "pending",
   "measurements_verified",
   "stitching",
   "quality_check",
   "ready_for_delivery",
   "last_review",
+  "processing",
+  "in_progress",
+]);
+
+const TAILOR_TASK_TERMINAL = new Set([
+  "completed",
+  "cancelled",
+  "canceled",
+  "rejected",
+  "declined",
+  "delivered",
 ]);
 
 const CUSTOMER_VISIBLE_SET = new Set(workflowStages.map((s) => s.status));
@@ -69,6 +81,8 @@ function socketEnumToInternal(raw, currentStepIndex) {
     COMPLETED: "completed",
     PROCESSING: "processing",
     IN_PROGRESS: "in_progress",
+    ACCEPTED: "accepted",
+    ACTIVE: "accepted",
     NEEDS_ALTERATION: "needs_alteration",
   };
   return map[u] || "";
@@ -93,6 +107,7 @@ export function getWorkflowIndex(status) {
 
 export function getTrackingStatus(status) {
   const normalized = normalizeWorkflowStatus(status);
+  if (normalized === "accepted") return "ORDER_PLACED";
   if (normalized === "pending") return "ORDER_PLACED";
   if (normalized === "measurements_verified") return "MEASUREMENTS_VERIFIED";
   if (normalized === "stitching") return "STITCHING";
@@ -136,7 +151,18 @@ export function resolveWorkflowState(order) {
     }
   }
 
-  const workflowIndex = getWorkflowIndex(internalStatus);
+  if (internalStatus === "accepted") {
+    if (idx != null) {
+      internalStatus = workflowStages[idx]?.status || "pending";
+    } else {
+      internalStatus = "pending";
+    }
+  }
+
+  const workflowIndex =
+    idx != null && internalStatus !== "completed"
+      ? Math.max(0, Math.min(workflowStages.length - 1, idx))
+      : getWorkflowIndex(internalStatus);
   const trackingStatus = getTrackingStatus(internalStatus);
   const workflowStatus = internalStatus;
   const isTailorActive = TAILOR_ACTIVE_SET.has(internalStatus);
@@ -144,8 +170,62 @@ export function resolveWorkflowState(order) {
   return { internalStatus, workflowIndex, workflowStatus, trackingStatus, isTailorActive, isCustomerVisible };
 }
 
+function isTailorTaskTerminal(order) {
+  const input = order && typeof order === "object" ? order : {};
+  const state = resolveWorkflowState(input);
+  const raw = toSnake(input.status ?? input.workflowStatus ?? "");
+  return TAILOR_TASK_TERMINAL.has(state.internalStatus) || TAILOR_TASK_TERMINAL.has(raw);
+}
+
 export function isTailorActiveTask(order) {
-  return resolveWorkflowState(order).isTailorActive;
+  const input = order && typeof order === "object" ? order : {};
+  const state = resolveWorkflowState(input);
+  if (state.isTailorActive) return true;
+  if (input.isActive === true || input.acceptedAt) return true;
+  const raw = toSnake(input.status ?? input.workflowStatus ?? "");
+  return raw === "accepted" || raw === "active" || raw === "in_progress" || raw === "processing";
+}
+
+/** Current Tasks: active/accepted work; excludes completed/cancelled/delivered. */
+export function isTailorCurrentTaskOrder(order) {
+  if (!order || typeof order !== "object") return false;
+  if (isTailorTaskTerminal(order)) return false;
+  return isTailorActiveTask(order);
+}
+
+const CUSTOMER_TRACK_SKIP = new Set(["draft", "awaiting_tailor_selection"]);
+
+/** Customer Track Order: accepted/in-progress orders (not completed/cancelled). */
+export function isCustomerTrackableActiveOrder(order) {
+  if (!order || typeof order !== "object") return false;
+  if (isTailorTaskTerminal(order)) return false;
+  const raw = toSnake(order.status ?? order.workflowStatus ?? "");
+  if (CUSTOMER_TRACK_SKIP.has(raw)) return false;
+  if (order.isActive === true) return true;
+  if (order.acceptedAt) return true;
+  if (raw === "accepted" || raw === "active" || raw === "in_progress" || raw === "processing") {
+    return true;
+  }
+  const wf = order.workflowStatus != null ? String(order.workflowStatus).trim() : "";
+  if (wf) {
+    const w = toSnake(wf);
+    if (!CUSTOMER_TRACK_SKIP.has(w) && !TAILOR_TASK_TERMINAL.has(w)) return true;
+  }
+  const tailorId = String(order.tailorId ?? "").trim();
+  if (tailorId && (raw === "pending" || isTailorActiveTask(order))) return true;
+  return false;
+}
+
+export function pickLatestTrackableCustomerOrder(orders) {
+  const rows = (Array.isArray(orders) ? orders : []).filter(isCustomerTrackableActiveOrder);
+  if (rows.length === 0) return null;
+  return [...rows].sort((a, b) => {
+    const score = (o) =>
+      (o.isActive === true ? 4 : 0) +
+      (o.acceptedAt ? 2 : 0) +
+      new Date(o.updatedAt || o.acceptedAt || o.createdAt || 0).getTime() / 1e12;
+    return score(b) - score(a);
+  })[0];
 }
 
 export function isCustomerVisibleTask(order) {

@@ -12,6 +12,7 @@ import TailorDashboard from "./TailorDashboard";
 import CustomerDashboard from "./CustomerDashboard";
 import CustomerMessagesPage from "./pages/CustomerMessagesPage.jsx";
 import TailorMessagesPage from "./pages/TailorMessagesPage.jsx";
+import TailorOrdersPage from "./pages/TailorOrdersPage.jsx";
 import LastReviewPage from "./LastReviewPage";
 import CustomerReviewPage from "./CustomerReviewPage";
 import MeasurementWizard from "./MeasurementWizard";
@@ -106,6 +107,20 @@ function AnimatedRoutes() {
                 tailorOnboardingGate="require-complete"
               >
                 <TailorMessagesPage />
+              </ProtectedRoute>
+            </PageTransition>
+          }
+        />
+        <Route
+          path="/tailor/orders"
+          element={
+            <PageTransition>
+              <ProtectedRoute
+                redirectPath="/tailor-login"
+                allowedRoles={["tailor"]}
+                tailorOnboardingGate="require-complete"
+              >
+                <TailorOrdersPage />
               </ProtectedRoute>
             </PageTransition>
           }

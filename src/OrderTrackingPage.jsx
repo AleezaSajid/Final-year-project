@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { motion } from "framer-motion";
-import { useLocation, useNavigate, useSearchParams } from "react-router-dom";
+import { Navigate, useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import { FaTwitter } from "react-icons/fa6";
 import { SiFacebook, SiInstagram } from "react-icons/si";
 import { Check } from "lucide-react";
@@ -8,12 +8,8 @@ import { SewServeBrandImg } from "./components/SewServeBrandImg.jsx";
 import { LandingStylePageBackground } from "./components/LandingStylePageBackground.jsx";
 import LandingNavbar from "./components/LandingNavbar.jsx";
 import { useSewServeLogoProcessedSrc } from "./hooks/useSewServeLogoProcessedSrc";
-import {
-  getActiveOrderForCustomer,
-  getOrderById,
-  listOrdersForCustomer,
-  normalizeApiOrderDoc,
-} from "./api/ordersApi.js";
+import { getOrderById, normalizeApiOrderDoc, resolveCustomerTrackOrder } from "./api/ordersApi.js";
+import { useAuth } from "./context/AuthContext.jsx";
 import { ensureSocketThen, socket } from "./socket";
 import { resolveCustomerIdForChat } from "./utils/chatIdentity.js";
 import { getOrderActivityMessage } from "./utils/orderActivityMessage.js";
@@ -24,7 +20,7 @@ import {
   isOrderWorkflowCompleted,
   ORDER_WORKFLOW_STEPS,
 } from "./utils/orderWorkflow.js";
-import { getTrackingStatus, normalizeWorkflowStatus, resolveWorkflowState } from "./utils/workflowEngine.js";
+import { getTrackingStatus, normalizeWorkflowStatus } from "./utils/workflowEngine.js";
 
 const LOGO_SRC = `${process.env.PUBLIC_URL || ""}/images/hero/sewserve-logo.png`;
 
@@ -147,6 +143,8 @@ export default function OrderTrackingPage() {
   const navigate = useNavigate();
   const location = useLocation();
   const [searchParams] = useSearchParams();
+  const { user, loading: authLoading } = useAuth();
+  const isTailorUser = user?.role === "tailor";
   const logoDisplaySrc = useSewServeLogoProcessedSrc(LOGO_SRC);
 
   const [order, setOrder] = useState(null);
@@ -172,38 +170,30 @@ export default function OrderTrackingPage() {
   };
 
   const loadOrder = useCallback(async () => {
+    if (user?.role === "tailor") return;
+
     const paramId = searchParams.get("orderId") || searchParams.get("id");
     const stateId = location.state?.orderId ?? location.state?.trackingOrderId;
     const explicitId = paramId || stateId;
+    const cid = resolveCustomerIdForChat(user);
 
     setLoading(true);
     try {
-      if (explicitId) {
-        const doc = await getOrderById(String(explicitId).trim());
-        setOrder(normalizeApiOrderDoc(doc));
-      } else {
-        const cid = resolveCustomerIdForChat(null);
-        try {
-          const activeDoc = await getActiveOrderForCustomer(cid);
-          setOrder(normalizeApiOrderDoc(activeDoc));
-        } catch {
-          const list = await listOrdersForCustomer(cid);
-          const sorted = [...list].sort((a, b) => {
-            const ta = new Date(a.createdAt || a.date || 0).getTime();
-            const tb = new Date(b.createdAt || b.date || 0).getTime();
-            return tb - ta;
-          });
-          const active = sorted.find((o) => !isOrderWorkflowCompleted(o));
-          setOrder(active ? normalizeApiOrderDoc(active) : null);
-        }
+      if (!cid) {
+        setOrder(null);
+        return;
       }
+      const doc = await resolveCustomerTrackOrder(cid, {
+        orderId: explicitId ? String(explicitId).trim() : "",
+      });
+      setOrder(doc);
     } catch (err) {
       console.error(err);
       setOrder(null);
     } finally {
       setLoading(false);
     }
-  }, [searchParams, location.state]);
+  }, [searchParams, location.state, user]);
 
   useEffect(() => {
     document.title = "SewServe | Track Your Order";
@@ -233,8 +223,13 @@ export default function OrderTrackingPage() {
   }, []);
 
   useEffect(() => {
+    if (authLoading) return;
+    if (user?.role === "tailor") {
+      setLoading(false);
+      return;
+    }
     void loadOrder();
-  }, [loadOrder]);
+  }, [loadOrder, authLoading, user?.role]);
 
   useEffect(() => {
     if (!order) {
@@ -255,7 +250,7 @@ export default function OrderTrackingPage() {
     const idx = getWorkflowIndexFromOrder(order);
     setCurrentStep(Number.isFinite(idx) ? idx : 0);
     // eslint-disable-next-line react-hooks/exhaustive-deps -- sync when tracked order fields change
-  }, [order?.id, order?.status, order?.currentStepIndex]);
+  }, [order?.id, order?.status, order?.currentStepIndex, order?.workflowStatus]);
 
   useEffect(() => {
     if (!order) {
@@ -356,6 +351,8 @@ export default function OrderTrackingPage() {
   }, [order?.id, order?._id, loadOrder]);
 
   useEffect(() => {
+    if (isTailorUser) return undefined;
+
     const onRefresh = () => {
       void loadOrder();
     };
@@ -370,11 +367,42 @@ export default function OrderTrackingPage() {
       window.removeEventListener("focus", onRefresh);
       document.removeEventListener("visibilitychange", onVis);
     };
-  }, [loadOrder]);
+  }, [loadOrder, isTailorUser]);
 
   const isDone = useMemo(() => isOrderWorkflowCompleted(order), [order]);
-  const activeIdx = useMemo(() => resolveWorkflowState(order).workflowIndex, [order]);
+  const activeIdx = useMemo(() => getWorkflowIndexFromOrder(order), [order]);
   const normStatus = useMemo(() => normalizeWorkflowStatus(order?.status), [order?.status]);
+
+  const customerDisplayName = useMemo(() => {
+    if (!order) return "—";
+    return (
+      order.customerName ||
+      order.orderPayload?.customerName ||
+      user?.fullName ||
+      "Customer"
+    );
+  }, [order, user?.fullName]);
+
+  const tailorDisplayName = useMemo(() => {
+    if (!order) return "—";
+    return (
+      order.tailorName ||
+      order.tailorShopName ||
+      order.orderPayload?.tailorName ||
+      order.orderPayload?.tailorShopName ||
+      "Your tailor"
+    );
+  }, [order]);
+
+  const garmentDisplay = useMemo(() => {
+    if (!order) return "—";
+    return (
+      order.garmentType ||
+      order.orderPayload?.garment?.type ||
+      order.orderPayload?.garmentType ||
+      "Garment"
+    );
+  }, [order]);
 
   const orderRef = useMemo(() => {
     if (!order) return "—";
@@ -410,6 +438,10 @@ export default function OrderTrackingPage() {
     if (!order) return "—";
     return getNextWorkflowLabel(activeIdx);
   }, [order, activeIdx]);
+
+  if (!authLoading && isTailorUser) {
+    return <Navigate to="/tailor/orders" replace />;
+  }
 
   return (
     <div className="relative isolate min-h-screen bg-transparent text-[#6B7280] antialiased">
@@ -515,6 +547,18 @@ export default function OrderTrackingPage() {
                       <div className="md:pr-10">
                         <h2 className="text-apple-h3 font-semibold text-ink">Order Details</h2>
                         <dl className="mt-5 space-y-3 text-sm">
+                          <div className="flex flex-wrap gap-x-2">
+                            <dt className="font-medium text-ink-muted">Customer</dt>
+                            <dd className="font-semibold text-ink">{customerDisplayName}</dd>
+                          </div>
+                          <div className="flex flex-wrap gap-x-2">
+                            <dt className="font-medium text-ink-muted">Tailor</dt>
+                            <dd className="font-semibold text-ink">{tailorDisplayName}</dd>
+                          </div>
+                          <div className="flex flex-wrap gap-x-2">
+                            <dt className="font-medium text-ink-muted">Garment</dt>
+                            <dd className="font-semibold text-ink">{garmentDisplay}</dd>
+                          </div>
                           <div className="flex flex-wrap gap-x-2">
                             <dt className="font-medium text-ink-muted">Order Number</dt>
                             <dd className="font-semibold text-ink">{orderRef}</dd>

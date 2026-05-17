@@ -35,14 +35,19 @@ function resolveMessagesPath(pathname) {
   return "/select-workspace";
 }
 
+/** Marketing order tracking — {@link OrderTrackingPage} (`/track-orders`), scroll to #order-tracking */
+const ORDER_TRACKING_PAGE_PATH = "/track-orders#order-tracking";
+
 function resolveDashboardPath(pathname) {
   if (isCustomerArea(pathname)) return "/customer/dashboard";
   if (isTailorArea(pathname)) return "/tailor/dashboard";
   return "/select-workspace";
 }
 
-/** Marketing order tracking — {@link OrderTrackingPage} (`/track-orders`), scroll to #order-tracking */
-const ORDER_TRACKING_PAGE_PATH = "/track-orders#order-tracking";
+function resolveOrdersPath(pathname) {
+  if (isTailorArea(pathname)) return "/tailor/orders";
+  return ORDER_TRACKING_PAGE_PATH;
+}
 
 export default function DashboardNavbar() {
   const navigate = useNavigate();
@@ -58,6 +63,7 @@ export default function DashboardNavbar() {
 
   const messagesPath = useMemo(() => resolveMessagesPath(location.pathname), [location.pathname]);
   const dashboardPath = useMemo(() => resolveDashboardPath(location.pathname), [location.pathname]);
+  const ordersPath = useMemo(() => resolveOrdersPath(location.pathname), [location.pathname]);
 
   const handleCloseMobileMenu = () => setMobileOpen(false);
 
@@ -89,8 +95,10 @@ export default function DashboardNavbar() {
     return (link) => {
       if (link.match === "dashboard") return isDashboardRoute(location.pathname);
       if (link.match === "messages") return isMessagesRoute(location.pathname);
-      if (link.match === "orders")
+      if (link.match === "orders") {
+        if (isTailorArea(location.pathname)) return location.pathname === "/tailor/orders";
         return location.pathname === "/track-orders" || location.pathname === "/orders";
+      }
       return false;
     };
   }, [location.pathname]);
@@ -114,9 +122,9 @@ export default function DashboardNavbar() {
     () => [
       { label: "Dashboard", to: dashboardPath, match: "dashboard" },
       { label: "Messages", to: messagesPath, match: "messages" },
-      { label: "Orders", to: ORDER_TRACKING_PAGE_PATH, match: "orders" },
+      { label: "Orders", to: ordersPath, match: "orders" },
     ],
-    [dashboardPath, messagesPath]
+    [dashboardPath, messagesPath, ordersPath]
   );
 
   return (

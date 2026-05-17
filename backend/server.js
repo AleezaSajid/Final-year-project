@@ -2178,7 +2178,43 @@ app.get('/orders/customer/:customerId', requireAuth, requireRole(['customer']), 
   }
 });
 
-/** Customer Track Order: order the tailor marked active (isActive), if any */
+const CUSTOMER_TRACK_TERMINAL = new Set([
+  'completed',
+  'cancelled',
+  'canceled',
+  'rejected',
+  'declined',
+  'delivered',
+]);
+
+function isCustomerTrackableActiveOrderDoc(doc) {
+  if (!doc) return false;
+  const v = normalizeOrderStatus(doc.status);
+  if (CUSTOMER_TRACK_TERMINAL.has(v)) return false;
+  if (v === 'draft' || v === 'awaiting_tailor_selection') return false;
+  if (doc.isActive === true) return true;
+  if (doc.acceptedAt) return true;
+  if (v === 'accepted' || v === 'active' || v === 'in_progress' || v === 'processing') return true;
+  const wf = doc.workflowStatus != null ? String(doc.workflowStatus).trim() : '';
+  if (wf) {
+    const w = normalizeOrderStatus(wf);
+    if (w !== 'draft' && w !== 'awaiting_tailor_selection' && !CUSTOMER_TRACK_TERMINAL.has(w)) {
+      return true;
+    }
+  }
+  const tid = doc.tailorId != null ? String(doc.tailorId).trim() : '';
+  if (tid && !isPlaceholderTailorShopId(tid) && v === 'pending') return true;
+  return false;
+}
+
+async function findTrackableOrdersForCustomer(customerId) {
+  const cid = String(customerId || '').trim();
+  if (!cid) return [];
+  const orders = await Order.find({ customerId: cid }).sort({ updatedAt: -1 }).lean().exec();
+  return orders.filter(isCustomerTrackableActiveOrderDoc);
+}
+
+/** Customer Track Order: latest accepted/active in-progress order for this customer */
 app.get('/orders/customer/:customerId/active', requireAuth, requireRole(['customer']), async (req, res) => {
   const { customerId } = req.params;
   try {
@@ -2186,12 +2222,14 @@ app.get('/orders/customer/:customerId/active', requireAuth, requireRole(['custom
       log403PatchOrder(req, null, { customerId }, { phase: 'GET /orders/customer/:id/active' });
       return res.status(403).json({ message: 'Forbidden.' });
     }
-    const order = await Order.findOne({ customerId: String(customerId), isActive: true })
-      .sort({ updatedAt: -1 })
-      .exec();
-    if (!order) {
+    const trackable = await findTrackableOrdersForCustomer(customerId);
+    if (trackable.length === 0) {
       return res.status(404).json({ message: 'No active order.' });
     }
+    const order =
+      trackable.find((o) => o.isActive === true) ||
+      trackable.find((o) => o.acceptedAt) ||
+      trackable[0];
     return res.status(200).json(order);
   } catch (error) {
     console.error('FETCH ACTIVE CUSTOMER ORDER ERROR', error);
@@ -2375,6 +2413,7 @@ app.patch('/orders/:orderId', requireAuth, async (req, res) => {
         updatePayload.isActive = true;
         updatePayload.chatEnabled = true;
         updatePayload.acceptedAt = new Date();
+        updatePayload.currentStepIndex = 0;
       } else {
         const access = tailorMayPatchOrder(req, existing, b, tailorPatch);
         if (!access.ok) {
@@ -2429,6 +2468,9 @@ app.patch('/orders/:orderId', requireAuth, async (req, res) => {
     } else {
       updatePayload.status = 'accepted';
       updatePayload.workflowStatus = 'accepted';
+      if (updatePayload.currentStepIndex == null) {
+        updatePayload.currentStepIndex = 0;
+      }
     }
 
     const updatedOrder = await Order.findByIdAndUpdate(

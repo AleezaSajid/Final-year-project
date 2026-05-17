@@ -1,9 +1,11 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useLocation } from "react-router-dom";
-import DashboardNavbar from "./components/DashboardNavbar";
 import { LandingStylePageBackground } from "./components/LandingStylePageBackground.jsx";
+import TailorDashboardAmbient from "./tailorDashboard/components/TailorDashboardAmbient.jsx";
 import TdDashboardOverview from "./tailorDashboard/components/TdDashboardOverview";
+import TailorDashboardSidebar from "./tailorDashboard/components/TailorDashboardSidebar.jsx";
+import { TD_PAGE_BG } from "./tailorDashboard/tailorDashboardClassNames.js";
 import WizardOrderReviewModal from "./tailorDashboard/components/WizardOrderReviewModal.jsx";
 import OrderPopup from "./tailorDashboard/components/OrderPopup.jsx";
 import { TailorDashboardChatContext } from "./context/TailorDashboardChatContext.jsx";
@@ -105,28 +107,33 @@ export default function TailorDashboard() {
 
   return (
     <TailorDashboardChatContext.Provider value={tailorChatApi}>
-      <div className="relative isolate min-h-screen overflow-x-hidden bg-transparent font-['Inter',system-ui,sans-serif] text-slate-600 antialiased">
+      <div
+        className={`relative isolate flex min-h-screen min-h-[100dvh] w-full overflow-x-hidden font-['Inter',system-ui,sans-serif] antialiased ${TD_PAGE_BG} text-[#4B5563]`}
+      >
         <LandingStylePageBackground />
-        <DashboardNavbar />
-        {typeof document !== "undefined" && incomingOrder
-          ? createPortal(
-              <OrderPopup
-                key={incomingOrder.orderId}
-                order={incomingOrder}
-                onInterested={onIncomingOrderInterested}
-                onIgnore={dismissIncomingOrder}
-              />,
-              document.body
-            )
-          : null}
-        <div className="relative z-10 mx-auto max-w-7xl space-y-8 px-4 pb-16 pt-6 sm:px-6 lg:px-8">
-          <WizardOrderReviewModal
-            order={dash.reviewModalDisplayOrder}
-            open={dash.reviewModalOpen}
-            onClose={dash.closeMeasurementsReview}
-            acceptOrderIntoCurrentTasks={dash.acceptOrderIntoCurrentTasks}
-          />
-          <TdDashboardOverview {...dash} />
+        <TailorDashboardAmbient />
+        <TailorDashboardSidebar unreadChatCount={dash.unreadChatCount} />
+        <div className="relative z-10 flex min-w-0 flex-1 flex-col">
+          {typeof document !== "undefined" && incomingOrder
+            ? createPortal(
+                <OrderPopup
+                  key={incomingOrder.orderId}
+                  order={incomingOrder}
+                  onInterested={onIncomingOrderInterested}
+                  onIgnore={dismissIncomingOrder}
+                />,
+                document.body
+              )
+            : null}
+          <main className="relative z-10 mx-auto w-full max-w-[1280px] flex-1 space-y-4 px-3 pb-8 pt-3 sm:px-4 sm:pt-4 lg:px-5 lg:pt-5">
+            <WizardOrderReviewModal
+              order={dash.reviewModalDisplayOrder}
+              open={dash.reviewModalOpen}
+              onClose={dash.closeMeasurementsReview}
+              acceptOrderIntoCurrentTasks={dash.acceptOrderIntoCurrentTasks}
+            />
+            <TdDashboardOverview {...dash} />
+          </main>
         </div>
         {/** Temporarily disabled to avoid double popups (keep logic untouched). */}
         {null}

@@ -38,5 +38,9 @@ export function getNextWorkflowLabel(activeIndex) {
   return next ? next.label : "—";
 }
 
+export {
+  isCustomerTrackableActiveOrder,
+  pickLatestTrackableCustomerOrder,
+} from "./workflowEngine.js";
 export { normalizeWorkflowStatus };
 export { getTrackingStatus };
