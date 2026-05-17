@@ -22,6 +22,7 @@ import BrowseTailors from "./pages/BrowseTailors";
 import TailorPublicProfile from "./pages/TailorPublicProfile";
 import NearbyTailorsMap from "./pages/map/NearbyTailorsMap";
 import LocationStep from "./LocationStep.jsx";
+import ForgotPasswordPage from "./pages/ForgotPasswordPage.jsx";
 import ProtectedRoute from "./components/ProtectedRoute.jsx";
 import { RoleProvider } from "./context/RoleContext";
 import { CustomerChatProvider } from "./context/CustomerChatContext.jsx";
@@ -41,6 +42,7 @@ function AnimatedRoutes() {
         <Route path="/workspace" element={<PageTransition><WorkspaceSelect /></PageTransition>} />
         <Route path="/login" element={<PageTransition><LoginPage /></PageTransition>} />
         <Route path="/tailor-login" element={<PageTransition><TailorLoginPage /></PageTransition>} />
+        <Route path="/forgot-password" element={<PageTransition><ForgotPasswordPage /></PageTransition>} />
         <Route path="/signup" element={<PageTransition><SignUpPage /></PageTransition>} />
         <Route path="/tailor-signup" element={<PageTransition><TailorSignUpPage /></PageTransition>} />
         <Route path="/dashboard" element={<PageTransition><TailorDashboard /></PageTransition>} />

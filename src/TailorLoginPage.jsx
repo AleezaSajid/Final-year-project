@@ -6,6 +6,10 @@ import tailorSignupBg from "./assets/images/tailorsignup.png";
 import { LandingStylePageBackground } from "./components/LandingStylePageBackground.jsx";
 import { useAuth } from "./context/AuthContext.jsx";
 import { useSewServeLogoProcessedSrc } from "./hooks/useSewServeLogoProcessedSrc";
+import {
+  forgotPasswordHref,
+  forgotPasswordLinkState,
+} from "./utils/forgotPasswordRoutes.js";
 import { clearUserRole, setUserRole } from "./utils/userRole";
 import { tailorPostAuthPath } from "./utils/tailorOnboarding.js";
 import { useToast } from "./components/ToastProvider.jsx";
@@ -723,7 +727,12 @@ export default function TailorLoginPage() {
                 </Field>
 
                 <ForgotRow>
-                  <ForgotLink to="/forgot-password">Forgot password?</ForgotLink>
+                  <ForgotLink
+                    to={forgotPasswordHref("tailor")}
+                    state={forgotPasswordLinkState("/tailor-login")}
+                  >
+                    Forgot password?
+                  </ForgotLink>
                 </ForgotRow>
 
                 <SubmitBtn type="submit" disabled={loading}>

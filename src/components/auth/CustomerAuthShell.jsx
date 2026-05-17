@@ -1,20 +1,12 @@
-import { useEffect, useState } from "react";
-import { Link, useLocation, useNavigate } from "react-router-dom";
+import { Link } from "react-router-dom";
 import styled from "styled-components";
 
-import signupTailorBg from "./assets/images/signup-tailor-bg.png";
-import { useAuth } from "./context/AuthContext.jsx";
-import { useSewServeLogoProcessedSrc } from "./hooks/useSewServeLogoProcessedSrc";
-import { clearUserRole, setUserRole } from "./utils/userRole";
-import { useToast } from "./components/ToastProvider.jsx";
-import {
-  forgotPasswordHref,
-  forgotPasswordLinkState,
-} from "./utils/forgotPasswordRoutes.js";
+import signupTailorBg from "../../assets/images/signup-tailor-bg.png";
+import { useSewServeLogoProcessedSrc } from "../../hooks/useSewServeLogoProcessedSrc";
 
 const LOGO_SRC = `${process.env.PUBLIC_URL || ""}/images/hero/sewserve-logo.png`;
 
-const FEATURES = [
+export const CUSTOMER_AUTH_FEATURES = [
   {
     title: "Track Orders",
     desc: "Follow fittings and delivery status in one place.",
@@ -250,7 +242,7 @@ const FeatureDesc = styled.p`
   color: #3a4f63;
 `;
 
-const FormPanel = styled.div`
+export const FormPanel = styled.div`
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -260,7 +252,7 @@ const FormPanel = styled.div`
   background: transparent;
 `;
 
-const Card = styled.div`
+export const AuthCard = styled.div`
   width: 100%;
   max-width: 500px;
   padding: clamp(1.05rem, 1.8vw, 1.35rem) clamp(1.25rem, 2vw, 1.55rem);
@@ -280,12 +272,12 @@ const Card = styled.div`
   }
 `;
 
-const CardHeader = styled.div`
+export const AuthCardHeader = styled.div`
   text-align: center;
   margin-bottom: 0.75rem;
 `;
 
-const AvatarCircle = styled.div`
+export const AuthIconCircle = styled.div`
   width: 2.65rem;
   height: 2.65rem;
   margin: 0 auto 0.55rem;
@@ -298,7 +290,7 @@ const AvatarCircle = styled.div`
   box-shadow: 0 8px 22px -4px rgba(47, 90, 66, 0.45);
 `;
 
-const CardTitle = styled.h2`
+export const AuthCardTitle = styled.h2`
   margin: 0 0 0.3rem;
   font-size: clamp(1.28rem, 2.2vw, 1.48rem);
   font-weight: 700;
@@ -306,19 +298,35 @@ const CardTitle = styled.h2`
   color: #1a3558;
 `;
 
-const CardSubtitle = styled.p`
+export const AuthCardSubtitle = styled.p`
   margin: 0;
   font-size: clamp(0.94rem, 1.5vw, 1.02rem);
   line-height: 1.5;
   color: #556575;
 `;
 
-const Field = styled.div`
+export const AuthStepIndicator = styled.div`
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.45rem;
+  margin-bottom: 0.85rem;
+`;
+
+export const AuthStepDot = styled.span`
+  width: ${(p) => (p.$active ? "1.65rem" : "0.45rem")};
+  height: 0.45rem;
+  border-radius: 999px;
+  background: ${(p) => (p.$active || p.$done ? "#4a7c59" : "rgba(148, 163, 184, 0.45)")};
+  transition: width 0.25s ease, background 0.25s ease;
+`;
+
+export const AuthField = styled.div`
   position: relative;
   margin-bottom: 0.45rem;
 `;
 
-const IconLeft = styled.span`
+export const AuthIconLeft = styled.span`
   position: absolute;
   left: 11px;
   top: 50%;
@@ -331,7 +339,7 @@ const IconLeft = styled.span`
   z-index: 1;
 `;
 
-const IconBtn = styled.button`
+export const AuthIconBtn = styled.button`
   position: absolute;
   right: 6px;
   top: 50%;
@@ -354,6 +362,7 @@ const IconBtn = styled.button`
 
 const inputBase = `
   width: 100%;
+  box-sizing: border-box;
   font-size: 0.92rem;
   border: 1.5px solid rgba(216, 231, 248, 0.95);
   border-radius: 11px;
@@ -373,48 +382,34 @@ const inputBase = `
     box-shadow: 0 0 0 3px rgba(74, 124, 89, 0.14);
     background: #ffffff;
   }
-
-  &[data-state="error"] {
-    border-color: #fca5a5;
-    box-shadow: 0 0 0 3px rgba(244, 63, 94, 0.12);
-  }
-
-  &[data-state="valid"] {
-    border-color: rgba(52, 211, 153, 0.8);
-    box-shadow: 0 0 0 3px rgba(16, 185, 129, 0.12);
-  }
 `;
 
-const Input = styled.input`
+export const AuthInput = styled.input`
   ${inputBase}
   padding: 0.62rem 0.85rem 0.62rem 2.45rem;
 `;
 
-const InputWithToggle = styled(Input)`
+export const AuthInputWithToggle = styled(AuthInput)`
   padding-right: 2.55rem;
 `;
 
-const ForgotRow = styled.div`
+export const AuthOtpInput = styled.input`
+  ${inputBase}
+  padding: 0.72rem 0.85rem;
+  text-align: center;
+  letter-spacing: 0.32em;
+  font-size: 1.2rem;
+`;
+
+export const AuthFormStack = styled.div`
   display: flex;
-  justify-content: flex-end;
-  margin: 0.15rem 0 0.55rem;
+  flex-direction: column;
+  gap: 0.35rem;
 `;
 
-const TextLink = styled(Link)`
-  font-size: 0.92rem;
-  color: #4a5d70;
-  text-decoration: none;
-  font-weight: 600;
-
-  &:hover {
-    color: #2f7a4f;
-    text-decoration: underline;
-    text-underline-offset: 3px;
-  }
-`;
-
-const SignInBtn = styled.button`
+export const AuthPrimaryButton = styled.button`
   width: 100%;
+  margin-top: 0.15rem;
   padding: 0.72rem 1rem;
   font-size: 1rem;
   font-weight: 700;
@@ -446,16 +441,69 @@ const SignInBtn = styled.button`
   }
 `;
 
-const CardFooter = styled.p`
-  margin: 0.65rem 0 0;
-  text-align: center;
-  font-size: 0.98rem;
-  color: #5a6a7d;
+export const AuthGhostButton = styled.button`
+  width: 100%;
+  padding: 0.55rem 1rem;
+  font-size: 0.92rem;
+  font-weight: 600;
+  color: #1a3558;
+  border: 1px solid rgba(39, 76, 123, 0.22);
+  border-radius: 11px;
+  cursor: pointer;
+  background: rgba(255, 255, 255, 0.75);
+
+  &:hover:not(:disabled) {
+    background: rgba(255, 255, 255, 0.95);
+  }
+
+  &:disabled {
+    opacity: 0.65;
+    cursor: not-allowed;
+  }
 `;
 
-const RegisterLink = styled(Link)`
+export const AuthMessageBox = styled.div`
+  margin-bottom: 0.45rem;
+  padding: 0.65rem 0.85rem;
+  font-size: 0.88rem;
+  line-height: 1.45;
+  border-radius: 10px;
+  background: ${(p) => (p.$variant === "success" ? "#ecfdf3" : "#fef3f2")};
+  color: ${(p) => (p.$variant === "success" ? "#067647" : "#b42318")};
+  border: 1px solid ${(p) => (p.$variant === "success" ? "#abefc6" : "#fecdca")};
+`;
+
+export const AuthBackButton = styled.button`
+  display: block;
+  width: 100%;
+  margin-top: 0.25rem;
+  padding: 0;
+  border: none;
+  background: none;
+  text-align: center;
+  font-size: 0.92rem;
+  font-weight: 600;
   color: #2f7a4f;
+  cursor: pointer;
+
+  &:hover {
+    text-decoration: underline;
+    text-underline-offset: 3px;
+  }
+
+  &:disabled {
+    opacity: 0.55;
+    cursor: not-allowed;
+  }
+`;
+
+export const AuthTextLink = styled(Link)`
+  display: block;
+  margin-top: 0.65rem;
+  text-align: center;
+  font-size: 0.98rem;
   font-weight: 700;
+  color: #2f7a4f;
   text-decoration: none;
 
   &:hover {
@@ -465,22 +513,17 @@ const RegisterLink = styled(Link)`
   }
 `;
 
-const ErrorBox = styled.div`
-  margin-bottom: 0.55rem;
-  padding: 0.65rem 0.85rem;
-  font-size: 0.88rem;
-  color: #b42318;
-  background: #fef3f2;
-  border: 1px solid #fecdca;
-  border-radius: 10px;
-`;
+export const AuthEmailHint = styled.p`
+  margin: 0 0 0.5rem;
+  text-align: center;
+  font-size: 0.85rem;
+  color: #64748b;
+  word-break: break-word;
 
-const FieldHint = styled.p`
-  margin: -0.35rem 0 0.5rem;
-  padding-left: 0.1rem;
-  font-size: 0.82rem;
-  color: ${(p) => (p["data-variant"] === "error" ? "#b42318" : "#64748b")};
-  font-weight: 600;
+  strong {
+    color: #1a3558;
+    font-weight: 600;
+  }
 `;
 
 const PageFooter = styled.footer`
@@ -494,38 +537,6 @@ const PageFooter = styled.footer`
   font-weight: 500;
   background: transparent;
 `;
-
-function isValidEmail(v) {
-  const s = String(v || "").trim();
-  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(s);
-}
-
-function MailIcon() {
-  return (
-    <svg width="17" height="17" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-      <path d="M4 6h16v12H4V6z" stroke="currentColor" strokeWidth="1.7" strokeLinejoin="round" />
-      <path d="M4 7l8 6 8-6" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" />
-    </svg>
-  );
-}
-
-function LockIcon() {
-  return (
-    <svg width="17" height="17" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-      <rect x="5" y="10" width="14" height="11" rx="2" stroke="currentColor" strokeWidth="1.7" />
-      <path d="M8 10V8a4 4 0 118 0v2" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" />
-    </svg>
-  );
-}
-
-function AvatarUserIcon() {
-  return (
-    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-      <circle cx="12" cy="8" r="3.5" stroke="currentColor" strokeWidth="1.8" />
-      <path d="M5 20c0-3.5 3.1-6 7-6s7 2.5 7 6" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
-    </svg>
-  );
-}
 
 function FeatureGlyph({ index }) {
   if (index === 0) {
@@ -551,79 +562,17 @@ function FeatureGlyph({ index }) {
   );
 }
 
-function EyeIcon({ passwordVisible }) {
-  if (passwordVisible) {
-    return (
-      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-        <path d="M2 12s4-7 10-7 10 7 10 7-4 7-10 7S2 12 2 12z" stroke="currentColor" strokeWidth="1.7" />
-        <circle cx="12" cy="12" r="3" stroke="currentColor" strokeWidth="1.7" />
-        <path d="M3 3l18 18" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" />
-      </svg>
-    );
-  }
-  return (
-    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-      <path d="M2 12s4-7 10-7 10 7 10 7-4 7-10 7S2 12 2 12z" stroke="currentColor" strokeWidth="1.7" />
-      <circle cx="12" cy="12" r="3" stroke="currentColor" strokeWidth="1.7" />
-    </svg>
-  );
-}
-
-export default function SignInPage() {
-  const { login, logout } = useAuth();
-  const navigate = useNavigate();
-  const location = useLocation();
+/**
+ * Customer auth split layout (login / forgot-password / signup family).
+ */
+export default function CustomerAuthShell({
+  children,
+  heroHeading = "Welcome back to SewServe",
+  heroSubtitle = "Sign in to manage fittings, orders, measurements, and live tailor chats.",
+  features = CUSTOMER_AUTH_FEATURES,
+  footerText = "Fast · Reliable · Professional Tailoring Platform",
+}) {
   const logoDisplaySrc = useSewServeLogoProcessedSrc(LOGO_SRC);
-  const toast = useToast();
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
-  const [showPassword, setShowPassword] = useState(false);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState("");
-  const [touched, setTouched] = useState({ email: false, password: false });
-
-  useEffect(() => {
-    document.title = "SewServe | Customer sign in";
-  }, []);
-
-  const emailOk = isValidEmail(email);
-  const passwordOk = String(password || "").length >= 6;
-  const emailError = touched.email && !emailOk ? "Enter a valid email address." : "";
-  const passwordError = touched.password && !passwordOk ? "Password must be at least 6 characters." : "";
-
-  async function handleSubmit(e) {
-    e.preventDefault();
-    setError("");
-    setTouched({ email: true, password: true });
-    if (!emailOk || !passwordOk) {
-      toast.error("Fix the highlighted fields", "Please check your email and password.");
-      return;
-    }
-    setLoading(true);
-    try {
-      const data = await login(email.trim(), password);
-      const role = data?.user?.role ? String(data.user.role).trim() : "";
-      if (role !== "customer") {
-        await logout();
-        clearUserRole();
-        toast.error("Invalid account type for this login", "Please use the Tailor login page.");
-        setError("Invalid account type for this login.");
-        return;
-      }
-      setUserRole("customer");
-      toast.success("Welcome back", "Signing you in…", { durationMs: 1400 });
-      const from = location?.state?.from;
-      window.setTimeout(() => {
-        navigate(typeof from === "string" && from.trim() ? from : "/customer/dashboard", { replace: true });
-      }, 260);
-    } catch (err) {
-      const msg = err?.message || "Sign in failed";
-      setError(msg);
-      toast.error("Couldn't sign you in", msg);
-    } finally {
-      setLoading(false);
-    }
-  }
 
   return (
     <Page>
@@ -637,13 +586,11 @@ export default function SignInPage() {
               <BrandLogoImg src={logoDisplaySrc} alt="SewServe" />
             </BrandLogoLink>
 
-            <BrandHeading>Welcome back to SewServe</BrandHeading>
-            <BrandSubtitle>
-              Sign in to manage fittings, orders, measurements, and live tailor chats.
-            </BrandSubtitle>
+            <BrandHeading>{heroHeading}</BrandHeading>
+            <BrandSubtitle>{heroSubtitle}</BrandSubtitle>
 
             <FeatureList>
-              {FEATURES.map((item, index) => (
+              {features.map((item, index) => (
                 <FeatureCard key={item.title}>
                   <FeatureIcon>
                     <FeatureGlyph index={index} />
@@ -658,87 +605,10 @@ export default function SignInPage() {
           </HeroInner>
         </HeroPanel>
 
-        <FormPanel>
-          <Card>
-            <CardHeader>
-              <AvatarCircle aria-hidden>
-                <AvatarUserIcon />
-              </AvatarCircle>
-              <CardTitle>Customer Account</CardTitle>
-              <CardSubtitle>Sign in to continue</CardSubtitle>
-            </CardHeader>
-
-            <form onSubmit={handleSubmit} noValidate>
-              {error ? <ErrorBox role="alert">{error}</ErrorBox> : null}
-
-              <Field>
-                <IconLeft>
-                  <MailIcon />
-                </IconLeft>
-                <Input
-                  type="email"
-                  name="email"
-                  autoComplete="email"
-                  placeholder="Email Address"
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  onBlur={() => setTouched((p) => ({ ...p, email: true }))}
-                  data-state={touched.email ? (emailOk ? "valid" : "error") : ""}
-                  required
-                />
-              </Field>
-              {emailError ? <FieldHint data-variant="error">{emailError}</FieldHint> : null}
-
-              <Field>
-                <IconLeft>
-                  <LockIcon />
-                </IconLeft>
-                <InputWithToggle
-                  type={showPassword ? "text" : "password"}
-                  name="password"
-                  autoComplete="current-password"
-                  placeholder="Enter your password"
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  onBlur={() => setTouched((p) => ({ ...p, password: true }))}
-                  data-state={touched.password ? (passwordOk ? "valid" : "error") : ""}
-                  required
-                />
-                <IconBtn
-                  type="button"
-                  onClick={() => setShowPassword((v) => !v)}
-                  aria-label={showPassword ? "Hide password" : "Show password"}
-                >
-                  <EyeIcon passwordVisible={showPassword} />
-                </IconBtn>
-              </Field>
-              {passwordError ? <FieldHint data-variant="error">{passwordError}</FieldHint> : null}
-
-              <ForgotRow>
-                <TextLink
-                  to={forgotPasswordHref("customer")}
-                  state={forgotPasswordLinkState("/login")}
-                >
-                  Forgot Password?
-                </TextLink>
-              </ForgotRow>
-
-              <SignInBtn type="submit" disabled={loading} aria-busy={loading}>
-                {loading ? "Signing In..." : "Sign In"}
-              </SignInBtn>
-            </form>
-
-            <CardFooter>
-              Need an account?{" "}
-              <RegisterLink to="/signup" state={{ from: location?.state?.from }}>
-                Register Now
-              </RegisterLink>
-            </CardFooter>
-          </Card>
-        </FormPanel>
+        <FormPanel>{children}</FormPanel>
       </SplitLayout>
 
-      <PageFooter>Fast · Reliable · Professional Tailoring Platform</PageFooter>
+      <PageFooter>{footerText}</PageFooter>
     </Page>
   );
 }

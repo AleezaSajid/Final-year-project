@@ -1058,6 +1058,109 @@ app.get('/messages/:conversationId', requireAuth, async (req, res) => {
   }
 });
 
+const MIN_PASSWORD_LENGTH = 6;
+
+/** Password storage matches register/login (plain string on User model). */
+function normalizeAccountPassword(raw) {
+  return String(raw || '').trim();
+}
+
+/**
+ * Password reset OTP for verified accounts only.
+ * Stores OTP on User.emailOtpHash (same fields as legacy email verification).
+ */
+app.post('/api/auth/forgot-password', async (req, res) => {
+  const email = String(req.body?.email || '')
+    .trim()
+    .toLowerCase();
+  if (!email) {
+    return res.status(400).json({ message: 'Email is required.' });
+  }
+  try {
+    const user = await User.findOne({ email, isVerified: true });
+    if (!user) {
+      return res.json({
+        ok: true,
+        message: 'If an account exists with this email, we sent a reset code.',
+      });
+    }
+
+    const otp = generateSixDigitOtp();
+    user.emailOtpHash = hashEmailOtp(email, otp);
+    user.emailOtpExpiresAt = new Date(Date.now() + EMAIL_OTP_TTL_MS);
+    await user.save();
+
+    try {
+      await sendOtpMail({
+        to: email,
+        otp,
+        purpose: 'password-reset',
+        name: user.fullName,
+        expiresMinutes: Math.floor(EMAIL_OTP_TTL_MS / 60000),
+      });
+      console.log('[forgot-password] reset OTP sent email=%s', email);
+    } catch (emailErr) {
+      console.error('[forgot-password] OTP email failed email=%s', email, emailErr);
+      user.emailOtpHash = '';
+      user.emailOtpExpiresAt = null;
+      await user.save();
+      const msg =
+        emailErr && (emailErr.message === OTP_EMAIL_FAIL_MESSAGE || emailErr.code === 'OTP_EMAIL_SEND_FAILED')
+          ? OTP_SIGNUP_EMAIL_FAIL_MSG
+          : 'Could not send reset code. Please try again.';
+      return res.status(500).json({ message: msg, error: msg });
+    }
+
+    return res.json({
+      ok: true,
+      message: 'If an account exists with this email, we sent a reset code.',
+    });
+  } catch (e) {
+    console.error('POST /api/auth/forgot-password', e);
+    return res.status(500).json({ message: 'Could not process password reset request.' });
+  }
+});
+
+app.post('/api/auth/verify-reset-otp', async (req, res) => {
+  const email = String(req.body?.email || '')
+    .trim()
+    .toLowerCase();
+  const otpRaw = String(req.body?.otp || '').replace(/\D/g, '');
+  const newPassword = normalizeAccountPassword(req.body?.newPassword);
+
+  if (!email || otpRaw.length !== 6) {
+    return res.status(400).json({ message: 'Email and a 6-digit code are required.' });
+  }
+  if (!newPassword || newPassword.length < MIN_PASSWORD_LENGTH) {
+    return res.status(400).json({
+      message: `Password must be at least ${MIN_PASSWORD_LENGTH} characters.`,
+    });
+  }
+
+  try {
+    const user = await User.findOne({ email, isVerified: true });
+    const otpMissing = !user?.emailOtpHash || !user?.emailOtpExpiresAt;
+    const otpExpired = user?.emailOtpExpiresAt && user.emailOtpExpiresAt.getTime() < Date.now();
+    const otpInvalid =
+      !user || otpMissing || otpExpired || user.emailOtpHash !== hashEmailOtp(email, otpRaw);
+
+    if (otpInvalid) {
+      return res.status(400).json({ message: 'Invalid or expired verification code.' });
+    }
+
+    user.password = newPassword;
+    user.emailOtpHash = '';
+    user.emailOtpExpiresAt = null;
+    await user.save();
+
+    console.log('[verify-reset-otp] password updated email=%s', email);
+    return res.json({ ok: true, message: 'Password updated successfully.' });
+  } catch (e) {
+    console.error('POST /api/auth/verify-reset-otp', e);
+    return res.status(500).json({ message: 'Could not reset password. Please try again.' });
+  }
+});
+
 app.post('/api/auth/send-otp', async (req, res) => {
   const email = String(req.body?.email || '')
     .trim()
