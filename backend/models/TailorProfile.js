@@ -107,6 +107,15 @@ const tailorProfileSchema = new mongoose.Schema(
       type: Boolean,
       default: true,
     },
+    locationVerified: {
+      type: Boolean,
+      default: false,
+    },
+    locationStatus: {
+      type: String,
+      enum: ['pending', 'verified'],
+      default: 'pending',
+    },
   },
   {
     timestamps: true,

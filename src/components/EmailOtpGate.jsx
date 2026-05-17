@@ -41,6 +41,13 @@ const Hint = styled.p`
   color: #64748b;
 `;
 
+const SpamNote = styled.p`
+  margin: 0.5rem 0 0;
+  font-size: 0.8rem;
+  line-height: 1.4;
+  color: #94a3b8;
+`;
+
 const OtpInput = styled.input`
   width: 100%;
   box-sizing: border-box;
@@ -110,7 +117,7 @@ const BtnGhost = styled.button`
 
 /**
  * Post-signup email OTP step (no route changes).
- * @param {{ email: string; onVerified: () => Promise<void> | void; onDismiss: () => void }} props
+ * @param {{ email: string; onVerified: (verifyResult?: { redirectPath?: string; user?: object }) => Promise<void> | void; onDismiss: () => void }} props
  */
 export default function EmailOtpGate({ email, onVerified, onDismiss }) {
   const toast = useToast();
@@ -129,9 +136,9 @@ export default function EmailOtpGate({ email, onVerified, onDismiss }) {
     }
     setBusy(true);
     try {
-      await verifyAuthOtp(safeEmail, digits);
+      const result = await verifyAuthOtp(safeEmail, digits);
       toast.success("Verified", "Your email is verified.");
-      await onVerified();
+      await onVerified(result);
     } catch (err) {
       toast.error(
         "Verification failed",
@@ -172,6 +179,7 @@ export default function EmailOtpGate({ email, onVerified, onDismiss }) {
             onChange={(ev) => setOtp(ev.target.value)}
             aria-label="Verification code"
           />
+          <SpamNote>Check your spam or junk folder if you don&apos;t see the OTP.</SpamNote>
           <Row>
             <BtnPrimary type="submit" disabled={busy}>
               {busy ? "Verifying…" : "Verify & continue"}

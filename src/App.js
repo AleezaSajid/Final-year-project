@@ -7,8 +7,11 @@ import LoginPage from "./LoginPage";
 import TailorLoginPage from "./TailorLoginPage";
 import SignUpPage from "./SignUpPage";
 import TailorSignUpPage from "./TailorSignUpPage";
+import TailorCompleteProfilePage from "./pages/TailorCompleteProfilePage.jsx";
 import TailorDashboard from "./TailorDashboard";
 import CustomerDashboard from "./CustomerDashboard";
+import CustomerMessagesPage from "./pages/CustomerMessagesPage.jsx";
+import TailorMessagesPage from "./pages/TailorMessagesPage.jsx";
 import LastReviewPage from "./LastReviewPage";
 import CustomerReviewPage from "./CustomerReviewPage";
 import MeasurementWizard from "./MeasurementWizard";
@@ -43,10 +46,28 @@ function AnimatedRoutes() {
         <Route path="/dashboard" element={<PageTransition><TailorDashboard /></PageTransition>} />
         <Route path="/profile" element={<Navigate to="/tailor/dashboard" replace />} />
         <Route
+          path="/tailor/complete-profile"
+          element={
+            <PageTransition>
+              <ProtectedRoute
+                redirectPath="/tailor-login"
+                allowedRoles={["tailor"]}
+                tailorOnboardingGate="require-incomplete"
+              >
+                <TailorCompleteProfilePage />
+              </ProtectedRoute>
+            </PageTransition>
+          }
+        />
+        <Route
           path="/tailor/dashboard"
           element={
             <PageTransition>
-              <ProtectedRoute redirectPath="/tailor-login" allowedRoles={["tailor"]}>
+              <ProtectedRoute
+                redirectPath="/tailor-login"
+                allowedRoles={["tailor"]}
+                tailorOnboardingGate="require-complete"
+              >
                 <TailorDashboard />
               </ProtectedRoute>
             </PageTransition>
@@ -59,6 +80,30 @@ function AnimatedRoutes() {
             <PageTransition>
               <ProtectedRoute redirectPath="/login" allowedRoles={["customer"]}>
                 <CustomerDashboard />
+              </ProtectedRoute>
+            </PageTransition>
+          }
+        />
+        <Route
+          path="/customer/messages"
+          element={
+            <PageTransition>
+              <ProtectedRoute redirectPath="/login" allowedRoles={["customer"]}>
+                <CustomerMessagesPage />
+              </ProtectedRoute>
+            </PageTransition>
+          }
+        />
+        <Route
+          path="/tailor/messages"
+          element={
+            <PageTransition>
+              <ProtectedRoute
+                redirectPath="/tailor-login"
+                allowedRoles={["tailor"]}
+                tailorOnboardingGate="require-complete"
+              >
+                <TailorMessagesPage />
               </ProtectedRoute>
             </PageTransition>
           }

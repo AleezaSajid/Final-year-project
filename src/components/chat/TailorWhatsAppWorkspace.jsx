@@ -73,6 +73,7 @@ export default function TailorWhatsAppWorkspace({
   activeChatCustomer = { id: "", name: "Customer" },
   activeTailorShopId = "",
   setActiveOrderId,
+  fullPage = false,
 }) {
   const [acceptBusy, setAcceptBusy] = useState(false);
   const [filter, setFilter] = useState("all");
@@ -248,13 +249,17 @@ export default function TailorWhatsAppWorkspace({
     </button>
   );
 
+  const layoutMinH = fullPage ? "min-h-[calc(100dvh-9rem)] h-full" : "min-h-[min(720px,78vh)]";
+
   return (
     <section
       id="tailor-chat-workspace"
-      className="scroll-mt-24 overflow-hidden rounded-2xl border border-slate-200/90 bg-[#f0f2f5] shadow-[0_8px_30px_-12px_rgba(15,23,42,0.18)]"
+      className={`overflow-hidden rounded-2xl border border-slate-200/90 bg-[#f0f2f5] shadow-[0_8px_30px_-12px_rgba(15,23,42,0.18)] ${
+        fullPage ? "h-full min-h-0" : "scroll-mt-24"
+      }`}
       aria-label="Order messages"
     >
-      <div className="flex min-h-[min(720px,78vh)] w-full flex-col lg:flex-row">
+      <div className={`flex w-full flex-col lg:flex-row ${layoutMinH}`}>
         {/* Left — conversation list */}
         <aside
           className={`flex w-full shrink-0 flex-col border-slate-200/80 bg-white lg:w-[320px] lg:max-w-[320px] lg:border-r ${

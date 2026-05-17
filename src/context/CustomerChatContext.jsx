@@ -62,7 +62,11 @@ function customerConvRowIndex(list, rawId) {
 const CustomerChatContext = createContext(null);
 
 function isCustomerChatPath(pathname) {
-  return pathname === "/customer/dashboard" || pathname.startsWith("/customer/review");
+  return (
+    pathname === "/customer/dashboard" ||
+    pathname === "/customer/messages" ||
+    pathname.startsWith("/customer/review")
+  );
 }
 
 function isWizardRoute(pathname) {

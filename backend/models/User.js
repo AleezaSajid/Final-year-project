@@ -100,6 +100,12 @@ const userSchema = new mongoose.Schema(
       type: mongoose.Schema.Types.Mixed,
       default: null,
     },
+    /** Tailor onboarding: false until /tailor/complete-profile is submitted. */
+    profileComplete: {
+      type: Boolean,
+      default: false,
+      index: true,
+    },
   },
   {
     timestamps: true,

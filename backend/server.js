@@ -9,14 +9,15 @@ const fs = require('fs');
 require('dotenv').config();
 const crypto = require('crypto');
 const User = require('./models/User');
+const PendingSignup = require('./models/PendingSignup');
 const TailorProfile = require('./models/TailorProfile');
 const Message = require('./models/Message');
 const Conversation = require('./models/Conversation');
 const Order = require('./models/Order');
 const Testimonial = require('./models/Testimonial');
-const { sendMailSafe } = require('./email/mailer');
+const { sendMailSafe, sendOtpMail, getMailFrom, verifySmtpOnStartup, OTP_EMAIL_FAIL_MESSAGE } =
+  require('./email/mailer');
 const { makeWelcomeEmail } = require('./email/templates/welcomeEmail');
-const { makeOtpEmail } = require('./email/templates/otpEmail');
 
 const app = express();
 const PORT = 5000;
@@ -67,6 +68,8 @@ const SESSION_COOKIE_NAME = process.env.SESSION_COOKIE_NAME || 'sewserve_session
 const SESSION_SECRET = process.env.SESSION_SECRET || 'dev-session-secret-change-me';
 const SESSION_TTL_MS = Math.max(5 * 60 * 1000, Number(process.env.SESSION_TTL_MS) || 1000 * 60 * 60 * 24 * 7); // 7d
 const EMAIL_OTP_TTL_MS = 10 * 60 * 1000;
+const PENDING_SIGNUP_TTL_MS = 15 * 60 * 1000;
+const OTP_SIGNUP_EMAIL_FAIL_MSG = 'OTP email failed to send. Please try again.';
 
 function generateSixDigitOtp() {
   return String(Math.floor(100000 + Math.random() * 900000));
@@ -80,23 +83,55 @@ function hashEmailOtp(email, otp) {
   return crypto.createHmac('sha256', SESSION_SECRET).update(`${em}:${code}`).digest('hex');
 }
 
-async function persistOtpAndSendEmail(userDoc) {
+function buildSignupPayload(body, role, file) {
+  const payload = {
+    experience: String(body.experience || '').trim(),
+  };
+  if (role !== 'tailor') return payload;
+
+  const latRaw = body.lat != null ? String(body.lat).trim() : '';
+  const lngRaw = body.lng != null ? String(body.lng).trim() : '';
+  let lat = latRaw !== '' ? Number(latRaw) : NaN;
+  let lng = lngRaw !== '' ? Number(lngRaw) : NaN;
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+    lat = 0;
+    lng = 0;
+  }
+
+  return {
+    ...payload,
+    shopName: String(body.shopName || '').trim(),
+    city: String(body.city || '').trim(),
+    specialty: String(body.specialty || '').trim(),
+    lat,
+    lng,
+    experienceYears: Math.max(0, parseInt(String(body.experienceYears || '0'), 10) || 0),
+    priceStart: Math.max(0, parseInt(String(body.priceStart || '1500'), 10) || 1500),
+    deliveryDays: Math.max(1, parseInt(String(body.deliveryDays || '7'), 10) || 7),
+    bio: String(body.bio || '').trim(),
+    imageUrl: file ? `/uploads/${file.filename}` : String(body.imageUrl || '').trim(),
+  };
+}
+
+async function removeStaleUnverifiedUserIfAny(normalizedEmail) {
+  const existingUser = await User.findOne({ email: normalizedEmail });
+  if (!existingUser) return;
+  if (existingUser.isVerified === true) return;
+  console.log('[register] removing stale unverified user email=%s id=%s', normalizedEmail, existingUser.id);
+  await rollbackRegisteredUser(existingUser, existingUser.role || 'customer');
+}
+
+async function assignOtpToPendingAndSend(pending, purpose) {
   const otp = generateSixDigitOtp();
-  userDoc.emailOtpHash = hashEmailOtp(userDoc.email, otp);
-  userDoc.emailOtpExpiresAt = new Date(Date.now() + EMAIL_OTP_TTL_MS);
-  await userDoc.save();
-  const tpl = makeOtpEmail({
-    name: userDoc.fullName,
+  pending.otpHash = hashEmailOtp(pending.email, otp);
+  pending.otpExpiresAt = new Date(Date.now() + EMAIL_OTP_TTL_MS);
+  await pending.save();
+  await sendOtpMail({
+    to: pending.email,
     otp,
+    purpose,
+    name: pending.fullName,
     expiresMinutes: Math.floor(EMAIL_OTP_TTL_MS / 60000),
-  });
-  const from = process.env.MAIL_FROM || process.env.SMTP_USER || '';
-  await sendMailSafe({
-    from,
-    to: String(userDoc.email).trim().toLowerCase(),
-    subject: tpl.subject,
-    text: tpl.text,
-    html: tpl.html,
   });
 }
 
@@ -206,15 +241,20 @@ async function loadAuthedUser(req) {
   // Role drift check (token role must match DB role if present)
   if (payload.role && String(payload.role) !== String(role)) return null;
   let tailorShopId = null;
+  let tp = null;
   if (role === 'tailor') {
-    const tp = await TailorProfile.findOne({ userId: user.id }).select('tailorShopId').lean();
+    tp = await TailorProfile.findOne({ userId: user.id })
+      .select('tailorShopId location published')
+      .lean();
     if (tp && tp.tailorShopId) tailorShopId = String(tp.tailorShopId).trim();
   }
+  const profileComplete = resolveTailorProfileComplete(user, tp);
   return {
     id: user.id,
     fullName: user.fullName,
     email: user.email,
     role,
+    profileComplete,
     ...(tailorShopId ? { tailorShopId } : {}),
   };
 }
@@ -400,15 +440,11 @@ mongoose
   .connect('mongodb://127.0.0.1:27017/sewserve')
   .then(async () => {
     console.log('DB CONNECTED');
-    try {
-      const r = await User.updateMany(
-        { $or: [{ isVerified: { $exists: false } }, { isVerified: null }] },
-        { $set: { isVerified: true } }
-      );
-      if (r.modifiedCount) console.log('[auth] isVerified legacy migration:', r.modifiedCount);
-    } catch (e) {
-      console.error('[auth] isVerified migration error', e);
-    }
+    // Do NOT auto-verify users without OTP — that blocks the email verification flow.
+    // Dev/manual Mongo cleanup if testing is blocked by stale accounts:
+    //   db.users.deleteMany({ isVerified: false })
+    //   db.pendingsignups.deleteMany({})
+    // Verified users (isVerified: true) remain registered and block duplicate signup.
   })
   .catch((error) => {
     console.error('DB CONNECTION FAILED', error);
@@ -481,16 +517,48 @@ function mapTailorProfileToPublicRow(doc, idx = 0) {
   };
 }
 
+function isMongoDuplicateKeyError(err) {
+  return err && (err.code === 11000 || err.code === 11001);
+}
+
+/** Next numeric User.id — avoids countDocuments gaps when users were deleted but tailor profiles remain. */
+async function allocateNextNumericUserId() {
+  const [userAgg, tpAgg] = await Promise.all([
+    User.aggregate([{ $group: { _id: null, maxId: { $max: '$id' } } }]).exec(),
+    TailorProfile.aggregate([{ $group: { _id: null, maxId: { $max: '$userId' } } }]).exec(),
+  ]);
+  const maxUserId = userAgg[0]?.maxId ?? 0;
+  const maxProfileUserId = tpAgg[0]?.maxId ?? 0;
+  let candidate = Math.max(maxUserId, maxProfileUserId) + 1;
+  for (let attempt = 0; attempt < 100; attempt += 1) {
+    const [userTaken, profileTaken] = await Promise.all([
+      User.exists({ id: candidate }),
+      TailorProfile.exists({ userId: candidate }),
+    ]);
+    if (!userTaken && !profileTaken) return candidate;
+    candidate += 1;
+  }
+  throw new Error('Could not allocate a unique numeric user id');
+}
+
+async function rollbackRegisteredUser(userDoc, role) {
+  if (!userDoc?._id) return;
+  const numericId = userDoc.id;
+  if (role === 'tailor' && numericId != null) {
+    await TailorProfile.deleteOne({ userId: numericId }).catch(() => {});
+  }
+  await User.deleteOne({ _id: userDoc._id }).catch(() => {});
+}
+
 async function registerUser(req, res) {
   const body = req.body || {};
 
-  // Debug + safety: needed for multipart/form-data (FormData) submissions.
-  console.log("BODY RECEIVED:", body);
-  console.log("FILE RECEIVED:", req.file);
+  console.log('BODY RECEIVED:', body);
+  console.log('FILE RECEIVED:', req.file);
 
-  const fullName = String(body.fullName || body.name || "").trim();
-  const email = String(body.email || "").trim();
-  const password = String(body.password || "").trim();
+  const fullName = String(body.fullName || body.name || '').trim();
+  const email = String(body.email || '').trim();
+  const password = String(body.password || '').trim();
   const role = body.role === 'tailor' ? 'tailor' : 'customer';
 
   if (!fullName || !email || !password) {
@@ -512,135 +580,262 @@ async function registerUser(req, res) {
     }
   }
 
+  const normalizedEmail = String(email).toLowerCase();
+  let pending = null;
+
   try {
-    const normalizedEmail = String(email).toLowerCase();
-    const existingUser = await User.findOne({ email: normalizedEmail });
-    if (existingUser) {
+    const verifiedUser = await User.findOne({ email: normalizedEmail, isVerified: true });
+    if (verifiedUser) {
       return res.status(409).json({ error: 'Email already registered.', message: 'Email already registered.' });
     }
 
-    const nextUserId = (await User.countDocuments()) + 1;
-    const verifyToken = crypto.randomBytes(24).toString('hex');
-    const verifyExpiresAt = new Date(Date.now() + 1000 * 60 * 60 * 24); // 24h
+    await removeStaleUnverifiedUserIfAny(normalizedEmail);
 
-    const created = await User.create({
-      id: nextUserId,
-      fullName: String(fullName).trim(),
-      email: normalizedEmail,
-      password,
-      role,
-      phone: String(body.phone || '').trim(),
-      address: String(body.address || '').trim(),
-      experience: String(body.experience || '').trim(),
-      emailVerified: false,
-      isVerified: false,
-      emailOtpHash: '',
-      emailOtpExpiresAt: null,
-      emailVerifyToken: verifyToken,
-      emailVerifyTokenExpiresAt: verifyExpiresAt,
-    });
+    await PendingSignup.deleteMany({ email: normalizedEmail, expiresAt: { $lte: new Date() } });
 
-    let tailorShopId = null;
-    if (role === 'tailor') {
-      tailorShopId = `T-U${created.id}`;
-      const shopName = String(body.shopName || '').trim();
-      const city = String(body.city || '').trim();
-      const specialty = String(body.specialty || '').trim();
-      const latRaw = body.lat != null ? String(body.lat).trim() : '';
-      const lngRaw = body.lng != null ? String(body.lng).trim() : '';
-      const lat = latRaw !== '' ? Number(latRaw) : NaN;
-      const lng = lngRaw !== '' ? Number(lngRaw) : NaN;
-      if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
-        return res.status(400).json({
-          error: 'Valid location coordinates (lat/lng) are required.',
-          message: 'Valid location coordinates (lat/lng) are required.',
-        });
-      }
-      const experienceYears = Math.max(0, parseInt(String(body.experienceYears || '0'), 10) || 0);
-      const priceStart = Math.max(0, parseInt(String(body.priceStart || '1500'), 10) || 1500);
-      const deliveryDays = Math.max(1, parseInt(String(body.deliveryDays || '7'), 10) || 7);
-      try {
-        const avatarPath = req.file ? `/uploads/${req.file.filename}` : '';
-        await TailorProfile.create({
-          userId: created.id,
-          email: normalizedEmail,
-          tailorShopId,
-          shopName,
-          displayName: String(fullName).trim(),
-          city,
-          address: String(body.address || '').trim(),
-          location: { type: 'Point', coordinates: [lng, lat] },
-          specialty,
-          bio: String(body.bio || '').trim(),
-          skillsNotes: String(body.experience || '').trim(),
-          experienceYears,
-          priceStart,
-          deliveryDays,
-          imageUrl: avatarPath || String(body.imageUrl || '').trim(),
-          rating: 4.7,
-          availability: 'available',
-          published: true,
-        });
-      } catch (profileErr) {
-        console.error('TAILOR PROFILE CREATE ERROR', profileErr);
-        await User.deleteOne({ _id: created._id });
-        return res.status(500).json({
-          error: 'Could not create tailor profile.',
-          message: 'Could not create tailor profile. Please try again.',
-        });
-      }
+    if (role === 'customer') {
+      console.log('Creating customer pending signup email=%s', normalizedEmail);
     }
 
-    const userOut = {
-      id: created.id,
-      fullName: created.fullName,
-      email: created.email,
-      role: created.role || 'customer',
-    };
-    if (tailorShopId) userOut.tailorShopId = tailorShopId;
+    const signupPayload = buildSignupPayload(body, role, req.file);
+    const otp = generateSixDigitOtp();
+    const now = Date.now();
+
+    pending = await PendingSignup.findOneAndUpdate(
+      { email: normalizedEmail },
+      {
+        $set: {
+          email: normalizedEmail,
+          role,
+          fullName,
+          phone: String(body.phone || '').trim(),
+          address: String(body.address || '').trim(),
+          password,
+          signupPayload,
+          otpHash: hashEmailOtp(normalizedEmail, otp),
+          otpExpiresAt: new Date(now + EMAIL_OTP_TTL_MS),
+          expiresAt: new Date(now + PENDING_SIGNUP_TTL_MS),
+        },
+      },
+      { upsert: true, new: true, setDefaultsOnInsert: true }
+    );
+
+    console.log('[register] pending signup created/updated email=%s role=%s', normalizedEmail, role);
+    if (role === 'customer') {
+      console.log('Customer pending signup saved email=%s', normalizedEmail);
+    }
 
     try {
-      await persistOtpAndSendEmail(created);
-    } catch (e) {
-      console.error('[email] OTP send error', e);
-      if (role === 'tailor') {
-        await TailorProfile.deleteOne({ userId: created.id }).catch(() => {});
-      }
-      await User.deleteOne({ _id: created._id });
-      return res.status(500).json({
-        error: 'Could not send verification email. Please try again.',
-        message: 'Could not send verification email. Please try again.',
+      await sendOtpMail({
+        to: normalizedEmail,
+        otp,
+        purpose: 'signup',
+        name: fullName,
+        expiresMinutes: Math.floor(EMAIL_OTP_TTL_MS / 60000),
       });
+      console.log('[register] OTP email sent email=%s role=%s', normalizedEmail, role);
+    } catch (emailErr) {
+      console.error('[register] OTP email failed email=%s', normalizedEmail, emailErr);
+      await PendingSignup.deleteOne({ email: normalizedEmail }).catch(() => {});
+      const otpMsg =
+        emailErr && (emailErr.message === OTP_EMAIL_FAIL_MESSAGE || emailErr.code === 'OTP_EMAIL_SEND_FAILED')
+          ? OTP_SIGNUP_EMAIL_FAIL_MSG
+          : OTP_SIGNUP_EMAIL_FAIL_MSG;
+      return res.status(500).json({ error: otpMsg, message: otpMsg });
     }
 
-    // Welcome + link verification (optional) after OTP in a follow-up email is omitted here to avoid duplicate noise.
-
     return res.status(201).json({
-      message: 'Account created. Enter the verification code we emailed you.',
+      message: 'Enter the verification code we emailed you.',
       needsVerification: true,
-      user: userOut,
+      email: normalizedEmail,
+      role,
     });
   } catch (error) {
     console.error('SIGNUP ERROR', error);
-    return res.status(500).json({ error: 'Unable to create account right now.', message: 'Unable to create account right now.' });
+    if (pending?._id) {
+      await PendingSignup.deleteOne({ _id: pending._id }).catch(() => {});
+    }
+    return res.status(500).json({
+      error: 'Unable to create account right now.',
+      message: 'Unable to create account right now.',
+    });
   }
 }
 
 app.post('/signup', upload.single('avatar'), registerUser);
 app.post('/api/register', upload.single('avatar'), registerUser);
 
+const DEFAULT_TAILOR_SIGNUP_LNG = 74.3587;
+const DEFAULT_TAILOR_SIGNUP_LAT = 31.5204;
+const TAILOR_PENDING_LAT = 0;
+const TAILOR_PENDING_LNG = 0;
+
+function isTailorPendingLocationCoords(lat, lng) {
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return true;
+  if (Math.abs(lat) < 1e-6 && Math.abs(lng) < 1e-6) return true;
+  if (
+    Math.abs(lat - DEFAULT_TAILOR_SIGNUP_LAT) < 0.0001 &&
+    Math.abs(lng - DEFAULT_TAILOR_SIGNUP_LNG) < 0.0001
+  ) {
+    return true;
+  }
+  return false;
+}
+
+function isValidTailorCompleteProfileLocation(lat, lng) {
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return false;
+  if (isTailorPendingLocationCoords(lat, lng)) return false;
+  if (lat < -90 || lat > 90 || lng < -180 || lng > 180) return false;
+  return true;
+}
+
+/** Create verified User (+ TailorProfile for tailors) after OTP verification. */
+async function createFinalUserFromPendingSignup(pending) {
+  const normalizedEmail = String(pending.email).trim().toLowerCase();
+  const role = pending.role === 'tailor' ? 'tailor' : 'customer';
+  const payload = pending.signupPayload && typeof pending.signupPayload === 'object' ? pending.signupPayload : {};
+
+  if (role === 'customer') {
+    console.log('Creating final verified customer email=%s', normalizedEmail);
+  }
+
+  const verifiedExists = await User.findOne({ email: normalizedEmail, isVerified: true });
+  if (verifiedExists) {
+    const err = new Error('Email already registered.');
+    err.statusCode = 409;
+    throw err;
+  }
+
+  const stale = await User.findOne({ email: normalizedEmail, isVerified: { $ne: true } });
+  if (stale) {
+    await rollbackRegisteredUser(stale, stale.role || 'customer');
+  }
+
+  let created = null;
+  for (let attempt = 0; attempt < 5; attempt += 1) {
+    const nextUserId = await allocateNextNumericUserId();
+    try {
+      created = await User.create({
+        id: nextUserId,
+        fullName: String(pending.fullName || '').trim(),
+        email: normalizedEmail,
+        password: pending.password,
+        role,
+        phone: String(pending.phone || '').trim(),
+        address: String(pending.address || '').trim(),
+        experience: String(payload.experience || '').trim(),
+        emailVerified: true,
+        isVerified: true,
+        emailOtpHash: '',
+        emailOtpExpiresAt: null,
+        emailVerifyToken: '',
+        emailVerifyTokenExpiresAt: null,
+        profileComplete: role === 'tailor' ? false : true,
+      });
+      console.log(
+        '[verify-otp] final user created numericId=%s mongoId=%s role=%s email=%s',
+        created.id,
+        created._id,
+        created.role,
+        created.email
+      );
+      break;
+    } catch (userErr) {
+      if (isMongoDuplicateKeyError(userErr) && userErr.keyPattern?.id) {
+        console.warn('[verify-otp] numeric user id collision, retrying', nextUserId);
+        continue;
+      }
+      throw userErr;
+    }
+  }
+
+  if (!created) {
+    throw new Error('Could not assign a unique user id.');
+  }
+
+  if (role === 'customer') {
+    console.log('Customer verification successful numericId=%s email=%s', created.id, normalizedEmail);
+  }
+
+  if (role === 'tailor') {
+    const tailorShopId = `T-U${created.id}`;
+    let lat = Number(payload.lat);
+    let lng = Number(payload.lng);
+    if (!Number.isFinite(lat) || !Number.isFinite(lng) || isTailorPendingLocationCoords(lat, lng)) {
+      lat = TAILOR_PENDING_LAT;
+      lng = TAILOR_PENDING_LNG;
+    }
+
+    const existingProfile = await TailorProfile.findOne({ userId: created.id }).lean();
+    if (existingProfile) {
+      await rollbackRegisteredUser(created, role);
+      const err = new Error('A tailor profile already exists for this account.');
+      err.statusCode = 409;
+      throw err;
+    }
+
+    const profile = await TailorProfile.create({
+      userId: created.id,
+      email: normalizedEmail,
+      tailorShopId,
+      shopName: String(payload.shopName || '').trim(),
+      displayName: String(pending.fullName || '').trim(),
+      city: String(payload.city || '').trim(),
+      address: String(pending.address || '').trim(),
+      location: { type: 'Point', coordinates: [lng, lat] },
+      specialty: String(payload.specialty || '').trim(),
+      bio: String(payload.bio || '').trim(),
+      skillsNotes: String(payload.experience || '').trim(),
+      experienceYears: Math.max(0, Number(payload.experienceYears) || 0),
+      priceStart: Math.max(0, Number(payload.priceStart) || 1500),
+      deliveryDays: Math.max(1, Number(payload.deliveryDays) || 7),
+      imageUrl: String(payload.imageUrl || '').trim(),
+      rating: 4.7,
+      availability: 'available',
+      published: false,
+      locationVerified: false,
+      locationStatus: 'pending',
+    });
+    console.log(
+      '[verify-otp] tailor profile created userId=%s tailorShopId=%s',
+      profile.userId,
+      profile.tailorShopId
+    );
+  }
+
+  return created;
+}
+
+function resolveTailorProfileComplete(user, tp) {
+  if (!user || user.role !== 'tailor') return true;
+  if (user.profileComplete === true) return true;
+  if (user.profileComplete === false) return false;
+  if (!tp) return false;
+  const coords = tp.location && Array.isArray(tp.location.coordinates) ? tp.location.coordinates : [];
+  const lng = Number(coords[0]);
+  const lat = Number(coords[1]);
+  const hasCoords = Number.isFinite(lat) && Number.isFinite(lng);
+  const isPlaceholderOnly = hasCoords && isTailorPendingLocationCoords(lat, lng);
+  return hasCoords && tp.published === true && !isPlaceholderOnly;
+}
+
 async function buildUserOutForSession(user) {
   if (!user) return null;
   let tailorShopId = null;
+  let profileComplete = true;
   if (user.role === 'tailor') {
-    const tp = await TailorProfile.findOne({ userId: user.id }).select('tailorShopId').lean();
+    const tp = await TailorProfile.findOne({ userId: user.id })
+      .select('tailorShopId location published')
+      .lean();
     if (tp && tp.tailorShopId) tailorShopId = String(tp.tailorShopId).trim();
+    profileComplete = resolveTailorProfileComplete(user, tp);
   }
   return {
     id: user.id,
     fullName: user.fullName,
     email: user.email,
     role: user.role || 'customer',
+    profileComplete,
     ...(tailorShopId ? { tailorShopId } : {}),
   };
 }
@@ -871,18 +1066,43 @@ app.post('/api/auth/send-otp', async (req, res) => {
     return res.status(400).json({ message: 'Email is required.' });
   }
   try {
-    const user = await User.findOne({ email });
-    if (!user) {
-      return res.status(404).json({ message: 'User not found.' });
+    const verifiedUser = await User.findOne({ email, isVerified: true });
+    if (verifiedUser) {
+      return res.status(400).json({ message: 'Account already verified. Please sign in.' });
     }
-    if (user.isVerified === true) {
-      return res.status(400).json({ message: 'Account already verified.' });
+
+    await PendingSignup.deleteMany({ email, expiresAt: { $lte: new Date() } });
+
+    const pending = await PendingSignup.findOne({ email });
+    if (!pending) {
+      return res.status(404).json({
+        message: 'No pending signup found. Please complete the sign-up form again.',
+      });
     }
-    await persistOtpAndSendEmail(user);
+
+    if (pending.expiresAt && pending.expiresAt.getTime() < Date.now()) {
+      await PendingSignup.deleteOne({ _id: pending._id });
+      return res.status(400).json({
+        message: 'Sign-up session expired. Please sign up again.',
+      });
+    }
+
+    try {
+      await assignOtpToPendingAndSend(pending, 'resend');
+      console.log('[send-otp] OTP email sent email=%s', email);
+    } catch (emailErr) {
+      console.error('[send-otp] OTP email failed email=%s', email, emailErr);
+      const msg =
+        emailErr && (emailErr.message === OTP_EMAIL_FAIL_MESSAGE || emailErr.code === 'OTP_EMAIL_SEND_FAILED')
+          ? OTP_SIGNUP_EMAIL_FAIL_MSG
+          : OTP_SIGNUP_EMAIL_FAIL_MSG;
+      return res.status(500).json({ message: msg, error: msg });
+    }
+
     return res.json({ ok: true, message: 'Verification code sent.' });
   } catch (e) {
     console.error('POST /api/auth/send-otp', e);
-    return res.status(500).json({ message: 'Could not send verification code.' });
+    return res.status(500).json({ message: 'Could not send verification code.', error: 'Could not send verification code.' });
   }
 });
 
@@ -895,43 +1115,62 @@ app.post('/api/auth/verify-otp', async (req, res) => {
     return res.status(400).json({ message: 'Email and a 6-digit code are required.' });
   }
   try {
-    const user = await User.findOne({ email });
-    if (!user) {
-      return res.status(404).json({ message: 'User not found.' });
-    }
-    if (user.isVerified === true) {
-      const userOut = await buildUserOutForSession(user);
+    const verifiedUser = await User.findOne({ email, isVerified: true });
+    if (verifiedUser) {
+      const userOut = await buildUserOutForSession(verifiedUser);
       setSessionCookie(res, userOut);
-      return res.json({ ok: true, message: 'Already verified.', user: userOut });
+      const redirectPath =
+        verifiedUser.role === 'tailor' ? '/tailor/complete-profile' : '/customer/dashboard';
+      return res.json({ ok: true, message: 'Already verified.', user: userOut, redirectPath });
     }
-    if (!user.emailOtpHash || !user.emailOtpExpiresAt || user.emailOtpExpiresAt.getTime() < Date.now()) {
+
+    const pending = await PendingSignup.findOne({ email });
+    if (!pending) {
+      return res.status(404).json({
+        message: 'No pending signup found. Please sign up again.',
+      });
+    }
+
+    if (pending.expiresAt && pending.expiresAt.getTime() < Date.now()) {
+      await PendingSignup.deleteOne({ _id: pending._id });
+      return res.status(400).json({ message: 'Sign-up session expired. Please sign up again.' });
+    }
+
+    if (!pending.otpHash || !pending.otpExpiresAt || pending.otpExpiresAt.getTime() < Date.now()) {
       return res.status(400).json({ message: 'Code expired or missing. Request a new code.' });
     }
-    if (user.emailOtpHash !== hashEmailOtp(email, otpRaw)) {
+
+    if (pending.otpHash !== hashEmailOtp(email, otpRaw)) {
       return res.status(400).json({ message: 'Invalid verification code.' });
     }
-    user.isVerified = true;
-    user.emailVerified = true;
-    user.emailOtpHash = '';
-    user.emailOtpExpiresAt = null;
-    await user.save();
-    const userOut = await buildUserOutForSession(user);
+
+    console.log('[verify-otp] OTP verified email=%s role=%s', email, pending.role);
+    if (pending.role === 'customer') {
+      console.log('Customer verification successful email=%s', email);
+    }
+
+    const created = await createFinalUserFromPendingSignup(pending);
+    await PendingSignup.deleteOne({ _id: pending._id });
+
+    const userOut = await buildUserOutForSession(created);
     setSessionCookie(res, userOut);
+
+    const redirectPath = created.role === 'tailor' ? '/tailor/complete-profile' : '/customer/dashboard';
+
     (async () => {
       try {
         const appName = process.env.APP_NAME || 'SewServe';
         const webBase = process.env.WEB_BASE_URL || 'http://localhost:3000';
         const loginUrl = `${String(webBase).replace(/\/$/, '')}/login`;
         const tpl = makeWelcomeEmail({
-          name: user.fullName,
+          name: created.fullName,
           appName,
           loginUrl,
           verifyUrl: '',
         });
-        const from = process.env.MAIL_FROM || process.env.SMTP_USER || '';
         await sendMailSafe({
-          from,
-          to: user.email,
+          from: getMailFrom(),
+          to: created.email,
           subject: tpl.subject,
           text: tpl.text,
           html: tpl.html,
@@ -940,9 +1179,18 @@ app.post('/api/auth/verify-otp', async (req, res) => {
         console.error('[email] welcome after OTP', e);
       }
     })();
-    return res.json({ ok: true, message: 'Email verified successfully.', user: userOut });
+
+    return res.json({
+      ok: true,
+      message: 'Email verified successfully.',
+      user: userOut,
+      redirectPath,
+    });
   } catch (e) {
     console.error('POST /api/auth/verify-otp', e);
+    if (e && e.statusCode === 409) {
+      return res.status(409).json({ message: e.message || 'Email already registered.' });
+    }
     return res.status(500).json({ message: 'Verification failed.' });
   }
 });
@@ -1146,6 +1394,91 @@ app.patch('/api/tailor/profile-self', requireAuth, requireRole(['tailor']), asyn
     return res.status(500).json({ message: 'Could not update profile.' });
   }
 });
+
+app.get('/api/tailor/onboarding-profile', requireAuth, requireRole(['tailor']), async (req, res) => {
+  try {
+    const user = await User.findOne({ id: Number(req.authUser.id), email: String(req.authUser.email) }).exec();
+    if (!user) return res.status(403).json({ message: 'Forbidden.' });
+    const tp = await TailorProfile.findOne({ userId: user.id }).lean();
+    if (!tp) return res.json({ profile: null, profileComplete: false });
+    const coords = tp.location && Array.isArray(tp.location.coordinates) ? tp.location.coordinates : [];
+    const lng = Number(coords[0]);
+    const lat = Number(coords[1]);
+    const pendingLocation = isTailorPendingLocationCoords(lat, lng);
+    return res.json({
+      profileComplete: resolveTailorProfileComplete(user, tp),
+      profile: {
+        shopName: tp.shopName || '',
+        city: tp.city || '',
+        specialty: tp.specialty || '',
+        bio: tp.bio || '',
+        experienceYears: tp.experienceYears ?? 0,
+        priceStart: tp.priceStart ?? 1500,
+        deliveryDays: tp.deliveryDays ?? 7,
+        address: tp.address || '',
+        lat: pendingLocation ? null : lat,
+        lng: pendingLocation ? null : lng,
+        imageUrl: tp.imageUrl || '',
+      },
+    });
+  } catch (e) {
+    console.error('GET /api/tailor/onboarding-profile', e);
+    return res.status(500).json({ message: 'Unable to load profile.' });
+  }
+});
+
+app.post(
+  '/api/tailor/complete-profile',
+  requireAuth,
+  requireRole(['tailor']),
+  upload.single('avatar'),
+  async (req, res) => {
+    const body = req.body || {};
+    try {
+      const user = await User.findOne({ id: Number(req.authUser.id), email: String(req.authUser.email) }).exec();
+      if (!user) return res.status(403).json({ message: 'Forbidden.' });
+      const tp = await TailorProfile.findOne({ userId: user.id });
+      if (!tp) return res.status(404).json({ message: 'No tailor profile.' });
+
+      const latRaw = body.lat != null ? String(body.lat).trim() : '';
+      const lngRaw = body.lng != null ? String(body.lng).trim() : '';
+      const lat = latRaw !== '' ? Number(latRaw) : NaN;
+      const lng = lngRaw !== '' ? Number(lngRaw) : NaN;
+      if (!isValidTailorCompleteProfileLocation(lat, lng)) {
+        return res.status(400).json({
+          message: 'Valid location coordinates (lat/lng) are required.',
+        });
+      }
+
+      if (body.bio != null) tp.bio = String(body.bio).trim();
+      const ey = parseInt(String(body.experienceYears || '0'), 10);
+      const ps = parseInt(String(body.priceStart || '1500'), 10);
+      const dd = parseInt(String(body.deliveryDays || '7'), 10);
+      tp.experienceYears = Number.isFinite(ey) && ey >= 0 ? ey : 0;
+      tp.priceStart = Number.isFinite(ps) && ps > 0 ? ps : 1500;
+      tp.deliveryDays = Number.isFinite(dd) && dd > 0 ? dd : 7;
+      if (body.address != null) tp.address = String(body.address).trim();
+      tp.location = { type: 'Point', coordinates: [lng, lat] };
+      tp.locationVerified = true;
+      tp.locationStatus = 'verified';
+      if (req.file) {
+        tp.imageUrl = `/uploads/${req.file.filename}`;
+      }
+      tp.published = true;
+      await tp.save();
+
+      user.profileComplete = true;
+      await user.save();
+
+      const userOut = await buildUserOutForSession(user);
+      setSessionCookie(res, userOut);
+      return res.json({ ok: true, user: userOut });
+    } catch (e) {
+      console.error('POST /api/tailor/complete-profile', e);
+      return res.status(500).json({ message: 'Could not save profile.' });
+    }
+  }
+);
 
 /** Public listing for Browse Tailors (no auth). */
 app.get('/api/tailors/public', async (req, res) => {
@@ -2962,4 +3295,7 @@ io.on('connection', (socket) => {
 
 server.listen(PORT, () => {
   console.log(`Server running on http://localhost:${PORT}`);
+  verifySmtpOnStartup().catch((err) => {
+    console.error('[email] SMTP startup verify error', err);
+  });
 });

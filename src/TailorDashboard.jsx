@@ -5,7 +5,6 @@ import DashboardNavbar from "./components/DashboardNavbar";
 import { LandingStylePageBackground } from "./components/LandingStylePageBackground.jsx";
 import TdDashboardOverview from "./tailorDashboard/components/TdDashboardOverview";
 import WizardOrderReviewModal from "./tailorDashboard/components/WizardOrderReviewModal.jsx";
-import TailorWhatsAppWorkspace from "./components/chat/TailorWhatsAppWorkspace.jsx";
 import OrderPopup from "./tailorDashboard/components/OrderPopup.jsx";
 import { TailorDashboardChatContext } from "./context/TailorDashboardChatContext.jsx";
 import { useTailorDashboard } from "./tailorDashboard/hooks/useTailorDashboard";
@@ -120,17 +119,7 @@ export default function TailorDashboard() {
               document.body
             )
           : null}
-        <div className="relative z-10 mx-auto max-w-7xl space-y-10 px-4 pb-16 pt-6 sm:px-6 lg:px-8">
-          <TailorWhatsAppWorkspace
-            tailorChatConversations={dash.tailorChatConversations}
-            orders={dash.orders}
-            openChatForOrder={dash.openChatForOrder}
-            acceptOrderIntoCurrentTasks={dash.acceptOrderIntoCurrentTasks}
-            activeConversationId={dash.activeConversationId}
-            activeChatCustomer={dash.activeChatCustomer}
-            activeTailorShopId={dash.activeTailorShopId}
-            setActiveOrderId={dash.setActiveOrderId}
-          />
+        <div className="relative z-10 mx-auto max-w-7xl space-y-8 px-4 pb-16 pt-6 sm:px-6 lg:px-8">
           <WizardOrderReviewModal
             order={dash.reviewModalDisplayOrder}
             open={dash.reviewModalOpen}
