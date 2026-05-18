@@ -312,15 +312,16 @@ export default function LandingNavbar({
           /* Landing — airy glass: low white fill, blur does the work; scroll adds a touch more frost + shadow */
           .ss-landing-nav-glass {
             padding-top: env(safe-area-inset-top, 0px);
-            background-color: rgba(255, 255, 255, 0.18);
+            background-color: rgba(255, 255, 255, 0.22);
             background-image: linear-gradient(
               180deg,
-              rgba(255, 255, 255, 0.28) 0%,
-              rgba(255, 255, 255, 0.1) 100%
+              rgba(255, 255, 255, 0.42) 0%,
+              rgba(232, 247, 243, 0.18) 100%
             );
-            -webkit-backdrop-filter: blur(20px) saturate(185%);
-            backdrop-filter: blur(20px) saturate(185%);
-            box-shadow: 0 1px 1px rgba(15, 23, 42, 0.03);
+            border-bottom: 1px solid rgba(255, 255, 255, 0.45);
+            -webkit-backdrop-filter: blur(22px) saturate(190%);
+            backdrop-filter: blur(22px) saturate(190%);
+            box-shadow: 0 1px 0 rgba(255, 255, 255, 0.5) inset, 0 4px 24px -12px rgba(26, 53, 88, 0.08);
             transition:
               background-color 0.3s ease-in-out,
               background-image 0.3s ease-in-out,
@@ -378,26 +379,43 @@ export default function LandingNavbar({
           }
           /* Shared nav text styles (underline is one sliding element in nav) */
           .ss-landing-nav-link {
-            transition: color 0.2s ease;
+            transition: color 0.2s ease, transform 0.2s ease;
           }
           .ss-landing-nav-link:hover {
-            color: #4a7c59 !important;
+            color: #1f6b52 !important;
+            transform: translateY(-1px);
           }
           .ss-landing-nav-link:focus-visible {
-            color: #4a7c59 !important;
+            color: #1f6b52 !important;
             outline: none;
           }
           .ss-landing-nav-link--active {
-            color: #166534 !important;
+            color: #1a3558 !important;
+            font-weight: 600;
           }
           .ss-landing-nav-link--active:hover {
-            color: #4a7c59 !important;
+            color: #1f6b52 !important;
+          }
+          .ss-landing-nav-cta {
+            border-radius: 0.875rem;
+            background: linear-gradient(135deg, #1f6b52 0%, #2a7a5e 50%, #1f6b52 100%);
+            box-shadow:
+              inset 0 1px 0 rgba(255, 255, 255, 0.28),
+              0 6px 22px -6px rgba(31, 107, 82, 0.45);
+            transition: transform 0.22s ease, box-shadow 0.22s ease, filter 0.22s ease;
+          }
+          .ss-landing-nav-cta:hover {
+            transform: translateY(-2px);
+            filter: brightness(1.05);
+            box-shadow:
+              inset 0 1px 0 rgba(255, 255, 255, 0.32),
+              0 12px 28px -8px rgba(31, 107, 82, 0.5);
           }
         `}
       </style>
       <nav
         ref={navRef}
-        className="relative mx-auto flex w-full max-w-7xl items-center justify-between gap-4 px-4 py-3.5 sm:px-6 lg:px-8"
+        className="relative mx-auto flex w-full max-w-7xl items-center justify-between gap-4 px-4 py-4 sm:px-6 lg:px-8"
         onMouseLeave={onNavPointerLeave}
       >
         {/* Single sliding underline (md+); positioned at bottom of nav — transform + width */}
@@ -456,7 +474,7 @@ export default function LandingNavbar({
               onClick={() => onSectionNavigate(link.sectionId)}
               onMouseEnter={() => onNavItemEnter(`section-${link.sectionId}`)}
               onFocus={() => onNavItemFocus(`section-${link.sectionId}`)}
-              className="ss-landing-nav-link px-3 py-2 text-sm font-medium text-slate-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-600/25 focus-visible:ring-offset-2"
+              className="ss-landing-nav-link px-3.5 py-2 text-sm font-medium text-[#3d5a73] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-600/25 focus-visible:ring-offset-2"
             >
               {link.label}
             </button>
@@ -612,7 +630,7 @@ export default function LandingNavbar({
             onClick={() => navigate("/signup")}
             type="button"
             aria-label="Get started — sign up"
-            className="rounded-apple bg-gradient-to-b from-[#4a7c59] to-[#3d5d48] px-[18px] py-2.5 text-sm font-semibold text-white shadow-md shadow-emerald-900/20 transition-all duration-200 ease-out hover:-translate-y-0.5 hover:brightness-105 hover:shadow-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-600/40 focus-visible:ring-offset-2"
+            className="ss-landing-nav-cta px-5 py-2.5 text-sm font-semibold text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-600/40 focus-visible:ring-offset-2"
           >
             Get Started
           </button>

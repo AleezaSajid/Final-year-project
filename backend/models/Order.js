@@ -98,6 +98,20 @@ const orderSchema = new mongoose.Schema(
       type: Date,
       default: null,
     },
+    rejectedAt: {
+      type: Date,
+      default: null,
+    },
+    rejectedBy: {
+      type: String,
+      default: '',
+      trim: true,
+    },
+    rejectionReason: {
+      type: String,
+      default: '',
+      trim: true,
+    },
     dueDate: {
       type: Date,
       default: null,

@@ -3,10 +3,7 @@ import {
   ArrowLeft,
   Image as ImageIcon,
   MessageCircle,
-  MoreVertical,
-  Phone,
   Search,
-  Video,
 } from "lucide-react";
 import { socket } from "../../socket.js";
 import {
@@ -381,32 +378,6 @@ export default function TailorWhatsAppWorkspace({
                       {socket.connected ? "Online" : "Connecting…"}
                     </span>
                   </p>
-                </div>
-                <div className="hidden items-center gap-0.5 sm:flex">
-                  <button
-                    type="button"
-                    className="rounded-full p-2 text-slate-500 hover:bg-slate-200/80"
-                    aria-label="Voice call"
-                    disabled
-                  >
-                    <Video className="h-5 w-5" />
-                  </button>
-                  <button
-                    type="button"
-                    className="rounded-full p-2 text-slate-500 hover:bg-slate-200/80"
-                    aria-label="Phone"
-                    disabled
-                  >
-                    <Phone className="h-5 w-5" />
-                  </button>
-                  <button
-                    type="button"
-                    className="rounded-full p-2 text-slate-500 hover:bg-slate-200/80"
-                    aria-label="More"
-                    disabled
-                  >
-                    <MoreVertical className="h-5 w-5" />
-                  </button>
                 </div>
                 <button
                   type="button"

@@ -151,6 +151,7 @@ function AnimatedRoutes() {
         <Route path="/tailors/:tailorId" element={<PageTransition><TailorPublicProfile /></PageTransition>} />
         <Route path="/browse-tailors" element={<PageTransition><BrowseTailors /></PageTransition>} />
         <Route path="/empower-her" element={<PageTransition><EmpowerHer /></PageTransition>} />
+        <Route path="/for-women" element={<Navigate to="/empower-her" replace />} />
         <Route path="/map" element={<PageTransition><NearbyTailorsMap /></PageTransition>} />
         <Route path="/nearby-tailors" element={<Navigate to="/map" replace />} />
         <Route path="/location-step" element={<PageTransition><LocationStep /></PageTransition>} />

@@ -27,11 +27,13 @@ import {
   TD_GHOST_BTN,
   TD_HERO_CARD,
   TD_PRIMARY_BUTTON_CLASS,
+  TD_REJECT_BUTTON_CLASS,
   TD_SECONDARY_NAVY_BTN,
   TD_STAT_ICON,
 } from "../tailorDashboardClassNames";
 import { isOrderAwaitingTailorAccept } from "../../chatUtils.js";
 import RecentChatsPreviewCard from "../../components/chat/RecentChatsPreviewCard.jsx";
+import RejectOrderModal from "./RejectOrderModal.jsx";
 
 const TASK_MAP = {
   accepted: "Accepted Order",
@@ -111,6 +113,7 @@ export default function TdDashboardOverview({
   displayStats,
   upcomingOrders,
   orders,
+  currentTaskOrders = [],
   calendarPreview,
   measurementsCandidates,
   setActiveOrderId,
@@ -124,9 +127,12 @@ export default function TdDashboardOverview({
   fetchOrders,
   openChatForOrder,
   acceptOrderIntoCurrentTasks,
+  rejectOrderFromPending,
   tailorChatConversations = [],
 }) {
   const [expandedTaskId, setExpandedTaskId] = useState(null);
+  const [rejectTarget, setRejectTarget] = useState(null);
+  const [rejectBusy, setRejectBusy] = useState(false);
 
   useEffect(() => {
     const onOrdersInvalidate = () => {
@@ -137,11 +143,11 @@ export default function TdDashboardOverview({
   }, [fetchOrders]);
 
   const tasks = useMemo(() => {
-    const list = Array.isArray(orders) ? orders : [];
+    const list = Array.isArray(currentTaskOrders) && currentTaskOrders.length > 0
+      ? currentTaskOrders
+      : (Array.isArray(orders) ? orders : []).filter((order) => orderIsActiveCurrentTask(order));
 
-    const filtered = [...list]
-      .filter((order) => orderIsActiveCurrentTask(order))
-      .sort((a, b) => getPriorityScore(a) - getPriorityScore(b));
+    const filtered = [...list].sort((a, b) => getPriorityScore(a) - getPriorityScore(b));
 
     return filtered.map((order) => {
       const workflow = taskWorkflowMeta(order);
@@ -171,7 +177,7 @@ export default function TdDashboardOverview({
         sourceOrder: order,
       };
     });
-  }, [orders]);
+  }, [currentTaskOrders, orders]);
 
   const focusCurrentTask = (task, toggleExpand = false) => {
     if (!task?.sourceOrder) return;
@@ -224,8 +230,26 @@ export default function TdDashboardOverview({
   const secondaryNavyBtn = TD_SECONDARY_NAVY_BTN;
   const primaryBtn = TD_PRIMARY_BUTTON_CLASS;
 
+  const handleRejectConfirm = async (reason) => {
+    if (!rejectTarget?.id || !rejectOrderFromPending) return;
+    setRejectBusy(true);
+    try {
+      const ok = await rejectOrderFromPending(rejectTarget.id, rejectTarget.order, reason);
+      if (ok) setRejectTarget(null);
+    } finally {
+      setRejectBusy(false);
+    }
+  };
+
   return (
     <div className="space-y-4 sm:space-y-5">
+      <RejectOrderModal
+        open={Boolean(rejectTarget)}
+        orderLabel={rejectTarget?.label || "this request"}
+        busy={rejectBusy}
+        onClose={() => !rejectBusy && setRejectTarget(null)}
+        onConfirm={handleRejectConfirm}
+      />
       {notifications.length > 0 ? (
         <div className="flex flex-wrap gap-2">
           {notifications.map((note, index) => (
@@ -441,17 +465,35 @@ export default function TdDashboardOverview({
                             </ol>
                             <div className="flex flex-wrap gap-2 pt-1">
                               {task.sourceOrder && isOrderAwaitingTailorAccept(task.sourceOrder) ? (
-                                <button
-                                  type="button"
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    const oid = String(task._id ?? task.id ?? "").trim();
-                                    if (oid) void acceptOrderIntoCurrentTasks?.(oid, task.sourceOrder);
-                                  }}
-                                  className={primaryBtn}
-                                >
-                                  Accept order
-                                </button>
+                                <>
+                                  <button
+                                    type="button"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      const oid = String(task._id ?? task.id ?? "").trim();
+                                      if (oid) void acceptOrderIntoCurrentTasks?.(oid, task.sourceOrder);
+                                    }}
+                                    className={primaryBtn}
+                                  >
+                                    Accept order
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      const oid = String(task._id ?? task.id ?? "").trim();
+                                      if (!oid) return;
+                                      setRejectTarget({
+                                        id: oid,
+                                        order: task.sourceOrder,
+                                        label: `${task.customerName || "Customer"}'s request`,
+                                      });
+                                    }}
+                                    className={TD_REJECT_BUTTON_CLASS}
+                                  >
+                                    Reject order
+                                  </button>
+                                </>
                               ) : null}
                               <button
                                 type="button"
@@ -506,17 +548,35 @@ export default function TdDashboardOverview({
                     </div>
                     <div className="flex shrink-0 flex-col gap-2 sm:flex-row">
                       {isOrderAwaitingTailorAccept(order) ? (
-                        <motion.button
-                          type="button"
-                          whileTap={{ scale: 0.97 }}
-                          onClick={() => {
-                            const oid = String(order.id ?? order._id ?? "").trim();
-                            if (oid) void acceptOrderIntoCurrentTasks?.(oid, order);
-                          }}
-                          className={primaryBtn}
-                        >
-                          Accept order
-                        </motion.button>
+                        <>
+                          <motion.button
+                            type="button"
+                            whileTap={{ scale: 0.97 }}
+                            onClick={() => {
+                              const oid = String(order.id ?? order._id ?? "").trim();
+                              if (oid) void acceptOrderIntoCurrentTasks?.(oid, order);
+                            }}
+                            className={primaryBtn}
+                          >
+                            Accept order
+                          </motion.button>
+                          <motion.button
+                            type="button"
+                            whileTap={{ scale: 0.97 }}
+                            onClick={() => {
+                              const oid = String(order.id ?? order._id ?? "").trim();
+                              if (!oid) return;
+                              setRejectTarget({
+                                id: oid,
+                                order,
+                                label: `${order.customerName || "Customer"}'s ${order.garmentType || "order"} request`,
+                              });
+                            }}
+                            className={TD_REJECT_BUTTON_CLASS}
+                          >
+                            Reject order
+                          </motion.button>
+                        </>
                       ) : null}
                       <motion.button
                         type="button"

@@ -101,6 +101,7 @@ export const getStatusIndex = (status) => {
 export const formatStatusLabel = (status) => {
   const normalized = normalizeStatus(status);
   if (normalized === "needs_alteration") return "Needs Alteration";
+  if (normalized === "rejected" || normalized === "declined") return "Declined";
   if (normalized === "accepted") return "Order Placed";
   const label = workflowStages.find((stage) => stage.status === normalized)?.label;
   if (label) return label;

@@ -4,17 +4,22 @@ import { CheckCircle2, ClipboardList, Inbox, Package } from "lucide-react";
 import {
   formatStatusLabel,
   getStatusIndex,
-  isPendingWorkflowStatus,
   resolveOrderWorkflowState,
   workflowStages,
 } from "../constants";
-import { getPriorityScore, isTailorCurrentTaskOrder } from "../../utils/workflowEngine.js";
-import { isOrderAwaitingTailorAccept } from "../../chatUtils.js";
+import {
+  getPriorityScore,
+  isTailorCurrentTaskOrder,
+  isTailorMeasurementReviewOrder,
+} from "../../utils/workflowEngine.js";
+import { isOrderAwaitingTailorAccept, isOrderRejected } from "../../chatUtils.js";
 import {
   TD_GLASS_CARD,
   TD_HERO_CARD,
   TD_PRIMARY_BUTTON_CLASS,
+  TD_REJECT_BUTTON_CLASS,
 } from "../tailorDashboardClassNames";
+import RejectOrderModal from "./RejectOrderModal.jsx";
 
 function orderRowId(order) {
   return String(order?._id ?? order?.id ?? "").trim();
@@ -39,13 +44,15 @@ function orderWorkflowMeta(order) {
     internalStatus,
     workflowIndex,
     stepLabel: step?.label || formatStatusLabel(internalStatus),
-    chipLabel: isFreshAccept
-      ? "Accepted"
-      : internalStatus === "completed"
-        ? "Completed"
-        : isOrderAwaitingTailorAccept(order)
-          ? "Awaiting approval"
-          : "In progress",
+    chipLabel: isOrderRejected(order)
+      ? "Declined"
+      : isFreshAccept
+        ? "Accepted"
+        : internalStatus === "completed"
+          ? "Completed"
+          : isOrderAwaitingTailorAccept(order)
+            ? "Awaiting approval"
+            : "In progress",
   };
 }
 
@@ -53,14 +60,19 @@ function bucketTailorOrders(orders) {
   const pending = [];
   const inProgress = [];
   const completed = [];
+  const rejected = [];
 
   for (const order of orders) {
     const { internalStatus } = resolveOrderWorkflowState(order);
+    if (isOrderRejected(order)) {
+      rejected.push(order);
+      continue;
+    }
     if (internalStatus === "completed") {
       completed.push(order);
       continue;
     }
-    if (isOrderAwaitingTailorAccept(order) || isPendingWorkflowStatus(internalStatus)) {
+    if (isTailorMeasurementReviewOrder(order)) {
       pending.push(order);
       continue;
     }
@@ -68,7 +80,6 @@ function bucketTailorOrders(orders) {
       inProgress.push(order);
       continue;
     }
-    inProgress.push(order);
   }
 
   const byNewest = (a, b) =>
@@ -77,8 +88,13 @@ function bucketTailorOrders(orders) {
   pending.sort(byNewest);
   inProgress.sort((a, b) => getPriorityScore(a) - getPriorityScore(b));
   completed.sort(byNewest);
+  rejected.sort((a, b) => {
+    const ta = new Date(a.rejectedAt || a.updatedAt || a.createdAt || 0).getTime();
+    const tb = new Date(b.rejectedAt || b.updatedAt || b.createdAt || 0).getTime();
+    return tb - ta;
+  });
 
-  return { pending, inProgress, completed };
+  return { pending, inProgress, completed, rejected };
 }
 
 function SectionBlock({ title, subtitle, count, children, emptyMessage, icon: Icon }) {
@@ -124,6 +140,7 @@ function OrderRow({
   onToggleExpand,
   onMarkDone,
   onAccept,
+  onReject,
   setActiveOrderId,
 }) {
   const rowKey = orderRowId(order);
@@ -145,7 +162,13 @@ function OrderRow({
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-2">
             <p className="text-sm font-bold text-[#1F2933]">{customerName}</p>
-            <span className="inline-flex rounded-full bg-[#E8F3EE] px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-[#1F6B52]">
+            <span
+              className={`inline-flex rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide ${
+                isOrderRejected(order)
+                  ? "bg-rose-50 text-rose-800 ring-1 ring-rose-200/80"
+                  : "bg-[#E8F3EE] text-[#1F6B52]"
+              }`}
+            >
               {meta.chipLabel}
             </span>
           </div>
@@ -159,15 +182,26 @@ function OrderRow({
         </div>
         <div className="flex shrink-0 flex-wrap gap-2">
           {isOrderAwaitingTailorAccept(order) ? (
-            <button
-              type="button"
-              onClick={() => {
-                if (rowKey) void onAccept?.(rowKey, order);
-              }}
-              className={TD_PRIMARY_BUTTON_CLASS}
-            >
-              Accept order
-            </button>
+            <>
+              <button
+                type="button"
+                onClick={() => {
+                  if (rowKey) void onAccept?.(rowKey, order);
+                }}
+                className={TD_PRIMARY_BUTTON_CLASS}
+              >
+                Accept order
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  if (rowKey) onReject?.(rowKey, order);
+                }}
+                className={TD_REJECT_BUTTON_CLASS}
+              >
+                Reject order
+              </button>
+            </>
           ) : null}
           {showMarkDone && !atLastStep ? (
             <button
@@ -217,11 +251,14 @@ export default function TdTailorOrdersList({
   tailorOrders = [],
   updateOrderStatus,
   acceptOrderIntoCurrentTasks,
+  rejectOrderFromPending,
   navigate,
   setActiveOrderId,
   fetchOrders,
 }) {
   const [expandedId, setExpandedId] = useState(null);
+  const [rejectTarget, setRejectTarget] = useState(null);
+  const [rejectBusy, setRejectBusy] = useState(false);
 
   useEffect(() => {
     const onRefresh = () => {
@@ -231,10 +268,21 @@ export default function TdTailorOrdersList({
     return () => window.removeEventListener("sewserve:orders-refresh", onRefresh);
   }, [fetchOrders]);
 
-  const { pending, inProgress, completed } = useMemo(
+  const { pending, inProgress, completed, rejected } = useMemo(
     () => bucketTailorOrders(Array.isArray(tailorOrders) ? tailorOrders : []),
     [tailorOrders]
   );
+
+  const handleRejectConfirm = async (reason) => {
+    if (!rejectTarget?.id || !rejectOrderFromPending) return;
+    setRejectBusy(true);
+    try {
+      const ok = await rejectOrderFromPending(rejectTarget.id, rejectTarget.order, reason);
+      if (ok) setRejectTarget(null);
+    } finally {
+      setRejectBusy(false);
+    }
+  };
 
   const handleToggleExpand = (rowKey) => {
     setExpandedId((prev) => {
@@ -284,6 +332,13 @@ export default function TdTailorOrdersList({
           onToggleExpand={handleToggleExpand}
           onMarkDone={handleMarkDone}
           onAccept={acceptOrderIntoCurrentTasks}
+          onReject={(rowKey, order) =>
+            setRejectTarget({
+              id: rowKey,
+              order,
+              label: `${order?.customerName || "Customer"}'s ${orderGarment(order)} request`,
+            })
+          }
           setActiveOrderId={setActiveOrderId}
         />
       ))}
@@ -292,6 +347,13 @@ export default function TdTailorOrdersList({
 
   return (
     <div className="space-y-4 sm:space-y-5">
+      <RejectOrderModal
+        open={Boolean(rejectTarget)}
+        orderLabel={rejectTarget?.label || "this request"}
+        busy={rejectBusy}
+        onClose={() => !rejectBusy && setRejectTarget(null)}
+        onConfirm={handleRejectConfirm}
+      />
       <motion.header
         initial={{ opacity: 0, y: 12 }}
         animate={{ opacity: 1, y: 0 }}
@@ -335,6 +397,16 @@ export default function TdTailorOrdersList({
         emptyMessage="Completed orders will appear here."
       >
         {renderList(completed, false)}
+      </SectionBlock>
+
+      <SectionBlock
+        title="Rejected requests"
+        subtitle="Declined customer requests"
+        count={rejected.length}
+        icon={Inbox}
+        emptyMessage="Declined requests will appear here for your records."
+      >
+        {renderList(rejected, false)}
       </SectionBlock>
     </div>
   );

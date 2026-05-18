@@ -65,6 +65,15 @@ export const TD_CHATS_OPEN_BTN = [
 export const TD_INPUT_CLASS =
   "w-full rounded-xl border border-[#E5E7EB] bg-white px-3 py-2 text-sm text-[#1F2933] placeholder:text-[#9CA3AF] shadow-[inset_0_1px_2px_rgba(15,23,42,0.04)] focus:border-[#1F6B52]/40 focus:outline-none focus:ring-2 focus:ring-[#1F6B52]/15";
 
+export const TD_REJECT_BUTTON_CLASS = [
+  "rounded-xl border border-rose-200/90 bg-gradient-to-r from-rose-50 to-white",
+  "px-3.5 py-2 text-xs font-semibold text-rose-800",
+  "shadow-[0_4px_14px_-6px_rgba(225,29,72,0.18)]",
+  "transition-all duration-200 ease-out",
+  "hover:-translate-y-0.5 hover:border-rose-300 hover:bg-rose-50 hover:shadow-[0_8px_20px_-8px_rgba(225,29,72,0.22)]",
+  "active:scale-[0.98] sm:text-sm sm:px-4",
+].join(" ");
+
 export const TD_PRIMARY_BUTTON_CLASS = [
   "rounded-xl bg-gradient-to-r from-[#1F6B52] to-[#2A7A5E]",
   "px-3.5 py-2 text-xs font-semibold text-white",

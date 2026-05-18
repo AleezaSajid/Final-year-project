@@ -10,6 +10,7 @@ import {
   dedupeConversationsByOrderId,
   getOrderChatConversationId,
   isOrderEligibleForChat,
+  isOrderRejected,
   logConversationRowsValidation,
   messageBelongsToOrderChat,
   normalizeChatId,
@@ -45,6 +46,7 @@ import {
   getTrackingStatus,
   getWorkflowIndex,
   isTailorCurrentTaskOrder,
+  isTailorMeasurementReviewOrder,
 } from "../../utils/workflowEngine.js";
 
 function isPlainOrderObject(v) {
@@ -614,6 +616,11 @@ export function useTailorDashboard() {
     [orders, activeTailorShopId]
   );
 
+  const currentTaskOrders = useMemo(
+    () => tailorOrders.filter((order) => isTailorCurrentTaskOrder(order)),
+    [tailorOrders]
+  );
+
   useEffect(() => {
     if (!activeTailorShopId) return;
     const shopId = String(activeTailorShopId).trim();
@@ -648,19 +655,21 @@ export function useTailorDashboard() {
   }, [activeTailorShopId, activeConversationId]);
 
   const activeOrder = useMemo(() => {
-    if (tailorOrders.length === 0) return null;
+    if (currentTaskOrders.length === 0) return null;
     const aid = String(activeOrderId ?? "").trim();
-    if (!aid) return tailorOrders[0];
+    if (!aid) return currentTaskOrders[0];
     return (
-      tailorOrders.find(
+      currentTaskOrders.find(
         (order) => String(order.id ?? order._id ?? "").trim() === aid
-      ) || tailorOrders[0]
+      ) || currentTaskOrders[0]
     );
-  }, [tailorOrders, activeOrderId]);
+  }, [currentTaskOrders, activeOrderId]);
 
   useEffect(() => {
-    if (!activeOrder && tailorOrders.length > 0) setActiveOrderId(tailorOrders[0].id);
-  }, [activeOrder, tailorOrders, setActiveOrderId]);
+    if (!activeOrder && currentTaskOrders.length > 0) {
+      setActiveOrderId(currentTaskOrders[0].id);
+    }
+  }, [activeOrder, currentTaskOrders, setActiveOrderId]);
 
   useEffect(() => {
     const current = profiles[activeTailorShopId] || {};
@@ -673,12 +682,8 @@ export function useTailorDashboard() {
 
   const stats = useMemo(() => {
     const total = tailorOrders.length;
-    const pending = tailorOrders.filter((o) => isPendingWorkflowStatus(resolveOrderWorkflowState(o).internalStatus)).length;
-    const inProgress = tailorOrders.filter((o) => {
-      const s = resolveOrderWorkflowState(o).internalStatus;
-      if (s === "completed") return false;
-      return WORKFLOW_NON_COMPLETED_STATUSES.has(s) && !isPendingWorkflowStatus(s);
-    }).length;
+    const pending = tailorOrders.filter((o) => isTailorMeasurementReviewOrder(o)).length;
+    const inProgress = tailorOrders.filter((o) => isTailorCurrentTaskOrder(o)).length;
     const completed = tailorOrders.filter((o) => resolveOrderWorkflowState(o).internalStatus === "completed").length;
     return { total, pending, inProgress, completed };
   }, [tailorOrders]);
@@ -731,6 +736,7 @@ export function useTailorDashboard() {
       orders.filter(
         (order) =>
           String(order.tailorId ?? "").trim() === String(activeTailorShopId).trim() &&
+          !isOrderRejected(order) &&
           resolveOrderWorkflowState(order).internalStatus !== "completed"
       ),
     [orders, activeTailorShopId]
@@ -740,7 +746,7 @@ export function useTailorDashboard() {
     const nowMs = Date.now();
     const oneDayMs = 24 * 60 * 60 * 1000;
     return tailorOrders
-      .filter((order) => isPendingWorkflowStatus(resolveOrderWorkflowState(order).internalStatus))
+      .filter((order) => isTailorMeasurementReviewOrder(order))
       .filter((order) => {
         const orderTime = new Date(order.createdAt || order.date).getTime();
         return Number.isFinite(orderTime) && nowMs - orderTime <= oneDayMs;
@@ -990,6 +996,99 @@ export function useTailorDashboard() {
     [activeTailorShopId, fetchOrders, fetchTailorConversations, orders]
   );
 
+  const rejectOrderFromPending = useCallback(
+    async (orderId, orderHint = null, rejectionReason = "") => {
+      const tailorId = String(activeTailorShopId || "").trim();
+      const oid = String(orderId ?? "").trim();
+      if (!tailorId || !oid) return false;
+
+      const rejectedAtIso = new Date().toISOString();
+      const reasonText = String(rejectionReason || "").trim().slice(0, 500);
+      const rejectPatch = {
+        status: "rejected",
+        workflowStatus: "rejected",
+        isActive: false,
+        chatEnabled: false,
+        acceptedAt: null,
+        rejectedAt: rejectedAtIso,
+        rejectedBy: tailorId,
+        rejectionReason: reasonText,
+      };
+
+      setOrders((prev) => {
+        const exists = prev.some((o) => orderMatchesId(o, oid));
+        if (!exists) return prev;
+        return prev.map((o) =>
+          orderMatchesId(o, oid)
+            ? toStoreOrder(mergeOrderPatch(o, rejectPatch))
+            : o
+        );
+      });
+
+      const existingRow =
+        orders.find((o) => orderMatchesId(o, oid)) ||
+        (orderHint && typeof orderHint === "object" ? orderHint : null);
+
+      try {
+        const updated = await patchOrderWizardFields(
+          oid,
+          {
+            action: "reject_order",
+            tailorId,
+            ...rejectPatch,
+          },
+          { operation: "Reject order" }
+        );
+        const merged = toStoreOrder(
+          mergeOrderPatch(existingRow || { id: oid }, {
+            ...(updated && typeof updated === "object" ? updated : {}),
+            ...rejectPatch,
+            status: "rejected",
+            workflowStatus: "rejected",
+          })
+        );
+        setOrders((prev) => {
+          const exists = prev.some((o) => orderMatchesId(o, oid));
+          if (!exists) return [merged, ...prev];
+          return prev.map((o) => (orderMatchesId(o, oid) ? merged : o));
+        });
+        if (String(activeOrderId ?? "").trim() === oid) {
+          setActiveOrderId(null);
+        }
+        setTailorChatConversations((prev) =>
+          (Array.isArray(prev) ? prev : []).map((r) =>
+            normalizeConversationId(r?.orderId ?? r?.conversationId) === normalizeConversationId(oid)
+              ? { ...r, status: "rejected" }
+              : r
+          )
+        );
+        window.dispatchEvent(new CustomEvent("sewserve:orders-refresh"));
+        void fetchTailorConversations();
+        setNotifications((prev) => [
+          reasonText ? `Order request declined: ${reasonText}.` : "Order request declined.",
+          ...prev,
+        ]);
+        return true;
+      } catch (e) {
+        console.error("REJECT ORDER ERROR", e);
+        await fetchOrders();
+        const msg =
+          (e && typeof e === "object" && "message" in e && e.message ? String(e.message) : "") ||
+          "Could not reject the order right now.";
+        setNotifications((prev) => [msg, ...prev]);
+        return false;
+      }
+    },
+    [
+      activeTailorShopId,
+      activeOrderId,
+      fetchOrders,
+      fetchTailorConversations,
+      orders,
+      orderMatchesId,
+    ]
+  );
+
   const advanceWorkflow = async () => {
     if (!activeOrder) return;
     setIsAdvancing(true);
@@ -1149,18 +1248,32 @@ export function useTailorDashboard() {
 
   const currentTaskLines = useMemo(() => {
     const lines = [];
-    const pend = tailorOrders.filter((o) => isPendingWorkflowStatus(resolveOrderWorkflowState(o).internalStatus));
+    const pend = tailorOrders.filter(
+      (o) =>
+        !isOrderRejected(o) &&
+        isPendingWorkflowStatus(resolveOrderWorkflowState(o).internalStatus)
+    );
     if (pend[0]) {
       lines.push(
         `Finish ${pend[0].customerName} ${pend[0].garmentType} — Due ${pend[0].dueDate || pend[0].date || "soon"}`
       );
     }
-    const any = tailorOrders.find((o) => resolveOrderWorkflowState(o).internalStatus !== "completed");
+    const any = tailorOrders.find(
+      (o) =>
+        !isOrderRejected(o) &&
+        resolveOrderWorkflowState(o).internalStatus !== "completed" &&
+        isTailorCurrentTaskOrder(o)
+    );
     if (any && lines.length < 2) {
       lines.push(`Review ${any.customerName} request — Awaiting approval`);
     }
-    if (lines.length < 2 && tailorOrders[0]) {
-      lines.push(`${tailorOrders[0].garmentType} for ${tailorOrders[0].customerName} — in workflow`);
+    if (lines.length < 2) {
+      const fallback = tailorOrders.find(
+        (o) => !isOrderRejected(o) && isTailorCurrentTaskOrder(o)
+      );
+      if (fallback) {
+        lines.push(`${fallback.garmentType} for ${fallback.customerName} — in workflow`);
+      }
     }
     return lines.slice(0, 2);
   }, [tailorOrders]);
@@ -1168,25 +1281,22 @@ export function useTailorDashboard() {
   const calendarPreview = useMemo(
     () =>
       [...tailorOrders]
+        .filter((o) => !isOrderRejected(o))
         .filter((o) => resolveOrderWorkflowState(o).internalStatus !== "completed")
+        .filter((o) => isTailorCurrentTaskOrder(o))
         .filter((o) => o.dueDate || o.date)
         .sort((a, b) => String(a.dueDate || a.date).localeCompare(String(b.dueDate || b.date)))
         .slice(0, 2),
     [tailorOrders]
   );
 
-  /** Same top orders as “Current Tasks”, limited to statuses that still need measurement/wizard review. */
+  /** Pending approval requests only (excludes rejected and active current tasks). */
   const measurementsCandidates = useMemo(() => {
     const list = Array.isArray(orders) ? orders : [];
-    const needsReview = (o) => {
-      const s = resolveOrderWorkflowState(o).internalStatus;
-      return s === "pending" || s === "order_placed" || s === "measurements_verified";
-    };
-    const topCurrent = [...list]
-      .filter(orderIsActiveCurrentTask)
+    return [...list]
+      .filter((o) => isTailorMeasurementReviewOrder(o))
       .sort((a, b) => getPriorityScore(a) - getPriorityScore(b))
       .slice(0, TAILOR_CURRENT_TASKS_VISIBLE_MAX);
-    return topCurrent.filter(needsReview);
   }, [orders]);
 
   const donutGradient = useMemo(() => {
@@ -1268,12 +1378,14 @@ export function useTailorDashboard() {
     tailorChatConversations,
     fetchTailorConversations,
     tailorOrders,
+    currentTaskOrders,
     activeOrder,
     upcomingOrders,
     newOrders,
     fetchOrders,
     updateOrderStatus,
     acceptOrderIntoCurrentTasks,
+    rejectOrderFromPending,
     advanceWorkflow,
     handleWorkflowStageClick,
     openChatForOrder,

@@ -18,6 +18,7 @@ import {
 
 import { SiFacebook, SiInstagram, SiPinterest, SiWhatsapp } from "react-icons/si";
 import LandingNavbar from "./components/LandingNavbar.jsx";
+import LandingHeroSection from "./components/landing/LandingHeroSection.jsx";
 import HowItWorksSplitSection from "./components/HowItWorksSplitSection.jsx";
 import { useSewServeLogoProcessedSrc } from "./hooks/useSewServeLogoProcessedSrc";
 import { fetchTestimonials } from "./api/testimonialsApi.js";
@@ -29,33 +30,9 @@ const navLinks = [
   { label: "Contact", sectionId: "contact" },
 ];
 
-/** Hero imagery — local assets from /public/images/hero/ */
-const HERO_IMAGE_SEWING = `${process.env.PUBLIC_URL || ""}/images/hero/sewingmachine.png`;
-const HERO_IMAGE_MANNEQUIN = `${process.env.PUBLIC_URL || ""}/images/hero/mannequin.png`;
 const LOGO_SRC = `${process.env.PUBLIC_URL || ""}/images/hero/sewserve-logo.png`;
 
-function HeroWaveDivider() {
-  return (
-    <div
-      className="pointer-events-none absolute inset-x-0 bottom-0 z-[1] w-full leading-none text-white/50"
-      aria-hidden="true"
-    >
-      <svg
-        className="block h-[52px] w-full sm:h-[72px] md:h-[88px]"
-        viewBox="0 0 1440 120"
-        preserveAspectRatio="none"
-        xmlns="http://www.w3.org/2000/svg"
-      >
-        <path
-          fill="currentColor"
-          d="M0,64L60,58.7C120,53,240,43,360,48C480,53,600,75,720,74.7C840,75,960,53,1080,42.7C1200,32,1320,32,1380,32L1440,32L1440,120L1380,120C1320,120,1200,120,1080,120C960,120,840,120,720,120C600,120,480,120,360,120C240,120,120,120,60,120L0,120Z"
-        />
-      </svg>
-    </div>
-  );
-}
-
-/** Marketing value props (moved from hero) — shown with icon tiles in Features */
+/** Marketing value props (moved from hero) â€” shown with icon tiles in Features */
 const valueProps = [
   { label: "Custom Alterations", icon: Scissors },
   { label: "Expert Tailors", icon: UsersRound },
@@ -63,6 +40,25 @@ const valueProps = [
   { label: "Fast", icon: Zap },
   { label: "Reliable", icon: BadgeCheck },
   { label: "Professional Tailoring Platform", icon: Briefcase },
+];
+
+/** Premium hero highlights â€” glass cards below CTAs */
+const heroHighlights = [
+  {
+    title: "Expert Tailors",
+    description: "Verified local professionals you can trust.",
+    icon: UsersRound,
+  },
+  {
+    title: "Real-Time Tracking",
+    description: "Live updates from stitch to delivery.",
+    icon: MapPinned,
+  },
+  {
+    title: "At-Home Measurements",
+    description: "Guided digital fitting at your pace.",
+    icon: Ruler,
+  },
 ];
 
 const features = [
@@ -226,7 +222,7 @@ export default function SewServeLandingPage() {
   };
 
   return (
-    <div className="relative isolate min-h-screen bg-transparent text-slate-600 antialiased">
+    <div className="relative isolate min-h-screen bg-transparent text-[#3d5a73] antialiased">
       <style>
         {`
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
@@ -246,7 +242,7 @@ export default function SewServeLandingPage() {
 .ss-nav-underline:hover::after,
 .ss-nav-underline:focus-visible::after { width: 100%; }
 
-/* Full-viewport animated wash — sits at z-0 inside isolated root; never blocks pointer events */
+/* Full-viewport animated wash â€” sits at z-0 inside isolated root; never blocks pointer events */
 .ss-page-bg-anim {
   position: fixed;
   inset: 0;
@@ -254,16 +250,16 @@ export default function SewServeLandingPage() {
   pointer-events: none;
   overflow: hidden;
   background:
-    radial-gradient(ellipse 100% 80% at 10% 0%, rgba(167, 243, 208, 0.5), transparent 55%),
-    radial-gradient(ellipse 90% 70% at 95% 15%, rgba(186, 230, 253, 0.52), transparent 52%),
-    radial-gradient(ellipse 85% 60% at 50% 100%, rgba(216, 180, 254, 0.38), transparent 55%),
-    radial-gradient(ellipse 60% 50% at 70% 55%, rgba(226, 232, 240, 0.45), transparent 50%),
-    linear-gradient(180deg, #eef2f7 0%, #e2e8f0 35%, #f1f5f9 70%, #f8fafc 100%);
+    radial-gradient(ellipse 95% 75% at 8% 4%, rgba(186, 230, 217, 0.62), transparent 58%),
+    radial-gradient(ellipse 88% 68% at 92% 12%, rgba(186, 215, 245, 0.58), transparent 54%),
+    radial-gradient(ellipse 80% 55% at 50% 98%, rgba(255, 248, 235, 0.72), transparent 58%),
+    radial-gradient(ellipse 55% 45% at 68% 48%, rgba(232, 247, 243, 0.45), transparent 52%),
+    linear-gradient(165deg, #e8f7f2 0%, #e4eff9 42%, #faf8f4 78%, #fcfaf7 100%);
   background-size: 140% 140%;
   animation: ss-bg-gradient-drift 52s ease-in-out infinite alternate;
-  filter: blur(28px) brightness(1.06);
+  filter: blur(22px) brightness(1.04);
 }
-/* Far depth — soft vignette for separation from mid layers */
+/* Far depth â€” soft vignette for separation from mid layers */
 .ss-page-bg-anim::after {
   content: "";
   position: absolute;
@@ -278,7 +274,7 @@ export default function SewServeLandingPage() {
   100% { background-position: 30% 100%; }
 }
 
-/* Apple-style frosted panels — sections / chrome (low fill, strong blur + saturation) */
+/* Apple-style frosted panels â€” sections / chrome (low fill, strong blur + saturation) */
 .ss-glass-surface {
   background: linear-gradient(180deg, rgba(255, 255, 255, 0.22) 0%, rgba(255, 255, 255, 0.08) 100%);
   -webkit-backdrop-filter: blur(28px) saturate(180%);
@@ -286,7 +282,7 @@ export default function SewServeLandingPage() {
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.35), 0 1px 2px rgba(15, 23, 42, 0.04);
 }
 
-/* Product cards — same backdrop layer as Measurement Wizard (soft fog, low contrast) */
+/* Product cards â€” same backdrop layer as Measurement Wizard (soft fog, low contrast) */
 .ss-glass-card {
   border: 1px solid rgba(255, 255, 255, 0.35);
   background: linear-gradient(160deg, rgba(255, 255, 255, 0.28) 0%, rgba(255, 255, 255, 0.08) 100%);
@@ -301,178 +297,6 @@ export default function SewServeLandingPage() {
   background: linear-gradient(160deg, rgba(255, 255, 255, 0.32) 0%, rgba(255, 255, 255, 0.1) 100%);
 }
 
-/* Hero — mid depth: soft fog behind copy only (center column) */
-.hero-mid-depth-fog {
-  pointer-events: none;
-  position: absolute;
-  inset: -12% -8% -8%;
-  z-index: 0;
-  background: radial-gradient(circle at 50% 42%, rgba(74, 124, 89, 0.1), transparent 60%);
-}
-
-/* Hero — center spotlight (background layer only; no box/card) */
-.hero-focal-spotlight {
-  pointer-events: none;
-  position: absolute;
-  left: 50%;
-  top: clamp(0.5rem, 12vw, 3.5rem);
-  z-index: 1;
-  width: min(130%, 32rem);
-  height: min(46vh, 20rem);
-  transform: translateX(-50%);
-  background: radial-gradient(
-    ellipse 68% 58% at 50% 36%,
-    rgba(134, 239, 172, 0.11) 0%,
-    rgba(147, 197, 253, 0.09) 38%,
-    rgba(255, 255, 255, 0.03) 55%,
-    transparent 72%
-  );
-  filter: blur(22px);
-}
-
-/* Hero — cinematic studio focus (H1 + CTA zone); sits above fog, below type */
-.hero-cinematic-focus {
-  pointer-events: none;
-  position: absolute;
-  left: 50%;
-  top: clamp(5rem, 28vh, 12rem);
-  z-index: 2;
-  width: min(150%, 40rem);
-  height: min(58vh, 26rem);
-  transform: translate(-50%, -42%);
-  background: radial-gradient(
-    ellipse 58% 50% at 50% 48%,
-    rgba(74, 124, 89, 0.18) 0%,
-    rgba(59, 130, 246, 0.1) 42%,
-    transparent 72%
-  );
-  filter: blur(72px);
-  opacity: 0.88;
-}
-
-/* Hero — soft edge mask (shared); softer falloff to transparent ~90% */
-.hero-img-mask-vision {
-  mask-image: radial-gradient(
-    ellipse 68% 82% at 50% 48%,
-    #000 0%,
-    #000 5%,
-    rgba(0, 0, 0, 0.55) 38%,
-    rgba(0, 0, 0, 0.18) 72%,
-    transparent 90%
-  );
-  -webkit-mask-image: radial-gradient(
-    ellipse 68% 82% at 50% 48%,
-    #000 0%,
-    #000 5%,
-    rgba(0, 0, 0, 0.55) 38%,
-    rgba(0, 0, 0, 0.18) 72%,
-    transparent 90%
-  );
-  mask-mode: alpha;
-}
-
-/* Hero — float + contrast + cinematic ground shadow (applied to img) */
-.hero-floating-img {
-  transform-origin: 50% 60%;
-  box-shadow: 0 30px 80px rgba(0, 0, 0, 0.12);
-  filter:
-    contrast(1.08)
-    drop-shadow(0 28px 56px rgba(15, 23, 42, 0.12))
-    drop-shadow(0 42px 72px rgba(20, 90, 55, 0.08))
-    drop-shadow(0 4px 2px rgba(255, 255, 255, 0.05));
-}
-.hero-floating-img--L {
-  animation: hero-float-L 7s ease-in-out infinite;
-}
-.hero-floating-img--R {
-  animation: hero-float-R 7s ease-in-out infinite;
-}
-@keyframes hero-float-L {
-  0%, 100% { transform: translateY(-8px) scale(1.04); }
-  50% { transform: translateY(0) scale(1.04); }
-}
-@keyframes hero-float-R {
-  0%, 100% { transform: translateY(0) scale(1.04); }
-  50% { transform: translateY(-8px) scale(1.04); }
-}
-
-/* Mannequin hero — curved ground shadow (bottom only, elliptical) */
-.hero-mannequin-wrap {
-  position: relative;
-  display: inline-block;
-  max-width: 100%;
-}
-.hero-mannequin-wrap .hero-floating-img {
-  position: relative;
-  z-index: 1;
-}
-.hero-mannequin-bottom-shadow {
-  position: absolute;
-  left: 50%;
-  bottom: clamp(-10px, -2vw, -4px);
-  z-index: 0;
-  width: min(88%, 22rem);
-  height: clamp(22px, 5vw, 40px);
-  transform: translateX(-50%);
-  pointer-events: none;
-  border-radius: 50%;
-  background: radial-gradient(
-    ellipse 100% 100% at 50% 0%,
-    rgba(15, 23, 42, 0.34) 0%,
-    rgba(15, 23, 42, 0.16) 38%,
-    rgba(15, 23, 42, 0.06) 58%,
-    transparent 72%
-  );
-  filter: blur(12px);
-  opacity: 0.95;
-}
-
-/* Hero — CTA: inner highlight + green glow + sweep (structure unchanged) */
-.hero-cta {
-  position: relative;
-  overflow: hidden;
-  box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.32),
-    inset 2px 3px 12px rgba(255, 255, 255, 0.12),
-    0 6px 28px rgba(34, 110, 72, 0.38),
-    0 2px 12px rgba(20, 70, 45, 0.22);
-}
-.hero-cta::before {
-  content: "";
-  position: absolute;
-  inset: 0;
-  z-index: 0;
-  border-radius: inherit;
-  background:
-    radial-gradient(ellipse 90% 70% at 18% 12%, rgba(255, 255, 255, 0.35) 0%, transparent 52%),
-    linear-gradient(175deg, rgba(255, 255, 255, 0.1) 0%, transparent 45%);
-  pointer-events: none;
-}
-.hero-cta::after {
-  content: "";
-  position: absolute;
-  inset: 0;
-  z-index: 1;
-  border-radius: inherit;
-  background: linear-gradient(
-    105deg,
-    transparent 0%,
-    transparent 38%,
-    rgba(255, 255, 255, 0.32) 50%,
-    transparent 62%,
-    transparent 100%
-  );
-  transform: translateX(-130%);
-  transition: transform 0.75s cubic-bezier(0.4, 0, 0.2, 1);
-  pointer-events: none;
-}
-.hero-cta:hover::after {
-  transform: translateX(130%);
-}
-.hero-cta > span {
-  position: relative;
-  z-index: 2;
-}
 `}
       </style>
 
@@ -486,121 +310,16 @@ export default function SewServeLandingPage() {
       />
 
       <div className="relative z-10 min-h-screen font-['Inter',sans-serif]">
-        {/* Hero: full-bleed background + wave; content max-width centered */}
-        <div className="relative isolate overflow-hidden border-b border-white/25 bg-white/[0.06] backdrop-blur-xl">
-          {/* Mid-depth ambient blobs — studio tint behind hero columns */}
-          <div
-            className="pointer-events-none absolute -left-36 top-[12%] h-[min(26rem,88vw)] w-[min(26rem,88vw)] rounded-full bg-emerald-400/12 blur-[2.75rem]"
-            aria-hidden="true"
-          />
-          <div
-            className="pointer-events-none absolute -right-36 top-[12%] h-[min(26rem,88vw)] w-[min(26rem,88vw)] rounded-full bg-sky-400/13 blur-[2.75rem]"
-            aria-hidden="true"
-          />
-          <div
-            className="pointer-events-none absolute bottom-[22%] left-1/3 h-56 w-56 rounded-full bg-violet-200/12 blur-3xl"
-            aria-hidden="true"
-          />
-
-          <section
-            id="home"
-            className="relative z-10 mx-auto flex min-h-[calc(100dvh-5.5rem)] w-full max-w-7xl flex-col justify-center px-4 pt-12 pb-24 sm:px-6 sm:pt-16 sm:pb-28 md:min-h-[calc(100dvh-6rem)] md:pb-32 lg:min-h-[calc(100dvh-5rem)] lg:px-10 lg:pb-40"
-          >
-            <div className="grid items-center gap-14 lg:grid-cols-3 lg:gap-12 xl:gap-14">
-              {/* Left image — leads sequence; strong boom, then copy animates in */}
-              <div className="relative z-[4] order-2 flex min-h-0 w-full min-w-0 origin-center scale-[0.96] items-center justify-center self-center py-3 sm:py-4 md:py-5 lg:order-none lg:min-h-0 lg:scale-100 lg:self-stretch lg:py-0">
-                <motion.div
-                  initial={{ opacity: 0, scale: 0.75, y: 80 }}
-                  animate={{ opacity: 1, scale: 1, y: 0 }}
-                  transition={{ duration: 0.8, ease: "easeOut" }}
-                  whileHover={{ scale: 1.03, transition: { duration: 0.25, ease: "easeOut" } }}
-                  className="origin-center will-change-transform"
-                >
-                  <img
-                    src={HERO_IMAGE_SEWING}
-                    alt="Vintage sewing machine and tailoring tools"
-                    width={720}
-                    height={900}
-                    loading="eager"
-                    decoding="async"
-                    fetchPriority="high"
-                    className="hero-floating-img hero-floating-img--L hero-img-mask-vision mx-auto h-[192px] w-[168px] shrink-0 select-none object-cover object-center opacity-[0.88] sm:h-[208px] sm:w-[184px] md:h-[228px] md:w-[208px] lg:h-[min(420px,52vh)] lg:w-full lg:max-w-[min(100%,28rem)] lg:opacity-100"
-                  />
-                </motion.div>
-              </div>
-
-              <div className="relative z-[6] order-1 mx-auto flex min-w-0 w-full max-w-lg flex-col items-center text-center lg:order-none">
-                <div className="hero-mid-depth-fog" aria-hidden="true" />
-                <div className="hero-focal-spotlight" aria-hidden="true" />
-                <div className="hero-cinematic-focus" aria-hidden="true" />
-                <div className="relative z-[12] flex w-full justify-center px-3">
-                  <motion.h1
-                    initial={{ opacity: 0, y: 40 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    transition={{ duration: 0.6, delay: 0.4, ease: "easeOut" }}
-                    className="inline-block max-w-none text-center font-['Playfair_Display',Georgia,serif] text-[clamp(1.25rem,4.25vw,2.5rem)] font-bold leading-[1.2] tracking-[-0.02em] whitespace-nowrap drop-shadow-[0_2px_3px_rgba(0,0,0,0.07)]"
-                  >
-                    <span className="bg-gradient-to-b from-[#070b14] to-[#1e293b] bg-clip-text text-transparent">
-                      Crafted for the Perfect Fit
-                    </span>
-                  </motion.h1>
-                </div>
-                <motion.p
-                  initial={{ opacity: 0, y: 40 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  transition={{ duration: 0.6, delay: 0.52, ease: "easeOut" }}
-                  className="relative z-[12] mx-auto mt-8 max-w-lg text-base font-normal leading-[1.6] tracking-[0.01em] text-ink-muted sm:text-[1rem]"
-                >
-                  From measurement to delivery, experience a seamless tailoring journey designed around you.
-                </motion.p>
-                <motion.div
-                  initial={{ opacity: 0, y: 40 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  transition={{ duration: 0.6, delay: 1.0, ease: "easeOut" }}
-                  className="relative z-[12] mt-11 flex justify-center"
-                >
-                  <button
-                    type="button"
-                    onClick={goToMeasurementWizard}
-                    aria-label="Book a fitting — open measurement wizard"
-                    className="hero-cta rounded-apple bg-gradient-to-b from-[#4a7c59] to-[#355542] px-[18px] py-2.5 text-base font-semibold text-white transition-all duration-200 ease-out hover:-translate-y-1 hover:brightness-[1.04] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-600/45 focus-visible:ring-offset-2"
-                  >
-                    <span className="relative z-10">Book a Fitting</span>
-                  </button>
-                </motion.div>
-              </div>
-
-              <div className="relative z-[4] order-3 flex min-h-0 w-full min-w-0 origin-center scale-[0.96] items-center justify-center self-center py-3 sm:py-4 md:py-5 lg:order-none lg:min-h-0 lg:scale-100 lg:self-stretch lg:py-0">
-                <motion.div
-                  initial={{ opacity: 0, scale: 0.75, y: 80 }}
-                  animate={{ opacity: 1, scale: 1, y: 0 }}
-                  transition={{ duration: 0.8, ease: "easeOut" }}
-                  whileHover={{ scale: 1.03, transition: { duration: 0.25, ease: "easeOut" } }}
-                  className="hero-mannequin-wrap hero-floating-img--R mx-auto origin-center will-change-transform"
-                >
-                  <img
-                    src={HERO_IMAGE_MANNEQUIN}
-                    alt="Tailored suit on a dress form with measuring tape"
-                    width={720}
-                    height={900}
-                    loading="eager"
-                    decoding="async"
-                    fetchPriority="high"
-                    className="hero-floating-img hero-img-mask-vision mx-auto h-[192px] w-[168px] shrink-0 select-none object-cover object-center opacity-[0.88] sm:h-[208px] sm:w-[184px] md:h-[228px] md:w-[208px] lg:h-[min(420px,52vh)] lg:w-full lg:max-w-[min(100%,28rem)] lg:opacity-100"
-                  />
-                  <span className="hero-mannequin-bottom-shadow" aria-hidden />
-                </motion.div>
-              </div>
-            </div>
-          </section>
-
-          <HeroWaveDivider />
-        </div>
+        <LandingHeroSection
+          heroHighlights={heroHighlights}
+          goToMeasurementWizard={goToMeasurementWizard}
+          onExploreTailors={() => navigate("/browse-tailors")}
+        />
 
         {/* Features Section */}
         <motion.section
           id="about"
-          className="ss-glass-surface relative z-[2] -mt-14 border-t border-white/30 py-[72px] shadow-[0_-16px_48px_-20px_rgba(15,23,42,0.1),0_24px_64px_-28px_rgba(15,23,42,0.1)] sm:-mt-[4.5rem] sm:py-20 md:-mt-20 md:py-[88px]"
+          className="ss-glass-surface relative z-[2] mt-5 border-t border-white/35 py-20 shadow-[0_-16px_48px_-20px_rgba(26,53,88,0.1),0_24px_64px_-28px_rgba(26,53,88,0.08)] sm:mt-7 sm:py-24 md:mt-10 md:py-28"
           variants={sectionReveal}
           initial="hidden"
           whileInView="visible"
@@ -608,8 +327,8 @@ export default function SewServeLandingPage() {
         >
           <div className="mx-auto w-full max-w-7xl px-4 sm:px-6 lg:px-8">
             <div className="mx-auto max-w-2xl text-center">
-              <h2 className="text-apple-h2 font-semibold tracking-tight text-ink">Features</h2>
-              <p className="mt-2.5 text-base leading-[1.6] text-ink-muted">
+              <h2 className="font-['Playfair_Display',Georgia,serif] text-3xl font-bold tracking-tight text-[#1a3558] sm:text-4xl">Features</h2>
+              <p className="mt-3 text-base leading-[1.65] text-[#5a7a92]">
                 Everything you need to simplify tailoring, from measurement to final delivery.
               </p>
             </div>
@@ -670,7 +389,7 @@ export default function SewServeLandingPage() {
         {/* Testimonials Section */}
         <motion.section
           id="testimonials"
-          className="ss-glass-surface relative z-[1] border-t border-white/25 py-[72px] shadow-[0_20px_56px_-24px_rgba(15,23,42,0.1)] sm:py-20 md:py-[88px]"
+          className="ss-glass-surface relative z-[1] border-t border-white/30 py-20 shadow-[0_20px_56px_-24px_rgba(26,53,88,0.08)] sm:py-24 md:py-28"
           variants={sectionReveal}
           initial="hidden"
           whileInView="visible"
@@ -678,8 +397,8 @@ export default function SewServeLandingPage() {
         >
           <div className="mx-auto w-full max-w-7xl px-4 sm:px-6 lg:px-8">
             <div className="mx-auto max-w-2xl text-center">
-              <h2 className="text-apple-h2 font-semibold tracking-tight text-ink">Testimonials</h2>
-              <p className="mt-2.5 text-base leading-[1.6] text-ink-muted">
+              <h2 className="font-['Playfair_Display',Georgia,serif] text-3xl font-bold tracking-tight text-[#1a3558] sm:text-4xl">Testimonials</h2>
+              <p className="mt-3 text-base leading-[1.65] text-[#5a7a92]">
                 Hear what our customers say about their SewServe tailoring experience.
               </p>
             </div>
@@ -721,12 +440,12 @@ export default function SewServeLandingPage() {
           />
           <div className="relative z-10 mx-auto w-full max-w-7xl px-4 sm:px-6 lg:px-8">
             <div className="grid grid-cols-1 gap-10 text-left lg:grid-cols-4 lg:gap-0 lg:divide-x lg:divide-slate-200/40">
-              {/* Column 1 — Brand & socials */}
+              {/* Column 1 â€” Brand & socials */}
               <div className="flex flex-col gap-5 lg:pr-8">
                 <a
                   href="#home"
                   className="inline-flex w-fit shrink-0 items-center focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-emerald-600/30"
-                  aria-label="SewServe — home"
+                  aria-label="SewServe â€” home"
                 >
                   <img
                     src={logoDisplaySrc}
@@ -776,7 +495,7 @@ export default function SewServeLandingPage() {
                   </a>
                 </div>
                 <div className="border-t border-slate-200/50 pt-5">
-                  <p className="text-xs text-slate-600">© 2026 SewServe. All rights reserved.</p>
+                  <p className="text-xs text-slate-600">Â© 2026 SewServe. All rights reserved.</p>
                   <div className="mt-3 flex flex-col gap-2 text-xs text-slate-600">
                     <a
                       href="#"
@@ -794,7 +513,7 @@ export default function SewServeLandingPage() {
                 </div>
               </div>
 
-              {/* Column 2 — Quick Links */}
+              {/* Column 2 â€” Quick Links */}
               <div className="lg:px-8">
                 <h3 className="text-sm font-bold text-slate-800">Quick Links</h3>
                 <ul className="mt-4 space-y-2.5 text-sm text-slate-600">
@@ -807,7 +526,7 @@ export default function SewServeLandingPage() {
                   ].map((item) => (
                     <li key={item.label} className="flex gap-2">
                       <span className="text-slate-400" aria-hidden>
-                        •
+                        â€¢
                       </span>
                       <a
                         href={item.href}
@@ -820,14 +539,14 @@ export default function SewServeLandingPage() {
                 </ul>
               </div>
 
-              {/* Column 3 — Our Services */}
+              {/* Column 3 â€” Our Services */}
               <div className="lg:px-8">
                 <h3 className="text-sm font-bold text-slate-800">Our Services</h3>
                 <ul className="mt-4 space-y-2.5 text-sm text-slate-600">
                   {["Custom Tailoring", "Alterations", "Wedding Attire", "Bespoke Suits"].map((label) => (
                     <li key={label} className="flex gap-2">
                       <span className="text-slate-400" aria-hidden>
-                        •
+                        â€¢
                       </span>
                       <span>{label}</span>
                     </li>
@@ -835,7 +554,7 @@ export default function SewServeLandingPage() {
                 </ul>
               </div>
 
-              {/* Column 4 — Get in touch & newsletter */}
+              {/* Column 4 â€” Get in touch & newsletter */}
               <div className="lg:pl-8">
                 <h3 className="text-sm font-bold text-slate-800">Get in Touch</h3>
                 <ul className="mt-4 space-y-3 text-sm text-slate-600">

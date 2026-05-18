@@ -226,6 +226,13 @@ function StatusPill({ variant }) {
       </span>
     );
   }
+  if (variant === "rejected") {
+    return (
+      <span className="inline-flex rounded-full border border-rose-200/80 bg-rose-50/90 px-2.5 py-1 text-xs font-semibold text-rose-800 shadow-sm backdrop-blur-sm">
+        Request Declined
+      </span>
+    );
+  }
   return (
     <span
       className="inline-flex rounded-full px-2.5 py-1 text-xs font-semibold"
@@ -876,14 +883,37 @@ export default function CustomerDashboard() {
       );
     };
 
+    const onOrderRejected = (data) => {
+      if (!data?.orderId) return;
+      const oid = String(data.orderId);
+      console.log("[Customer Sync] orderRejected", oid);
+      setOrders((prev) =>
+        prev.map((o) =>
+          orderIdentity(o) === oid
+            ? mergeOrderPatch(o, {
+                status: "rejected",
+                workflowStatus: "rejected",
+                isActive: false,
+                chatEnabled: false,
+                rejectionReason: data.rejectionReason || "",
+                rejectedAt: data.rejectedAt || new Date().toISOString(),
+                rejectedBy: data.rejectedBy || "",
+              })
+            : o
+        )
+      );
+    };
+
     socket.on("order:new", onOrderNew);
     socket.on("measurement:updated", onMeasurementUpdated);
     socket.on("order:statusUpdated", onOrderStatusUpdated);
+    socket.on("orderRejected", onOrderRejected);
 
     return () => {
       socket.off("order:new", onOrderNew);
       socket.off("measurement:updated", onMeasurementUpdated);
       socket.off("order:statusUpdated", onOrderStatusUpdated);
+      socket.off("orderRejected", onOrderRejected);
     };
   }, [user]);
 

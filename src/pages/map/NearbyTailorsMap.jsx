@@ -2,7 +2,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { MapContainer, Marker, Popup, TileLayer, useMap } from "react-leaflet";
 import "leaflet/dist/leaflet.css";
-import { patchOrderWizardFields } from "../../api/ordersApi.js";
+import { getOrderById, patchOrderWizardFields } from "../../api/ordersApi.js";
+import { isOrderRejected } from "../../chatUtils.js";
 import { ensureSocketThen, socket } from "../../socket";
 import { fetchPublicTailors } from "../../api/tailorsPublicApi.js";
 import MapDashboardNav from "./components/MapDashboardNav";
@@ -94,6 +95,25 @@ function orderIdsMatch(a, b) {
   return String(a).trim() === String(b).trim();
 }
 
+function isRejectedStatusValue(st) {
+  const s = String(st || "")
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, "_");
+  return s === "rejected" || s === "declined";
+}
+
+function resolveTailorDisplayName(tailorId, catalog, lastRequest) {
+  const fromRef = lastRequest?.tailorName;
+  if (fromRef && String(fromRef).trim()) return String(fromRef).trim();
+  const tid = String(tailorId || "").trim();
+  if (!tid) return "the tailor";
+  const hit = (Array.isArray(catalog) ? catalog : []).find(
+    (t) => String(t.tailorShopId || "") === tid || String(t.id || "") === tid
+  );
+  return hit?.name || hit?.shopName || "the tailor";
+}
+
 function orderEventMatches(orderEvent, oid) {
   if (!orderEvent || !oid) return false;
   const o = String(oid).trim();
@@ -151,6 +171,7 @@ export default function NearbyTailorsMap() {
 
   const [apiTailors, setApiTailors] = useState([]);
   const [orderLiveHint, setOrderLiveHint] = useState("");
+  const [requestDeclinedNotice, setRequestDeclinedNotice] = useState(null);
   const redirectedRef = useRef(false);
   const lastMapTailorRequestRef = useRef(null);
 
@@ -297,6 +318,36 @@ export default function NearbyTailorsMap() {
   interestedTailorsRef.current = interestedTailors;
   matchStatusRef.current = matchStatus;
 
+  const clearLastMapTailorRequest = useCallback(async () => {
+    lastMapTailorRequestRef.current = null;
+    if (user?.id && user.role === "customer") {
+      try {
+        await putCustomerMeta(user, { lastMapTailorRequest: null });
+      } catch {
+        /* ignore */
+      }
+    }
+  }, [user]);
+
+  const applyOrderDeclined = useCallback(
+    ({ tailorId = "", rejectionReason = "" } = {}) => {
+      const tid = String(tailorId || lastMapTailorRequestRef.current?.tailorId || "").trim();
+      const reason = String(rejectionReason || "").trim();
+      const tailorName = resolveTailorDisplayName(
+        tid,
+        allTailorsRef.current,
+        lastMapTailorRequestRef.current
+      );
+      void clearLastMapTailorRequest();
+      setMatchStatus("idle");
+      setAssignSuccess(false);
+      setAssignError("");
+      setRequestDeclinedNotice({ tailorId: tid, tailorName, reason });
+      window.dispatchEvent(new CustomEvent("sewserve:orders-refresh"));
+    },
+    [clearLastMapTailorRequest]
+  );
+
   const selectTailorsSorted = useMemo(() => {
     if (!isSelectMode) return [];
     let list = allTailors.filter((t) => t.distanceKm <= SELECT_MODE_RADIUS_KM);
@@ -318,7 +369,10 @@ export default function NearbyTailorsMap() {
   }, [isSelectMode, wizardOrderId]);
 
   useEffect(() => {
-    if (!wizardOrderId) return;
+    if (!wizardOrderId) {
+      setRequestDeclinedNotice(null);
+      return;
+    }
     activeOrderIdRef.current = wizardOrderId;
     setOrderLiveHint("");
     let cancelled = false;
@@ -350,12 +404,23 @@ export default function NearbyTailorsMap() {
         setInterestedTailors([]);
         setSelectedId(null);
       }
+
+      try {
+        const order = await getOrderById(wizardOrderId);
+        if (cancelled || !order || !isOrderRejected(order)) return;
+        applyOrderDeclined({
+          tailorId: order.tailorId,
+          rejectionReason: order.rejectionReason,
+        });
+      } catch {
+        /* order fetch optional */
+      }
     })();
 
     return () => {
       cancelled = true;
     };
-  }, [wizardOrderId, user]);
+  }, [wizardOrderId, user, applyOrderDeclined]);
 
   /** Join order room + surface status updates on the map (same events as order tracking). */
   useEffect(() => {
@@ -378,7 +443,19 @@ export default function NearbyTailorsMap() {
         (data.fullOrder && data.fullOrder.status && String(data.fullOrder.status)) ||
         (data.patch && data.patch.status && String(data.patch.status)) ||
         "";
-      if (st) setOrderLiveHint(`Latest: ${st}`);
+      if (st) {
+        if (isRejectedStatusValue(st)) {
+          applyOrderDeclined({
+            tailorId: data.tailorId ?? data.fullOrder?.tailorId,
+            rejectionReason:
+              data.rejectionReason ??
+              data.fullOrder?.rejectionReason ??
+              data.patch?.rejectionReason,
+          });
+          return;
+        }
+        setOrderLiveHint(`Latest: ${st}`);
+      }
     };
 
     socket.on("order:statusUpdated", onOrderEvent);
@@ -391,16 +468,10 @@ export default function NearbyTailorsMap() {
     };
     const onRejected = (payload = {}) => {
       if (!payload || !orderEventMatches(payload, oid)) return;
-      const tid = String(payload.tailorId ?? "").trim();
-      if (tid) {
-        setInterestedTailors((prev) => {
-          const next = prev.filter((t) => String(t.id) !== tid);
-          // If no tailors remain after rejection, return to idle.
-          if (next.length === 0) setMatchStatus("idle");
-          return next;
-        });
-        setSelectedId((curr) => (curr && String(curr) === tid ? null : curr));
-      }
+      applyOrderDeclined({
+        tailorId: payload.tailorId,
+        rejectionReason: payload.rejectionReason,
+      });
     };
     socket.on("orderAccepted", onAccepted);
     socket.on("orderRejected", onRejected);
@@ -411,7 +482,7 @@ export default function NearbyTailorsMap() {
       socket.off("orderAccepted", onAccepted);
       socket.off("orderRejected", onRejected);
     };
-  }, [wizardOrderId, navigate]);
+  }, [wizardOrderId, navigate, applyOrderDeclined]);
 
   const listTailors = useMemo(() => {
     const list = [...interestedTailors];
@@ -528,6 +599,7 @@ export default function NearbyTailorsMap() {
       }
       setAssignBusy(true);
       setAssignError("");
+      setRequestDeclinedNotice(null);
       try {
         await patchOrderWizardFields(
           oid,
@@ -704,12 +776,38 @@ export default function NearbyTailorsMap() {
               </div>
             ) : null}
 
-            {!isSelectMode && wizardOrderId ? (
+            {!isSelectMode && wizardOrderId && requestDeclinedNotice ? (
+              <div
+                className="mt-6 rounded-apple-card border border-rose-200/70 bg-rose-50/80 px-4 py-3 text-rose-950 shadow-sm shadow-rose-900/5 backdrop-blur-md sm:px-5 sm:py-4"
+                role="status"
+              >
+                <p className="text-sm font-semibold">
+                  Your request was declined by {requestDeclinedNotice.tailorName}.
+                </p>
+                {requestDeclinedNotice.reason ? (
+                  <p className="mt-1 text-sm text-rose-900/90">
+                    Reason: {requestDeclinedNotice.reason}
+                  </p>
+                ) : null}
+                <button
+                  type="button"
+                  onClick={() => {
+                    setRequestDeclinedNotice(null);
+                    setMatchStatus("idle");
+                    setSelectedId(null);
+                  }}
+                  className="mt-3 rounded-xl border border-rose-200/80 bg-white/90 px-4 py-2 text-sm font-semibold text-rose-900 shadow-sm transition hover:bg-white focus:outline-none focus-visible:ring-2 focus-visible:ring-rose-400/40"
+                >
+                  Find another tailor
+                </button>
+              </div>
+            ) : null}
+
+            {!isSelectMode && wizardOrderId && !requestDeclinedNotice ? (
               <div
                 className="mt-6 rounded-apple-card border border-emerald-200/70 bg-emerald-50/85 px-4 py-3 text-emerald-950 shadow-sm sm:px-5 sm:py-4"
                 role="status"
               >
-              
                 {matchStatus === "confirmed" ? (
                   <div>
                     <p className="text-sm font-semibold">Request sent. Waiting for tailor acceptance.</p>

@@ -1,7 +1,5 @@
 import { motion } from "framer-motion";
 import { ArrowRight, Clock3, Home, Scissors, TrendingUp, UserPlus } from "lucide-react";
-import { useCallback } from "react";
-import { useNavigate } from "react-router-dom";
 import LandingNavbar from "../components/LandingNavbar";
 import { useSewServeLogoProcessedSrc } from "../hooks/useSewServeLogoProcessedSrc";
 
@@ -49,22 +47,17 @@ const stats = [
 const EMPOWER_PORTRAIT_SRC = `${process.env.PUBLIC_URL || ""}/${encodeURI("pakistani lady.png")}`;
 
 export default function EmpowerHer() {
-  const navigate = useNavigate();
   const heroImage = EMPOWER_PORTRAIT_SRC;
   const storyImage = EMPOWER_PORTRAIT_SRC;
   const logoSrc = `${process.env.PUBLIC_URL || ""}/images/hero/sewserve-logo.png`;
   const logoDisplaySrc = useSewServeLogoProcessedSrc(logoSrc);
 
-  const handleSectionNavigate = useCallback((sectionId) => {
+  const handleSectionNavigate = (sectionId) => {
     const section = document.getElementById(sectionId);
     if (section) {
       section.scrollIntoView({ behavior: "smooth" });
     }
-  }, []);
-
-  const goToTailorSignup = useCallback(() => {
-    navigate("/tailor-signup");
-  }, [navigate]);
+  };
 
   return (
     <div className="emp-page relative isolate min-h-screen bg-transparent text-slate-900">
@@ -754,7 +747,6 @@ export default function EmpowerHer() {
               <div className="emp-cta-row">
                 <button
                   type="button"
-                  onClick={goToTailorSignup}
                   className="emp-btn-premium inline-flex items-center gap-2 rounded-2xl bg-gradient-to-b from-[#3d6b4f] to-[#2d4f3c] px-7 py-3 text-[15px] font-semibold text-white transition duration-200 hover:brightness-110"
                 >
                   Join as Tailor Today
@@ -762,7 +754,6 @@ export default function EmpowerHer() {
                 </button>
                 <button
                   type="button"
-                  onClick={() => handleSectionNavigate("about")}
                   className="inline-flex items-center gap-2 rounded-2xl border border-slate-200/90 bg-white/60 px-5 py-3 text-[15px] font-semibold text-[#1e3a2f] shadow-sm backdrop-blur-sm transition hover:border-teal-200/80 hover:bg-white/90"
                 >
                   Learn More
@@ -909,7 +900,6 @@ export default function EmpowerHer() {
               <div className="mt-5 flex justify-center md:justify-start">
                 <button
                   type="button"
-                  onClick={goToTailorSignup}
                   className="emp-btn-premium inline-flex items-center gap-2 rounded-2xl bg-white px-8 py-3.5 text-[15px] font-bold text-[#0f2937] shadow-lg transition hover:bg-teal-50"
                 >
                   Become a Partner Tailor

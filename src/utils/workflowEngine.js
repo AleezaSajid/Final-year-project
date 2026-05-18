@@ -90,6 +90,7 @@ function socketEnumToInternal(raw, currentStepIndex) {
 
 export function normalizeWorkflowStatus(value) {
   let s = toSnake(value || "pending");
+  if (s === "rejected" || s === "declined" || s === "cancelled" || s === "canceled") return s;
   if (s === "accepted" || s === "active") return "accepted";
   if (s === "inprogress") s = "in_progress";
   if (s === "orderplaced" || s === "order_placed") s = "pending";
@@ -177,6 +178,53 @@ function isTailorTaskTerminal(order) {
   return TAILOR_TASK_TERMINAL.has(state.internalStatus) || TAILOR_TASK_TERMINAL.has(raw);
 }
 
+export function normalizeOrderStatusToken(value) {
+  return String(value ?? "")
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, "_");
+}
+
+const TAILOR_EXCLUDED_TASK_STATUSES = new Set([
+  "rejected",
+  "declined",
+  "cancelled",
+  "canceled",
+  "delivered",
+  "completed",
+]);
+
+const TAILOR_CURRENT_TASK_STATUSES = new Set([
+  "accepted",
+  "active",
+  "in_progress",
+  "processing",
+  "measurements_verified",
+  "stitching",
+  "quality_check",
+  "ready_for_delivery",
+  "last_review",
+  "needs_alteration",
+]);
+
+/** Terminal / declined — excluded from Current Tasks, Measurements, and in-progress counts. */
+export function isTailorOrderExcludedFromTasks(order) {
+  if (!order || typeof order !== "object") return true;
+  if (order.rejectedAt != null && String(order.rejectedAt).trim() !== "") return true;
+
+  const status = normalizeOrderStatusToken(order.status);
+  const wf = normalizeOrderStatusToken(order.workflowStatus);
+  const convSt = normalizeOrderStatusToken(
+    order.conversation?.status ?? order.conversationStatus
+  );
+
+  if (TAILOR_EXCLUDED_TASK_STATUSES.has(status)) return true;
+  if (TAILOR_EXCLUDED_TASK_STATUSES.has(wf)) return true;
+  if (convSt === "rejected" || convSt === "declined") return true;
+
+  return false;
+}
+
 export function isTailorActiveTask(order) {
   const input = order && typeof order === "object" ? order : {};
   const state = resolveWorkflowState(input);
@@ -186,11 +234,58 @@ export function isTailorActiveTask(order) {
   return raw === "accepted" || raw === "active" || raw === "in_progress" || raw === "processing";
 }
 
-/** Current Tasks: active/accepted work; excludes completed/cancelled/delivered. */
+/**
+ * Current Tasks: accepted in-progress work only.
+ * Requires isActive === true; excludes rejected/locked/pending/completed rows.
+ */
 export function isTailorCurrentTaskOrder(order) {
   if (!order || typeof order !== "object") return false;
-  if (isTailorTaskTerminal(order)) return false;
-  return isTailorActiveTask(order);
+  if (isTailorOrderExcludedFromTasks(order)) return false;
+  if (order.isActive !== true) return false;
+
+  const status = normalizeOrderStatusToken(order.status);
+  const wf = normalizeOrderStatusToken(order.workflowStatus);
+
+  if (
+    status === "pending" ||
+    status === "order_placed" ||
+    status === "awaiting_acceptance" ||
+    status === "awaiting_tailor_selection" ||
+    status === "draft"
+  ) {
+    return false;
+  }
+
+  if (TAILOR_CURRENT_TASK_STATUSES.has(status) || TAILOR_CURRENT_TASK_STATUSES.has(wf)) {
+    return true;
+  }
+
+  const internal = resolveWorkflowState(order).internalStatus;
+  if (TAILOR_EXCLUDED_TASK_STATUSES.has(internal)) return false;
+  if (internal === "pending" || internal === "order_placed") return false;
+  return TAILOR_CURRENT_TASK_STATUSES.has(internal);
+}
+
+/** Measurements to Review: pending tailor approval only (not rejected, not active work). */
+export function isTailorMeasurementReviewOrder(order) {
+  if (!order || typeof order !== "object") return false;
+  if (isTailorOrderExcludedFromTasks(order)) return false;
+  if (order.isActive === true) return false;
+  if (order.acceptedAt) return false;
+
+  const status = normalizeOrderStatusToken(order.status);
+  const wf = normalizeOrderStatusToken(order.workflowStatus);
+
+  const isPendingRequest = (s) =>
+    s === "pending" ||
+    s === "order_placed" ||
+    s === "awaiting_acceptance" ||
+    s === "awaiting_tailor_selection";
+
+  if (isPendingRequest(status) || isPendingRequest(wf)) return true;
+
+  const internal = resolveWorkflowState(order).internalStatus;
+  return internal === "pending" || internal === "order_placed";
 }
 
 const CUSTOMER_TRACK_SKIP = new Set(["draft", "awaiting_tailor_selection"]);

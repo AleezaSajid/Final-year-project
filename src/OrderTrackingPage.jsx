@@ -21,6 +21,7 @@ import {
   ORDER_WORKFLOW_STEPS,
 } from "./utils/orderWorkflow.js";
 import { getTrackingStatus, normalizeWorkflowStatus } from "./utils/workflowEngine.js";
+import { isOrderRejected } from "./chatUtils.js";
 
 const LOGO_SRC = `${process.env.PUBLIC_URL || ""}/images/hero/sewserve-logo.png`;
 
@@ -372,6 +373,11 @@ export default function OrderTrackingPage() {
   const isDone = useMemo(() => isOrderWorkflowCompleted(order), [order]);
   const activeIdx = useMemo(() => getWorkflowIndexFromOrder(order), [order]);
   const normStatus = useMemo(() => normalizeWorkflowStatus(order?.status), [order?.status]);
+  const orderRejected = useMemo(() => isOrderRejected(order), [order]);
+  const rejectionReason = useMemo(() => {
+    const r = order?.rejectionReason;
+    return typeof r === "string" && r.trim() ? r.trim() : "";
+  }, [order?.rejectionReason]);
 
   const customerDisplayName = useMemo(() => {
     if (!order) return "—";
@@ -503,6 +509,31 @@ export default function OrderTrackingPage() {
                 <div className="mt-12 text-center text-ink-muted">Loading…</div>
               ) : !order ? (
                 <div className="mt-12 text-center text-ink-muted">No active order found.</div>
+              ) : orderRejected ? (
+                <div className="mx-auto mt-10 max-w-xl rounded-apple-card border border-rose-200/70 bg-gradient-to-br from-rose-50/90 via-white/80 to-white/70 px-6 py-8 text-center shadow-[0_8px_30px_rgba(225,29,72,0.08)] backdrop-blur-sm lg:mt-12">
+                  <span className="inline-flex rounded-full border border-rose-200/80 bg-rose-50 px-3 py-1 text-xs font-semibold uppercase tracking-wide text-rose-800">
+                    Request Declined
+                  </span>
+                  <h2 className="mt-4 text-xl font-semibold text-ink">This request was declined</h2>
+                  <p className="mt-2 text-sm leading-relaxed text-ink-muted">
+                    {tailorDisplayName !== "—"
+                      ? `${tailorDisplayName} is unable to take this order right now.`
+                      : "The tailor is unable to take this order right now."}
+                  </p>
+                  {rejectionReason ? (
+                    <p className="mx-auto mt-4 max-w-md rounded-xl border border-rose-100/90 bg-white/70 px-4 py-3 text-sm text-rose-900/90">
+                      <span className="font-semibold">Note from tailor: </span>
+                      {rejectionReason}
+                    </p>
+                  ) : null}
+                  <button
+                    type="button"
+                    onClick={() => navigate("/browse-tailors")}
+                    className="mt-6 rounded-apple bg-[#3E704D] px-5 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-[#356645]"
+                  >
+                    Browse other tailors
+                  </button>
+                </div>
               ) : (
                 <>
                   <ul className="mx-auto mt-10 max-w-xl space-y-3 lg:mt-12">

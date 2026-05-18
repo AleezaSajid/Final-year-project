@@ -7,7 +7,7 @@
   } from "../../chatUtils.js";
   import { ensureSocketThen, socket } from "../../socket.js";
   import { notifyConversationRoomJoined, notifyConversationRoomLeft } from "../../conversationJoinRegistry.js";
-  import { Image as ImageIcon, Paperclip, Smile, Send } from "lucide-react";
+  import { Send } from "lucide-react";
   import "./chatThread.css";
 
   const formatTime = (timestamp) => {
@@ -306,31 +306,7 @@
             </div>
           ) : null}
           {theme === "whatsapp" ? (
-            <div className="flex items-end gap-1.5 rounded-2xl border border-slate-200/80 bg-white px-1.5 py-1.5 shadow-[0_2px_8px_rgba(15,23,42,0.08)] sm:gap-2">
-              <button
-                type="button"
-                className="shrink-0 rounded-lg p-2 text-slate-500 transition hover:bg-slate-100 hover:text-slate-700"
-                aria-label="Emoji"
-                disabled
-              >
-                <Smile className="h-5 w-5" />
-              </button>
-              <button
-                type="button"
-                className="shrink-0 rounded-lg p-2 text-slate-500 transition hover:bg-slate-100 hover:text-slate-700"
-                aria-label="Attach file"
-                disabled
-              >
-                <Paperclip className="h-5 w-5" />
-              </button>
-              <button
-                type="button"
-                className="shrink-0 rounded-lg p-2 text-slate-500 transition hover:bg-slate-100 hover:text-slate-700"
-                aria-label="Attach image"
-                disabled
-              >
-                <ImageIcon className="h-5 w-5" />
-              </button>
+            <div className="flex items-end gap-2 rounded-2xl border border-slate-200/80 bg-white px-2.5 py-1.5 shadow-[0_2px_8px_rgba(15,23,42,0.08)]">
               <textarea
                 rows={1}
                 value={inputValue}

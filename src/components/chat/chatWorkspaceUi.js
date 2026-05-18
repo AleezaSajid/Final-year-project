@@ -1,3 +1,5 @@
+import { isOrderRejected } from "../../chatUtils.js";
+
 /** Display-only helpers for WhatsApp-style chat workspaces (no business logic). */
 
 export function chatInitials(name) {
@@ -27,6 +29,21 @@ export function chatStatusBadge(conv, order) {
     .trim()
     .toLowerCase()
     .replace(/\s+/g, "_");
+
+  if (
+    isOrderRejected(order) ||
+    order?.rejectedAt ||
+    convSt === "rejected" ||
+    convSt === "declined" ||
+    raw === "rejected" ||
+    raw === "declined"
+  ) {
+    return {
+      label: "Declined",
+      className:
+        "rounded-md bg-rose-50/95 px-1.5 py-px text-[9px] font-medium text-rose-700/90 ring-1 ring-rose-200/80",
+    };
+  }
 
   if (order?.chatEnabled === false) {
     return {

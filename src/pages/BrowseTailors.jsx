@@ -1,6 +1,15 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useNavigate, useSearchParams } from "react-router-dom";
-import { ArrowRight, ChevronDown, Search, SlidersHorizontal } from "lucide-react";
+import {
+  ArrowRight,
+  BadgeCheck,
+  ChevronDown,
+  MapPin,
+  MousePointerClick,
+  Search,
+  SlidersHorizontal,
+} from "lucide-react";
+import "./browseTailors.css";
 import LandingNavbar from "../components/LandingNavbar";
 import { LandingStylePageBackground } from "../components/LandingStylePageBackground";
 import { useSewServeLogoProcessedSrc } from "../hooks/useSewServeLogoProcessedSrc";
@@ -20,6 +29,15 @@ import {
 } from "../data/browseTailorsMock";
 
 const LOGO_SRC = `${process.env.PUBLIC_URL || ""}/images/hero/sewserve-logo.png`;
+const TAILORS_PAGE_SIZE = 8;
+
+const SUPPORT_BENEFITS = [
+  { icon: BadgeCheck, label: "Verified Tailors" },
+  { icon: MapPin, label: "Nearby Experts" },
+  { icon: MousePointerClick, label: "Instant Requests" },
+];
+
+const HERO_STATS = ["500+ Tailors", "Verified Experts", "Fast Responses"];
 
 const navLinks = [
   { label: "Home", sectionId: "home" },
@@ -69,8 +87,23 @@ function quickLabelExperience(v) {
   return o?.label ?? "Experience";
 }
 
-const dropdownPill =
-  "inline-flex items-center gap-2 rounded-full border border-gray-200/90 bg-white/85 px-4 py-2.5 text-sm font-semibold text-slate-800 shadow-sm backdrop-blur-md transition-all duration-300 hover:border-emerald-200/80 hover:bg-white hover:shadow-md active:scale-95";
+function filterPillClass(isActive) {
+  return `browse-filter-pill${isActive ? " browse-filter-pill--active" : ""}`;
+}
+
+function BrowseSkeletonCard() {
+  return (
+    <li className="browse-skeleton-card" aria-hidden>
+      <div className="browse-skeleton-media" />
+      <div className="browse-skeleton-body">
+        <div className="browse-skeleton-line browse-skeleton-line--mid" />
+        <div className="browse-skeleton-line browse-skeleton-line--short" />
+        <div className="browse-skeleton-line" />
+        <div className="browse-skeleton-line browse-skeleton-line--short" />
+      </div>
+    </li>
+  );
+}
 
 export default function BrowseTailors() {
   const navigate = useNavigate();
@@ -88,6 +121,8 @@ export default function BrowseTailors() {
   const [requestFor, setRequestFor] = useState(null);
   const [tailorDataset, setTailorDataset] = useState([]);
   const [tailorLoadError, setTailorLoadError] = useState("");
+  const [tailorsLoading, setTailorsLoading] = useState(true);
+  const [visibleCount, setVisibleCount] = useState(TAILORS_PAGE_SIZE);
   const popoverRef = useRef(null);
   const urlHydrated = useRef(false);
 
@@ -98,15 +133,17 @@ export default function BrowseTailors() {
   useEffect(() => {
     let cancelled = false;
     (async () => {
+      setTailorsLoading(true);
       const { tailors, ok } = await fetchPublicTailors();
       if (cancelled) return;
       if (ok && Array.isArray(tailors)) {
         setTailorDataset(tailors);
         setTailorLoadError("");
-        return;
+      } else {
+        setTailorDataset([]);
+        setTailorLoadError("Could not load tailors right now. Please try again.");
       }
-      setTailorDataset([]);
-      setTailorLoadError("Could not load tailors right now. Please try again.");
+      setTailorsLoading(false);
     })();
     return () => {
       cancelled = true;
@@ -219,6 +256,25 @@ export default function BrowseTailors() {
     return list;
   }, [filtered, sortBy]);
 
+  const categoryFilterKey = categoryParamFromSet(categoryUi);
+
+  useEffect(() => {
+    setVisibleCount(TAILORS_PAGE_SIZE);
+  }, [search, rating, price, delivery, experienceBar, sortBy, categoryFilterKey]);
+
+  const visibleTailors = useMemo(
+    () => sortedTailors.slice(0, visibleCount),
+    [sortedTailors, visibleCount]
+  );
+
+  const totalTailors = sortedTailors.length;
+  const shownEnd = totalTailors === 0 ? 0 : Math.min(visibleCount, totalTailors);
+  const canLoadMore = !tailorsLoading && totalTailors > visibleCount;
+
+  const handleLoadMore = useCallback(() => {
+    setVisibleCount((prev) => Math.min(prev + TAILORS_PAGE_SIZE, sortedTailors.length));
+  }, [sortedTailors.length]);
+
   const toggleCategory = (label) => {
     setCategoryUi((prev) => {
       const next = new Set(prev);
@@ -231,6 +287,12 @@ export default function BrowseTailors() {
   const ratingSliderIdx = ratingToSliderIndex(rating);
   const priceSliderIdx = priceToSliderIndex(price);
   const starsPlusChecked = rating === "4" || rating === "4.5";
+
+  const locationLabel = useMemo(() => {
+    const fromState = location.state?.locationLabel || location.state?.areaLabel || location.state?.city;
+    if (typeof fromState === "string" && fromState.trim()) return fromState.trim();
+    return "";
+  }, [location.state]);
 
   const openMenu = (key) => {
     setFilterMenu((prev) => (prev === key ? null : key));
@@ -283,52 +345,64 @@ export default function BrowseTailors() {
         />
 
         <main id="home" className="relative">
-          <div className="relative isolate overflow-hidden border-b border-white/25 bg-white/[0.06] backdrop-blur-xl">
+          <div className="browse-hero-shell relative isolate overflow-hidden border-b border-white/25">
+            <div className="browse-hero-grid" aria-hidden="true" />
             <div
-              className="pointer-events-none absolute -left-36 top-[12%] h-[min(26rem,88vw)] w-[min(26rem,88vw)] rounded-full bg-emerald-400/12 blur-[2.75rem]"
+              className="browse-hero-glow browse-hero-glow--mint pointer-events-none absolute -left-24 top-0 h-[min(18rem,70vw)] w-[min(18rem,70vw)] rounded-full"
               aria-hidden="true"
             />
             <div
-              className="pointer-events-none absolute -right-36 top-[12%] h-[min(26rem,88vw)] w-[min(26rem,88vw)] rounded-full bg-sky-400/13 blur-[2.75rem]"
+              className="browse-hero-glow browse-hero-glow--blue pointer-events-none absolute -right-24 top-2 h-[min(16rem,65vw)] w-[min(16rem,65vw)] rounded-full"
               aria-hidden="true"
             />
             <div
-              className="pointer-events-none absolute bottom-[22%] left-1/3 h-56 w-56 rounded-full bg-violet-200/12 blur-3xl"
+              className="browse-hero-glow browse-hero-glow--violet pointer-events-none absolute bottom-0 left-1/2 h-32 w-48 -translate-x-1/2 rounded-full"
               aria-hidden="true"
             />
 
-            <section className="relative z-10 mx-auto max-w-7xl px-6 py-16 text-center sm:px-8 lg:px-10 lg:py-20">
-            <h1 className="font-['Playfair_Display',Georgia,serif] text-4xl font-bold tracking-tight text-slate-900 sm:text-5xl lg:text-[3.25rem]">
-              <span className="bg-gradient-to-b from-[#070b14] to-[#1e293b] bg-clip-text text-transparent">
-                Find Your Perfect Tailor
-              </span>
-            </h1>
-            <p className="mx-auto mt-4 max-w-2xl text-base leading-relaxed text-slate-600 sm:text-lg">
-              Browse trusted professionals, compare ratings, and book directly through SewServe.
-            </p>
+            <section className="browse-hero-section relative z-10 mx-auto max-w-7xl px-6 text-center sm:px-8 lg:px-10">
+              <h1 className="browse-hero-title text-3xl sm:text-4xl lg:text-[2.65rem]">
+                Find Tailors Near You
+              </h1>
+              <p className="browse-hero-subtitle mx-auto mt-2.5 max-w-xl text-sm sm:text-base">
+                Browse verified local tailors, compare styles, and send your request.
+              </p>
 
-            <div className="mx-auto mt-10 max-w-2xl">
-              <label className="relative block">
-                <span className="sr-only">Search tailors</span>
-                <Search
-                  className="pointer-events-none absolute left-6 top-1/2 h-5 w-5 -translate-y-1/2 text-emerald-600/80"
-                  aria-hidden
-                />
-                <input
-                  type="search"
-                  value={search}
-                  onChange={(e) => setSearch(e.target.value)}
-                  placeholder="Search by name, city, or specialty"
-                  className="w-full rounded-full border border-gray-200/90 bg-white/80 py-4 pl-16 pr-6 text-base font-medium text-slate-900 shadow-lg backdrop-blur-md transition-all duration-300 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-emerald-500/35 focus:ring-offset-2 focus:ring-offset-white/50"
-                />
-              </label>
-            </div>
+              <ul className="browse-hero-stats" aria-label="Platform highlights">
+                {HERO_STATS.map((stat) => (
+                  <li key={stat}>
+                    <span className="browse-hero-stat-pill">{stat}</span>
+                  </li>
+                ))}
+              </ul>
 
-            <div ref={popoverRef} className="relative mx-auto mt-8 flex max-w-4xl flex-wrap justify-center gap-2 sm:gap-3">
+              {locationLabel ? (
+                <p className="browse-location-pill browse-location-pill--hero" role="status">
+                  <MapPin className="h-3.5 w-3.5 shrink-0" aria-hidden />
+                  Showing tailors near {locationLabel}
+                </p>
+              ) : null}
+
+              <div className="browse-search-panel">
+                <div className="browse-search-wrap">
+                  <label className="relative block">
+                    <span className="sr-only">Search tailors</span>
+                    <Search className="browse-search-icon" aria-hidden />
+                    <input
+                      type="search"
+                      value={search}
+                      onChange={(e) => setSearch(e.target.value)}
+                      placeholder="Search by name, city, or specialty"
+                      className="browse-search-input"
+                    />
+                  </label>
+                </div>
+
+                <div ref={popoverRef} className="browse-hero-filters relative flex flex-wrap justify-center gap-2">
               <div className="relative">
                 <button
                   type="button"
-                  className={dropdownPill}
+                  className={filterPillClass(rating !== "any")}
                   onClick={() => openMenu("rating")}
                   aria-expanded={filterMenu === "rating"}
                   aria-controls="browse-filter-rating-menu"
@@ -360,7 +434,7 @@ export default function BrowseTailors() {
               <div className="relative">
                 <button
                   type="button"
-                  className={dropdownPill}
+                  className={filterPillClass(experienceBar !== "any")}
                   onClick={() => openMenu("experience")}
                   aria-expanded={filterMenu === "experience"}
                   aria-controls="browse-filter-experience-menu"
@@ -392,7 +466,7 @@ export default function BrowseTailors() {
               <div className="relative">
                 <button
                   type="button"
-                  className={dropdownPill}
+                  className={filterPillClass(price !== "any")}
                   onClick={() => openMenu("price")}
                   aria-expanded={filterMenu === "price"}
                   aria-controls="browse-filter-price-menu"
@@ -424,7 +498,7 @@ export default function BrowseTailors() {
               <div className="relative">
                 <button
                   type="button"
-                  className={dropdownPill}
+                  className={filterPillClass(delivery !== "any")}
                   onClick={() => openMenu("delivery")}
                   aria-expanded={filterMenu === "delivery"}
                   aria-controls="browse-filter-delivery-menu"
@@ -453,25 +527,38 @@ export default function BrowseTailors() {
                   </div>
                 )}
               </div>
-              <button type="button" className={dropdownPill} onClick={scrollToSidebar}>
+              <button
+                type="button"
+                className={filterPillClass(categoryUi.size > 0 || sortBy !== "rating")}
+                onClick={scrollToSidebar}
+              >
                 <SlidersHorizontal className="h-4 w-4" aria-hidden />
                 Filter
               </button>
-            </div>
+                </div>
+              </div>
             </section>
           </div>
 
-          <section className="mx-auto max-w-7xl px-6 pb-12 sm:px-8 lg:px-10 lg:pb-16">
-            <div className="mb-8 text-sm font-medium text-slate-600">
-              Showing <span className="font-bold text-slate-900">{sortedTailors.length}</span> tailor
-              {sortedTailors.length !== 1 ? "s" : ""}
-            </div>
+          <section className="browse-catalog-section mx-auto max-w-7xl px-6 pb-12 sm:px-8 lg:px-10 lg:pb-16">
+            <p className="browse-results-count mb-6" role="status" aria-live="polite">
+              {tailorsLoading ? (
+                <>Loading tailors…</>
+              ) : totalTailors === 0 ? (
+                <>Showing <strong>0</strong> tailors</>
+              ) : (
+                <>
+                  Showing <strong>1–{shownEnd}</strong> of <strong>{totalTailors}</strong> tailor
+                  {totalTailors !== 1 ? "s" : ""}
+                </>
+              )}
+            </p>
 
-            <div className="grid grid-cols-1 gap-8 lg:grid-cols-12 lg:gap-10">
+            <div className="grid grid-cols-1 gap-6 lg:grid-cols-12 lg:gap-8">
               <aside id="browse-sidebar" className="order-1 lg:col-span-3">
-                <div className="ss-glass-surface sticky top-24 rounded-2xl border border-white/40 p-6 shadow-lg transition-all duration-300">
+                <div className="browse-sidebar-card">
                   <div className="flex items-start justify-between gap-2">
-                    <h2 className="text-xs font-bold uppercase tracking-[0.12em] text-emerald-900/70">Filter Results</h2>
+                    <h2 className="browse-sidebar-heading">Filter Results</h2>
                     {hasActiveFilters && (
                       <button
                         type="button"
@@ -484,7 +571,7 @@ export default function BrowseTailors() {
                   </div>
 
                   <div className="mt-6 space-y-3 border-t border-emerald-900/10 pt-6">
-                    <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">Category</p>
+                    <p className="browse-sidebar-section-title">Category</p>
                     <ul className="space-y-2">
                       {CATEGORY_LABELS.map((cat) => (
                         <li key={cat}>
@@ -493,7 +580,7 @@ export default function BrowseTailors() {
                               type="checkbox"
                               checked={categoryUi.has(cat)}
                               onChange={() => toggleCategory(cat)}
-                              className="h-4 w-4 rounded border-emerald-300 text-emerald-600 focus:ring-emerald-500"
+                              className="browse-sidebar-check h-4 w-4 rounded border-emerald-300"
                             />
                             <span className="text-sm font-medium text-gray-800">{cat}</span>
                           </label>
@@ -503,7 +590,7 @@ export default function BrowseTailors() {
                   </div>
 
                   <div className="mt-6 space-y-3 border-t border-emerald-900/10 pt-6">
-                    <label className="text-xs font-semibold uppercase tracking-wide text-gray-500" htmlFor="browse-rating-slider">
+                    <label className="browse-sidebar-section-title" htmlFor="browse-rating-slider">
                       Rating
                     </label>
                     <input
@@ -514,28 +601,28 @@ export default function BrowseTailors() {
                       step={1}
                       value={ratingSliderIdx}
                       onChange={(e) => setRating(sliderIndexToRating(Number(e.target.value)))}
-                      className="h-2 w-full cursor-pointer appearance-none rounded-full bg-emerald-200/90 accent-emerald-600 transition-all duration-300"
+                      className="browse-sidebar-range w-full cursor-pointer appearance-none"
                     />
                     <label className="flex cursor-pointer items-center gap-2 pt-1">
                       <input
                         type="checkbox"
                         checked={starsPlusChecked}
                         onChange={(e) => setRating(e.target.checked ? "4" : "any")}
-                        className="h-4 w-4 rounded border-emerald-300 text-emerald-600 focus:ring-emerald-500"
+                        className="browse-sidebar-check h-4 w-4 rounded border-emerald-300"
                       />
                       <span className="text-sm font-medium text-gray-700">4+ Stars &amp; Up</span>
                     </label>
                   </div>
 
                   <div className="mt-6 space-y-2 border-t border-emerald-900/10 pt-6">
-                    <label className="text-xs font-semibold uppercase tracking-wide text-gray-500" htmlFor="browse-delivery-select">
+                    <label className="browse-sidebar-section-title" htmlFor="browse-delivery-select">
                       Delivery Time
                     </label>
                     <select
                       id="browse-delivery-select"
                       value={delivery}
                       onChange={(e) => setDelivery(e.target.value)}
-                      className="w-full rounded-xl border border-gray-200/90 bg-white/95 py-2.5 pl-3 pr-8 text-sm font-medium text-gray-800 shadow-sm backdrop-blur-sm transition-all duration-300 focus:border-emerald-500 focus:outline-none focus:ring-2 focus:ring-emerald-500/25"
+                      className="browse-sidebar-select"
                     >
                       {DELIVERY_OPTIONS.map((o) => (
                         <option key={o.value} value={o.value}>
@@ -546,7 +633,7 @@ export default function BrowseTailors() {
                   </div>
 
                   <div className="mt-6 space-y-2 border-t border-emerald-900/10 pt-6">
-                    <label className="text-xs font-semibold uppercase tracking-wide text-gray-500" htmlFor="browse-price-slider">
+                    <label className="browse-sidebar-section-title" htmlFor="browse-price-slider">
                       Price Range
                     </label>
                     <p className="text-xs font-medium text-emerald-800/80">PKR 1,000 – 5,000+ bands</p>
@@ -558,20 +645,20 @@ export default function BrowseTailors() {
                       step={1}
                       value={priceSliderIdx}
                       onChange={(e) => setPrice(sliderIndexToPrice(Number(e.target.value)))}
-                      className="h-2 w-full cursor-pointer appearance-none rounded-full bg-emerald-200/90 accent-emerald-600 transition-all duration-300"
+                      className="browse-sidebar-range w-full cursor-pointer appearance-none"
                     />
                     <p className="text-xs text-gray-500">{PRICE_OPTIONS[priceSliderIdx]?.label}</p>
                   </div>
 
                   <div className="mt-6 space-y-2 border-t border-emerald-900/10 pt-6">
-                    <label className="text-xs font-semibold uppercase tracking-wide text-gray-500" htmlFor="browse-sort">
+                    <label className="browse-sidebar-section-title" htmlFor="browse-sort">
                       Sort By
                     </label>
                     <select
                       id="browse-sort"
                       value={sortBy}
                       onChange={(e) => setSortBy(e.target.value)}
-                      className="w-full rounded-xl border border-gray-200/90 bg-white/95 py-2.5 pl-3 pr-8 text-sm font-medium text-gray-800 shadow-sm backdrop-blur-sm transition-all duration-300 focus:border-emerald-500 focus:outline-none focus:ring-2 focus:ring-emerald-500/25"
+                      className="browse-sidebar-select"
                     >
                       {SORT_OPTIONS.map((o) => (
                         <option key={o.value} value={o.value}>
@@ -584,24 +671,42 @@ export default function BrowseTailors() {
               </aside>
 
               <div className="order-2 lg:col-span-9">
-                <ul className="grid grid-cols-1 gap-8 sm:grid-cols-2">
-                  {sortedTailors.map((tailor) => (
-                    <li key={tailor.id} className="min-w-0">
-                      <TailorCard
-                        tailor={tailor}
-                        onViewProfile={() => navigate(`/tailors/${tailor.id}`)}
-                        onSendRequest={() => setRequestFor(tailor)}
-                      />
-                    </li>
-                  ))}
+                <ul className="browse-grid">
+                  {tailorsLoading
+                    ? Array.from({ length: 4 }, (_, i) => <BrowseSkeletonCard key={`sk-${i}`} />)
+                    : visibleTailors.map((tailor) => (
+                        <li key={tailor.id} className="min-w-0">
+                          <TailorCard
+                            tailor={tailor}
+                            onViewProfile={() => navigate(`/tailors/${tailor.id}`)}
+                            onSendRequest={() => setRequestFor(tailor)}
+                          />
+                        </li>
+                      ))}
                 </ul>
 
-                {sortedTailors.length === 0 && (
-                  <div className="mt-16 flex flex-col items-center justify-center rounded-2xl border border-gray-200/80 bg-white/70 px-6 py-16 text-center shadow-sm backdrop-blur-md">
-                    <div className="mb-4 flex h-16 w-16 items-center justify-center rounded-2xl bg-emerald-50 text-emerald-600 shadow-inner">
+                {!tailorsLoading && totalTailors > 0 && (
+                  <div className="browse-load-more-wrap">
+                    {canLoadMore ? (
+                      <button
+                        type="button"
+                        onClick={handleLoadMore}
+                        className="browse-load-more-btn"
+                      >
+                        Load More Tailors
+                      </button>
+                    ) : (
+                      <p className="browse-load-more-done">All tailors loaded.</p>
+                    )}
+                  </div>
+                )}
+
+                {!tailorsLoading && totalTailors === 0 && (
+                  <div className="browse-empty-state mt-4">
+                    <div className="mb-4 flex h-16 w-16 items-center justify-center rounded-2xl bg-emerald-50 text-emerald-700 shadow-[inset_0_1px_0_rgba(255,255,255,0.9)] ring-1 ring-emerald-100">
                       <Search className="h-8 w-8" strokeWidth={1.5} aria-hidden />
                     </div>
-                    <p className="text-lg font-semibold text-slate-900">No tailors found nearby</p>
+                    <p className="text-lg font-semibold text-[#0f172a]">No tailors found nearby</p>
                     <p className="mt-2 max-w-sm text-sm text-slate-600">
                       {tailorLoadError ? tailorLoadError : "Try adjusting your search or filters to see more results."}
                     </p>
@@ -609,7 +714,7 @@ export default function BrowseTailors() {
                       <button
                         type="button"
                         onClick={clearAllFilters}
-                        className="mt-6 rounded-full border border-emerald-200 bg-emerald-50 px-5 py-2.5 text-sm font-semibold text-emerald-900 transition hover:bg-emerald-100"
+                        className="mt-6 rounded-full border border-emerald-200/90 bg-gradient-to-b from-emerald-50 to-white px-5 py-2.5 text-sm font-semibold text-emerald-900 shadow-sm transition hover:border-emerald-300 hover:bg-emerald-100"
                       >
                         Clear filters
                       </button>
@@ -620,30 +725,38 @@ export default function BrowseTailors() {
             </div>
           </section>
 
-          <section className="mx-auto max-w-7xl px-6 pb-24 sm:px-8 lg:px-10">
-            <div className="ss-glass-surface grid grid-cols-1 items-center gap-10 rounded-2xl border border-white/40 p-8 shadow-lg transition-all duration-300 md:grid-cols-[minmax(0,280px)_1fr] md:gap-12 md:p-10 lg:p-12">
-              <div
-                className="mx-auto flex aspect-[4/3] w-full max-w-[280px] items-center justify-center rounded-2xl border border-emerald-200/50 bg-gradient-to-br from-emerald-100/90 via-teal-50/80 to-white text-center text-sm font-medium leading-snug text-emerald-900/60 shadow-inner md:mx-0"
-                aria-hidden="true"
-              >
-                Illustration — tailor at work
-              </div>
-              <div className="text-center md:text-left">
-                <h2 className="font-['Playfair_Display',Georgia,serif] text-2xl font-bold text-emerald-950 sm:text-3xl">
-                  Need Help Finding the Right Tailor?
-                </h2>
-                <p className="mt-3 max-w-xl text-base text-gray-600">
-                  Our support team is here to assist you.
-                </p>
+          <section className="browse-support-section mx-auto max-w-7xl px-6 pb-12 sm:px-8 lg:px-10">
+            <div className="browse-support-card ss-glass-surface">
+              <div className="browse-support-header">
+                <div className="browse-support-copy">
+                  <h2 className="browse-support-title">
+                    Need Help Finding the Right Tailor?
+                  </h2>
+                  <p className="browse-support-subtitle">
+                    Our support team is here to assist you.
+                  </p>
+                </div>
                 <button
                   type="button"
                   onClick={() => handleSectionNavigate("contact")}
-                  className="mt-6 inline-flex items-center gap-2 rounded-full bg-gradient-to-r from-emerald-700 to-teal-700 px-8 py-3 text-sm font-semibold text-white shadow-lg transition-all duration-300 hover:scale-105 hover:shadow-xl active:scale-95"
+                  className="browse-support-cta"
                 >
                   Contact Us
-                  <ArrowRight className="h-4 w-4" aria-hidden />
+                  <ArrowRight className="h-4 w-4 shrink-0" aria-hidden />
                 </button>
               </div>
+              <ul className="browse-support-pills" aria-label="Why use SewServe">
+                {SUPPORT_BENEFITS.map(({ icon: Icon, label }) => (
+                  <li key={label}>
+                    <span className="browse-support-pill">
+                      <span className="browse-support-pill-icon" aria-hidden>
+                        <Icon className="h-3.5 w-3.5" strokeWidth={2} />
+                      </span>
+                      <span className="browse-support-pill-label">{label}</span>
+                    </span>
+                  </li>
+                ))}
+              </ul>
             </div>
           </section>
         </main>

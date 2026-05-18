@@ -2414,6 +2414,28 @@ app.patch('/orders/:orderId', requireAuth, async (req, res) => {
         updatePayload.chatEnabled = true;
         updatePayload.acceptedAt = new Date();
         updatePayload.currentStepIndex = 0;
+      } else if (patchAction === 'reject_order') {
+        if (!shop || !orderTid || orderTid !== shop) {
+          log403AcceptOrder(
+            paramId,
+            orderTid || '',
+            shop || tailorShopFromAuth(req),
+            b.tailorId != null ? normalizeAuthId(b.tailorId) : ''
+          );
+          return res.status(403).json({ message: 'Order belongs to another tailor.' });
+        }
+        updatePayload.tailorId = shop;
+        updatePayload.status = 'rejected';
+        updatePayload.workflowStatus = 'rejected';
+        updatePayload.isActive = false;
+        updatePayload.chatEnabled = false;
+        updatePayload.rejectedAt = new Date();
+        updatePayload.rejectedBy = shop;
+        updatePayload.acceptedAt = null;
+        if (b.rejectionReason != null) {
+          updatePayload.rejectionReason = String(b.rejectionReason).trim().slice(0, 500);
+        }
+        updatePayload.currentStepIndex = 0;
       } else {
         const access = tailorMayPatchOrder(req, existing, b, tailorPatch);
         if (!access.ok) {
@@ -2460,17 +2482,26 @@ app.patch('/orders/:orderId', requireAuth, async (req, res) => {
       }
     }
 
-    if (patchAction !== 'accept_order') {
-      const unified = computeWorkflow({ ...orderDocToPlainForWorkflow(existing), ...updatePayload });
-      updatePayload.status = unified.status;
-      updatePayload.workflowStatus = unified.workflowStatus;
-      updatePayload.currentStepIndex = unified.currentStepIndex;
-    } else {
+    if (patchAction === 'accept_order') {
       updatePayload.status = 'accepted';
       updatePayload.workflowStatus = 'accepted';
       if (updatePayload.currentStepIndex == null) {
         updatePayload.currentStepIndex = 0;
       }
+    } else if (patchAction === 'reject_order') {
+      updatePayload.status = 'rejected';
+      updatePayload.workflowStatus = 'rejected';
+      updatePayload.isActive = false;
+      updatePayload.chatEnabled = false;
+      updatePayload.acceptedAt = null;
+      if (updatePayload.currentStepIndex == null) {
+        updatePayload.currentStepIndex = 0;
+      }
+    } else {
+      const unified = computeWorkflow({ ...orderDocToPlainForWorkflow(existing), ...updatePayload });
+      updatePayload.status = unified.status;
+      updatePayload.workflowStatus = unified.workflowStatus;
+      updatePayload.currentStepIndex = unified.currentStepIndex;
     }
 
     const updatedOrder = await Order.findByIdAndUpdate(
@@ -2570,8 +2601,23 @@ app.patch('/orders/:orderId', requireAuth, async (req, res) => {
           clientOrderId: payload.clientOrderId || '',
           tailorId: tId,
           status: payload.status,
+          rejectionReason:
+            persisted.rejectionReason != null ? String(persisted.rejectionReason).trim() : '',
+          rejectedAt:
+            persisted.rejectedAt != null
+              ? new Date(persisted.rejectedAt).toISOString()
+              : new Date().toISOString(),
+          rejectedBy:
+            persisted.rejectedBy != null ? String(persisted.rejectedBy).trim() : tId,
         };
-        emitToRoomUnion(io, patchStatusRooms, 'orderRejected', rej);
+        const rejectRooms = [...patchStatusRooms];
+        const cust = persisted.customerId != null ? String(persisted.customerId).trim() : '';
+        if (cust) {
+          rejectRooms.push(cust);
+          const uroom = userRoomName(cust);
+          if (uroom && uroom !== cust) rejectRooms.push(uroom);
+        }
+        emitToRoomUnion(io, rejectRooms, 'orderRejected', rej);
       }
     } catch (socketErr) {
       console.error('[Socket Sync] PATCH /orders emit error', socketErr);

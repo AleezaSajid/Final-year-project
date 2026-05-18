@@ -70,8 +70,33 @@ export function displayChatActorName(...candidates) {
 /**
  * True when tailor must accept before chat (customer selected tailor, not yet accepted).
  */
+export function isOrderRejected(order) {
+  if (!order || typeof order !== "object") return false;
+  if (order.rejectedAt != null && String(order.rejectedAt).trim() !== "") return true;
+  const status = String(order.status ?? "")
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, "_");
+  const wf = String(order.workflowStatus ?? "")
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, "_");
+  const convSt = String(order.conversation?.status ?? order.conversationStatus ?? "")
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, "_");
+  return (
+    status === "rejected" ||
+    status === "declined" ||
+    wf === "rejected" ||
+    convSt === "rejected" ||
+    convSt === "declined"
+  );
+}
+
 export function isOrderAwaitingTailorAccept(order) {
   if (!order || typeof order !== "object") return false;
+  if (isOrderRejected(order)) return false;
   if (order.isActive === true || order.acceptedAt) return false;
   const raw = order.status ?? order.workflowStatus ?? "";
   const s = String(raw).trim().toLowerCase().replace(/\s+/g, "_");

@@ -48,6 +48,7 @@ export default function TailorOrdersPage() {
               tailorOrders={dash.tailorOrders}
               updateOrderStatus={dash.updateOrderStatus}
               acceptOrderIntoCurrentTasks={dash.acceptOrderIntoCurrentTasks}
+              rejectOrderFromPending={dash.rejectOrderFromPending}
               navigate={dash.navigate}
               setActiveOrderId={dash.setActiveOrderId}
               fetchOrders={dash.fetchOrders}

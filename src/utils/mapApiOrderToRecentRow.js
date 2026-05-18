@@ -3,7 +3,10 @@
  */
 
 function statusToVariant(status) {
-  const s = String(status || "").toLowerCase();
+  const s = String(status || "").toLowerCase().replace(/\s+/g, "_");
+  if (s === "rejected" || s === "declined" || s === "cancelled" || s === "canceled") {
+    return "rejected";
+  }
   if (
     s === "new" ||
     s === "pending" ||
