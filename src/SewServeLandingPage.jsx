@@ -22,7 +22,7 @@ import LandingHeroSection from "./components/landing/LandingHeroSection.jsx";
 import HowItWorksSplitSection from "./components/HowItWorksSplitSection.jsx";
 import { useSewServeLogoProcessedSrc } from "./hooks/useSewServeLogoProcessedSrc";
 import { fetchTestimonials } from "./api/testimonialsApi.js";
-import { api } from "./api/client.js";
+import { openFreshMeasurementWizard } from "./utils/wizardNavigation.js";
 const navLinks = [
   { label: "Home", sectionId: "home" },
   { label: "About", sectionId: "about" },
@@ -119,18 +119,8 @@ export default function SewServeLandingPage() {
   const [newsletterEmail, setNewsletterEmail] = useState("");
   const [storedTestimonials, setStoredTestimonials] = useState([]);
 
-  const goToMeasurementWizard = async () => {
-    try {
-      const data = await api("/api/auth/me");
-      const role = data?.user?.role ? String(data.user.role).trim() : "";
-      if (data?.user && role === "customer") {
-        navigate("/features/measurement-wizard");
-        return;
-      }
-    } catch {
-      // ignore
-    }
-    navigate("/login", { state: { from: "/features/measurement-wizard" } });
+  const goToMeasurementWizard = () => {
+    void openFreshMeasurementWizard(navigate);
   };
 
   useEffect(() => {

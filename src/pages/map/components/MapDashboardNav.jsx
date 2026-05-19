@@ -1,5 +1,5 @@
 import { Link, NavLink } from "react-router-dom";
-import { Plus, Scissors } from "lucide-react";
+import { SewServeBrandImg } from "../../../components/SewServeBrandImg.jsx";
 
 const linkClass = ({ isActive }) =>
   `rounded-xl px-3 py-2 text-sm font-medium transition ${
@@ -16,17 +16,18 @@ export default function MapDashboardNav() {
   return (
     <header className="ss-glass-surface sticky top-0 z-50 border-b border-white/35 shadow-[0_6px_26px_-10px_rgba(15,23,42,0.07)]">
       <div className="mx-auto flex max-w-6xl items-center justify-between gap-4 px-4 py-3 sm:px-6 lg:px-8">
-        <Link to="/" className="flex min-w-0 items-center gap-2.5">
-          <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-[#4a7c59] to-[#355542] text-white shadow-md shadow-emerald-900/20">
-            <Scissors className="h-5 w-5" aria-hidden />
-          </span>
-          <span className="min-w-0">
-            <span className="block truncate font-bold tracking-tight text-ink">StitchNear</span>
-            <span className="block truncate text-xs font-medium text-ink-muted">Tailored for You</span>
-          </span>
+        <Link
+          to="/"
+          className="inline-flex shrink-0 items-center focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-600/30 focus-visible:ring-offset-2"
+          aria-label="SewServe — home"
+        >
+          <SewServeBrandImg
+            decorative
+            className="h-9 max-h-[44px] drop-shadow-[0_6px_14px_rgba(0,0,0,0.18)] transition-[filter,transform] duration-[250ms] ease-out hover:-translate-y-0.5 hover:scale-[1.02] hover:drop-shadow-[0_10px_24px_rgba(0,0,0,0.28)]"
+          />
         </Link>
 
-        <nav className="hidden items-center gap-1 md:flex">
+        <nav className="ml-auto hidden items-center gap-1 md:flex">
           <NavLink to="/" end className={linkClass}>
             Home
           </NavLink>
@@ -34,17 +35,6 @@ export default function MapDashboardNav() {
             Orders
           </NavLink>
         </nav>
-
-        <Link
-          to="/measurements/new"
-          className="hero-cta inline-flex shrink-0 items-center gap-2 rounded-xl px-4 py-2.5 text-sm font-semibold text-white transition-all duration-200 ease-out hover:-translate-y-0.5 hover:brightness-[1.04] focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-600/45 focus-visible:ring-offset-2 bg-gradient-to-b from-[#4a7c59] to-[#355542]"
-        >
-          <span className="relative z-10 inline-flex items-center gap-2">
-            <Plus className="h-4 w-4" aria-hidden />
-            <span className="hidden sm:inline">Place New Order</span>
-            <span className="sm:hidden">New Order</span>
-          </span>
-        </Link>
       </div>
     </header>
   );

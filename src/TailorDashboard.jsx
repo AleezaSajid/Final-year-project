@@ -8,6 +8,7 @@ import TailorDashboardSidebar from "./tailorDashboard/components/TailorDashboard
 import { TD_PAGE_BG } from "./tailorDashboard/tailorDashboardClassNames.js";
 import WizardOrderReviewModal from "./tailorDashboard/components/WizardOrderReviewModal.jsx";
 import OrderPopup from "./tailorDashboard/components/OrderPopup.jsx";
+import RejectOrderModal from "./tailorDashboard/components/RejectOrderModal.jsx";
 import { TailorDashboardChatContext } from "./context/TailorDashboardChatContext.jsx";
 import { useTailorDashboard } from "./tailorDashboard/hooks/useTailorDashboard";
 import { ensureSocketThen, socket } from "./socket.js";
@@ -20,6 +21,10 @@ export default function TailorDashboard() {
   const { user } = useAuth();
   const location = useLocation();
   const [incomingOrder, setIncomingOrder] = useState(null);
+  const [popupRejectBusy, setPopupRejectBusy] = useState(false);
+  const [popupRejectOpen, setPopupRejectOpen] = useState(false);
+  /** Order snapshot for decline flow after incoming popup is closed */
+  const [rejectSnapshot, setRejectSnapshot] = useState(null);
   const incomingRef = useRef(null);
   const autoCloseRef = useRef(null);
 
@@ -42,6 +47,40 @@ export default function TailorDashboard() {
     dismissIncomingOrder();
   }, [dash, dismissIncomingOrder]);
 
+  const onIncomingOrderDeclineClick = useCallback(() => {
+    const o = incomingRef.current;
+    if (!o?.orderId) return;
+    setRejectSnapshot(o);
+    dismissIncomingOrder();
+    setPopupRejectOpen(true);
+  }, [dismissIncomingOrder]);
+
+  const onPopupRejectClose = useCallback(() => {
+    if (popupRejectBusy) return;
+    setPopupRejectOpen(false);
+    setRejectSnapshot(null);
+  }, [popupRejectBusy]);
+
+  const onPopupRejectConfirm = useCallback(
+    async (reason) => {
+      const o = rejectSnapshot;
+      const oid = o?.orderId != null ? String(o.orderId).trim() : "";
+      if (!oid || !dash.rejectOrderFromPending) return;
+      setPopupRejectBusy(true);
+      try {
+        const ok = await dash.rejectOrderFromPending(oid, o, reason);
+        if (ok) {
+          setPopupRejectOpen(false);
+          setRejectSnapshot(null);
+          dismissIncomingOrder();
+        }
+      } finally {
+        setPopupRejectBusy(false);
+      }
+    },
+    [dash, dismissIncomingOrder, rejectSnapshot]
+  );
+
   useEffect(() => {
     // ROLE-BASED: only tailors should attach this listener
     if (!user || user.role !== "tailor") return undefined;
@@ -49,13 +88,22 @@ export default function TailorDashboard() {
     const allowed = location.pathname === "/tailor/dashboard" || location.pathname === "/tailor-dashboard";
     if (!allowed) return undefined;
 
-    // Ensure this tailor joins its room (room name MUST be tailorShopId).
-    const tailorShopId = dash.activeTailorShopId;
-    if (tailorShopId) {
-      ensureSocketThen(() => {
-        socket.emit("join_user", { userId: tailorShopId });
-      });
-    }
+    const tailorShopId = String(dash.activeTailorShopId || "").trim();
+    console.log("[TailorDashboard] logged user", {
+      id: user?.id,
+      tailorShopId: user?.tailorShopId,
+      tailorId: user?.tailorId,
+      role: user?.role,
+    });
+    console.log("[TailorDashboard] activeTailorShopId", tailorShopId || "(none)");
+
+    const joinTailorRoom = () => {
+      if (!tailorShopId) return;
+      console.log("[TailorDashboard] joined room", tailorShopId);
+      socket.emit("join_user", { userId: tailorShopId });
+    };
+    ensureSocketThen(joinTailorRoom);
+    socket.on("connect", joinTailorRoom);
 
     const handlePopup = (payload) => {
       // HARD SAFETY: ignore unless tailor + on tailor dashboard route
@@ -65,7 +113,7 @@ export default function TailorDashboard() {
       if (!okRoute) return;
       if (!payload || typeof payload !== "object" || Array.isArray(payload)) return;
       if (payload.orderId == null || String(payload.orderId).trim() === "") return;
-      // Normalize to existing popup shape.
+      console.log("[TailorDashboard] tailor:popup", String(payload.orderId).trim());
       setIncomingOrder({
         orderId: payload.orderId,
         dressType: payload.garmentType || payload.dressType || "—",
@@ -83,6 +131,7 @@ export default function TailorDashboard() {
 
     socket.on("tailor:popup", handlePopup);
     return () => {
+      socket.off("connect", joinTailorRoom);
       socket.off("tailor:popup", handlePopup);
       dismissIncomingOrder();
     };
@@ -114,13 +163,29 @@ export default function TailorDashboard() {
         <TailorDashboardAmbient />
         <TailorDashboardSidebar unreadChatCount={dash.unreadChatCount} />
         <div className="relative z-10 flex min-w-0 flex-1 flex-col">
-          {typeof document !== "undefined" && incomingOrder
+          {typeof document !== "undefined" && popupRejectOpen
+            ? createPortal(
+                <RejectOrderModal
+                  open={popupRejectOpen}
+                  orderLabel={
+                    rejectSnapshot?.dressType && String(rejectSnapshot.dressType).trim() !== "—"
+                      ? String(rejectSnapshot.dressType).trim()
+                      : "this request"
+                  }
+                  busy={popupRejectBusy}
+                  onClose={onPopupRejectClose}
+                  onConfirm={onPopupRejectConfirm}
+                />,
+                document.body
+              )
+            : null}
+          {typeof document !== "undefined" && incomingOrder && !popupRejectOpen
             ? createPortal(
                 <OrderPopup
                   key={incomingOrder.orderId}
                   order={incomingOrder}
                   onInterested={onIncomingOrderInterested}
-                  onIgnore={dismissIncomingOrder}
+                  onIgnore={onIncomingOrderDeclineClick}
                 />,
                 document.body
               )

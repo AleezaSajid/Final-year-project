@@ -1,3 +1,4 @@
+import { putCustomerMeta, putWizardDraft } from "../api/accountApi.js";
 import { getOrderById, patchOrderWizardFields } from "../api/ordersApi.js";
 import {
   buildMeasurementOrderPayload,
@@ -5,11 +6,40 @@ import {
   resolveOrderCustomerId,
 } from "./measurementOrderPayload.js";
 import { normalizeConversationId } from "../chatUtils.js";
+import { clearCustomerTailorShopSession } from "./chatIdentity.js";
+import { clearCustomerRejectedRequestSession } from "./customerRejectedRequest.js";
 
 let linkedWizardOrderIdMemory = null;
 
 export const WIZARD_LINKED_ORDER_SESSION_KEY = "sewserve_wizard_linked_order_id";
 export const WIZARD_CLIENT_ORDER_SESSION_KEY = "sewserve_wizard_client_order_id";
+
+const WIZARD_EPHEMERAL_LOCAL_KEYS = [
+  "sewserve_map_last_request",
+  "sewserve_pending_order_id",
+  "sewserve_wizard_linked_order_id",
+];
+
+const WIZARD_NON_EDITABLE_STATUSES = new Set([
+  "accepted",
+  "active",
+  "rejected",
+  "declined",
+  "completed",
+  "delivered",
+  "cancelled",
+  "canceled",
+  "in_progress",
+  "processing",
+]);
+
+const WIZARD_EDITABLE_STATUSES = new Set([
+  "draft",
+  "pending",
+  "order_placed",
+  "awaiting_tailor_selection",
+  "awaiting_acceptance",
+]);
 
 function readSessionOrderId(key) {
   if (typeof window === "undefined") return "";
@@ -43,6 +73,20 @@ export function getLinkedWizardOrderId() {
   return null;
 }
 
+/**
+ * Customer linked order id: URL ?orderId= → session → account meta (first valid).
+ * @param {{ urlOrderId?: string, metaOrderId?: string }} [options]
+ */
+export function resolveLinkedCustomerOrderId(options = {}) {
+  const url = options.urlOrderId != null ? String(options.urlOrderId).trim() : "";
+  if (url) return url;
+  const session = getLinkedWizardOrderId();
+  if (session) return session;
+  const meta = options.metaOrderId != null ? String(options.metaOrderId).trim() : "";
+  if (meta) return meta;
+  return "";
+}
+
 export function getWizardClientOrderId() {
   return readSessionOrderId(WIZARD_CLIENT_ORDER_SESSION_KEY) || null;
 }
@@ -61,6 +105,87 @@ export function clearLinkedWizardOrderId() {
   linkedWizardOrderIdMemory = null;
   writeSessionOrderId(WIZARD_LINKED_ORDER_SESSION_KEY, "");
   writeSessionOrderId(WIZARD_CLIENT_ORDER_SESSION_KEY, "");
+}
+
+function clearWizardEphemeralLocalStorage() {
+  if (typeof window === "undefined") return;
+  for (const key of WIZARD_EPHEMERAL_LOCAL_KEYS) {
+    try {
+      localStorage.removeItem(key);
+    } catch {
+      /* ignore */
+    }
+  }
+}
+
+function normalizeWizardOrderStatusToken(value) {
+  return String(value ?? "")
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, "_");
+}
+
+/** True when an order may be used as the in-progress wizard draft (not accepted/terminal). */
+export function isOrderEditableWizardDraft(order) {
+  if (!order || typeof order !== "object") return false;
+  if (order.acceptedAt != null && String(order.acceptedAt).trim() !== "") return false;
+  if (order.isActive === true) return false;
+
+  const status = normalizeWizardOrderStatusToken(order.status);
+  const wf = normalizeWizardOrderStatusToken(order.workflowStatus);
+  if (WIZARD_NON_EDITABLE_STATUSES.has(status) || WIZARD_NON_EDITABLE_STATUSES.has(wf)) {
+    return false;
+  }
+  if (WIZARD_EDITABLE_STATUSES.has(status) || WIZARD_EDITABLE_STATUSES.has(wf)) {
+    return true;
+  }
+  return false;
+}
+
+/** Whether a linked Mongo order id should hydrate wizard/map draft state. */
+export async function shouldRestoreWizardLinkedOrderId(linkedId) {
+  const oid = linkedId != null ? String(linkedId).trim() : "";
+  if (!oid) return false;
+  try {
+    const order = await getOrderById(oid);
+    if (!isOrderEditableWizardDraft(order)) {
+      console.log("[wizard restore skipped] previous order is not editable draft", {
+        orderId: oid,
+        status: order?.status,
+        workflowStatus: order?.workflowStatus,
+      });
+      return false;
+    }
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Clear wizard/request draft state only (not auth, chat, or completed orders in DB).
+ * @param {{ user?: object | null }} [options]
+ */
+export function startWizardFresh(options = {}) {
+  const { user } = options;
+  clearLinkedWizardOrderId();
+  clearCustomerTailorShopSession();
+  clearWizardEphemeralLocalStorage();
+  clearCustomerRejectedRequestSession();
+  console.log("[wizard fresh start] cleared previous draft state");
+
+  if (user?.id) {
+    void putWizardDraft(user, null).catch(() => {});
+    void putCustomerMeta(user, { lastMapTailorRequest: null }).catch(() => {});
+  }
+}
+
+/** Route state / query flag for intentional new booking. */
+export function isWizardFreshStart(location, searchParams) {
+  if (searchParams?.get?.("fresh") === "1") return true;
+  const raw = location?.state;
+  if (!raw || typeof raw !== "object") return false;
+  return raw.fresh === true || raw.startWizardFresh === true;
 }
 
 /** Restore linked order id from server-saved wizard draft. */

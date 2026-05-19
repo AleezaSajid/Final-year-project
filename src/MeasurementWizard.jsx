@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
-import { useLocation, useNavigate } from "react-router-dom";
+import { useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import { Check, ChevronLeft, ChevronRight, Upload } from "lucide-react";
 import WizardNavbar from "./components/WizardNavbar";
 import { saveWizardDraft, loadWizardDraft } from "./api/wizardDraftApi";
@@ -11,6 +11,9 @@ import {
   clearLinkedWizardOrderId,
   getLinkedWizardOrderId,
   hydrateLinkedOrderIdFromDraft,
+  isWizardFreshStart,
+  shouldRestoreWizardLinkedOrderId,
+  startWizardFresh,
   syncWizardOrderToServer,
 } from "./utils/measurementWizardOrderSync.js";
 import { resolveOrderCustomerId } from "./utils/measurementOrderPayload.js";
@@ -944,6 +947,7 @@ function ReviewStep({
 export default function MeasurementWizard() {
   const navigate = useNavigate();
   const location = useLocation();
+  const [searchParams] = useSearchParams();
   const { user, loading } = useAuth();
   const [activeStep, setActiveStep] = useState(initialWizardFromDraft.activeStep);
   const [customerInfo, setCustomerInfo] = useState(initialWizardFromDraft.customerInfo);
@@ -1016,6 +1020,68 @@ export default function MeasurementWizard() {
     })
   );
   const draftHydratedUserIdRef = useRef(null);
+  const wizardFreshHandledRef = useRef(false);
+
+  const applyFreshWizardFormState = useCallback(() => {
+    setActiveStep(1);
+    setCustomerInfo({ ...initialCustomerInfo });
+    setSelectedGarmentType("");
+    setCustomGarmentType("");
+    setReferenceImage(null);
+    setSelectedNeck("v-neck");
+    setMeasurements({ ...initialMeasurements });
+    setStyleOptions({ ...initialStyleOptions });
+    setDesignBrief({ ...initialDesignBrief });
+    setData({ ...initialWizardData });
+    setDraftVersion(0);
+    setAssignedTailorShopId("");
+    setAssignedTailorDisplayName("");
+    setBrowseTailorBanner(null);
+    setError("");
+    setFieldInsight(getAdaptiveHint(1));
+    setIsThinking(false);
+    lastPersistedSnapshotRef.current = JSON.stringify({
+      activeStep: 1,
+      customerInfo: { ...initialCustomerInfo },
+      selectedGarmentType: "",
+      customGarmentType: "",
+      referenceImage: null,
+      selectedNeck: "v-neck",
+      measurements: { ...initialMeasurements },
+      styleOptions: { ...initialStyleOptions },
+      designBrief: { ...initialDesignBrief },
+      data: { ...initialWizardData },
+      assignedTailorShopId: "",
+      assignedTailorDisplayName: "",
+    });
+  }, []);
+
+  useEffect(() => {
+    if (loading || wizardFreshHandledRef.current) return;
+    if (!isWizardFreshStart(location, searchParams)) return;
+    if (!user?.id || user.role !== "customer") return;
+
+    wizardFreshHandledRef.current = true;
+    draftHydratedUserIdRef.current = user.id;
+    startWizardFresh({ user });
+    applyFreshWizardFormState();
+
+    if (searchParams.get("fresh") === "1") {
+      const next = new URLSearchParams(searchParams);
+      next.delete("fresh");
+      const qs = next.toString();
+      navigate({ pathname: location.pathname, search: qs ? `?${qs}` : "" }, { replace: true, state: null });
+    } else {
+      navigate(".", { replace: true, state: null });
+    }
+  }, [
+    loading,
+    user,
+    location,
+    searchParams,
+    navigate,
+    applyFreshWizardFormState,
+  ]);
 
   useEffect(() => {
     if (!user?.id) {
@@ -1023,14 +1089,26 @@ export default function MeasurementWizard() {
       return;
     }
     if (draftHydratedUserIdRef.current === user.id) return;
+    if (isWizardFreshStart(location, searchParams)) return;
     let cancelled = false;
     void (async () => {
       const draft = await loadWizardDraft(user);
       if (cancelled) return;
       draftHydratedUserIdRef.current = user.id;
       if (!draft) return;
+
+      let linkedId = draft.linkedOrderId != null ? String(draft.linkedOrderId).trim() : "";
+      if (linkedId) {
+        const ok = await shouldRestoreWizardLinkedOrderId(linkedId);
+        if (!ok) linkedId = "";
+      }
+
       const next = buildInitialStateFromDraftPayload(draft);
-      hydrateLinkedOrderIdFromDraft(draft.linkedOrderId);
+      if (linkedId) {
+        hydrateLinkedOrderIdFromDraft(linkedId);
+      } else {
+        clearLinkedWizardOrderId();
+      }
       setActiveStep(next.activeStep);
       setCustomerInfo(next.customerInfo);
       setSelectedGarmentType(next.selectedGarmentType);
@@ -1062,7 +1140,7 @@ export default function MeasurementWizard() {
     return () => {
       cancelled = true;
     };
-  }, [user?.id, user?.email]);
+  }, [user?.id, user?.email, location, searchParams]);
 
   const prevActiveStepForMotionRef = useRef(activeStep);
   let stepTransitionDir = 1;
@@ -1120,7 +1198,7 @@ export default function MeasurementWizard() {
     if (browseLocationKeyHandledRef.current === locKey) return;
     browseLocationKeyHandledRef.current = locKey;
 
-    const fresh = Boolean(raw?.startWizardFresh);
+    const fresh = Boolean(raw?.startWizardFresh || raw?.fresh);
 
     const shopId = pickBrowseTailorShopIdFromState(bt);
     if (!shopId) {
@@ -1134,13 +1212,11 @@ export default function MeasurementWizard() {
     const noteLine = `[Request via Browse — tailor: ${tName}${tSpec ? ` · ${tSpec}` : ""}${tCity ? ` · ${tCity}` : ""}]`;
     const cardDisplayName = typeof bt.name === "string" ? bt.name.trim() : "";
 
-    clearLinkedWizardOrderId();
-    clearCustomerTailorShopSession();
-
-    if (fresh) {
-      if (user?.id) {
-        void putWizardDraft(user, null).catch(() => {});
-      }
+    if (!fresh) {
+      clearLinkedWizardOrderId();
+    } else {
+      startWizardFresh({ user });
+      clearCustomerTailorShopSession();
       setActiveStep(1);
       setCustomerInfo({ ...initialCustomerInfo });
       setSelectedGarmentType("");

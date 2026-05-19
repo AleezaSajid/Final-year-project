@@ -153,7 +153,12 @@ export function resolveWorkflowState(order) {
   }
 
   if (internalStatus === "accepted") {
-    if (idx != null) {
+    const claimed =
+      input.isActive === true ||
+      (input.acceptedAt != null && String(input.acceptedAt).trim() !== "");
+    if (claimed) {
+      internalStatus = "accepted";
+    } else if (idx != null) {
       internalStatus = workflowStages[idx]?.status || "pending";
     } else {
       internalStatus = "pending";
@@ -243,8 +248,23 @@ export function isTailorCurrentTaskOrder(order) {
   if (isTailorOrderExcludedFromTasks(order)) return false;
   if (order.isActive !== true) return false;
 
+  const hasAcceptedAt = order.acceptedAt != null && String(order.acceptedAt).trim() !== "";
+  if (hasAcceptedAt) return true;
+
   const status = normalizeOrderStatusToken(order.status);
   const wf = normalizeOrderStatusToken(order.workflowStatus);
+
+  if (
+    status === "accepted" ||
+    status === "in_progress" ||
+    status === "processing" ||
+    wf === "accepted" ||
+    wf === "order_placed" ||
+    wf === "in_progress" ||
+    wf === "processing"
+  ) {
+    return true;
+  }
 
   if (
     status === "pending" ||
@@ -266,7 +286,39 @@ export function isTailorCurrentTaskOrder(order) {
   return TAILOR_CURRENT_TASK_STATUSES.has(internal);
 }
 
-/** Measurements to Review: pending tailor approval only (not rejected, not active work). */
+/** Schedule date for tailor calendar (due / delivery fields, then createdAt). */
+export function getTailorOrderScheduleDate(order) {
+  if (!order || typeof order !== "object") return "";
+  const candidates = [
+    order.dueDate,
+    order.preferredDueDate,
+    order.deliveryDate,
+    order.deadline,
+    order.notes?.deliveryDate,
+    order.orderPayload?.notes?.deliveryDate,
+    order.wizardData?.designBrief?.deliveryDate,
+    order.date,
+    order.createdAt,
+  ];
+  for (const value of candidates) {
+    const s = value != null ? String(value).trim() : "";
+    if (s) return s;
+  }
+  return "";
+}
+
+const TAILOR_MEASUREMENT_REVIEW_STATUSES = new Set([
+  "pending",
+  "order_placed",
+  "awaiting_acceptance",
+  "awaiting_tailor_selection",
+  "awaiting_measurements",
+  "measurement_submitted",
+  "measurements_submitted",
+  "awaiting_review",
+]);
+
+/** Measurements to Review: pending / awaiting measurement review only (strict allowlist). */
 export function isTailorMeasurementReviewOrder(order) {
   if (!order || typeof order !== "object") return false;
   if (isTailorOrderExcludedFromTasks(order)) return false;
@@ -276,16 +328,10 @@ export function isTailorMeasurementReviewOrder(order) {
   const status = normalizeOrderStatusToken(order.status);
   const wf = normalizeOrderStatusToken(order.workflowStatus);
 
-  const isPendingRequest = (s) =>
-    s === "pending" ||
-    s === "order_placed" ||
-    s === "awaiting_acceptance" ||
-    s === "awaiting_tailor_selection";
-
-  if (isPendingRequest(status) || isPendingRequest(wf)) return true;
-
-  const internal = resolveWorkflowState(order).internalStatus;
-  return internal === "pending" || internal === "order_placed";
+  return (
+    TAILOR_MEASUREMENT_REVIEW_STATUSES.has(status) ||
+    TAILOR_MEASUREMENT_REVIEW_STATUSES.has(wf)
+  );
 }
 
 const CUSTOMER_TRACK_SKIP = new Set(["draft", "awaiting_tailor_selection"]);

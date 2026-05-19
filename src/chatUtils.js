@@ -70,6 +70,17 @@ export function displayChatActorName(...candidates) {
 /**
  * True when tailor must accept before chat (customer selected tailor, not yet accepted).
  */
+/** Hide declined request threads from tailor chat sidebar (accepted-order chats unchanged). */
+export function isOrderHiddenFromTailorChatList(order, conversation) {
+  if (order && isOrderRejected(order)) return true;
+  if (order?.rejectedAt != null && String(order.rejectedAt).trim() !== "") return true;
+  const convSt = String(conversation?.status ?? "")
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, "_");
+  return convSt === "rejected" || convSt === "declined";
+}
+
 export function isOrderRejected(order) {
   if (!order || typeof order !== "object") return false;
   if (order.rejectedAt != null && String(order.rejectedAt).trim() !== "") return true;
@@ -89,6 +100,7 @@ export function isOrderRejected(order) {
     status === "rejected" ||
     status === "declined" ||
     wf === "rejected" ||
+    wf === "declined" ||
     convSt === "rejected" ||
     convSt === "declined"
   );

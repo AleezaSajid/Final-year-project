@@ -159,7 +159,7 @@ export async function getOrderById(orderId) {
     e.status = res.status;
     throw e;
   }
-  return data;
+  return normalizeApiOrderDoc(data) || data;
 }
 
 /**

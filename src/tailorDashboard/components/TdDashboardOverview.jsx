@@ -19,7 +19,11 @@ import {
   resolveOrderWorkflowState,
   workflowStages,
 } from "../constants";
-import { getPriorityScore, isTailorCurrentTaskOrder } from "../../utils/workflowEngine.js";
+import {
+  getPriorityScore,
+  getTailorOrderScheduleDate,
+  isTailorCurrentTaskOrder,
+} from "../../utils/workflowEngine.js";
 import {
   TD_CHATS_SURFACE,
   TD_GLASS_CARD,
@@ -752,7 +756,7 @@ export default function TdDashboardOverview({
                     <span className="font-bold text-[#1F2933]">{o.customerName}</span>
                     <span className="flex items-center gap-1.5 text-xs font-medium text-[#6B7280]">
                       <CalendarDays className="h-3.5 w-3.5" aria-hidden />
-                      {o.dueDate || o.date}
+                      {getTailorOrderScheduleDate(o) || o.dueDate || o.date}
                     </span>
                   </li>
                 ))}

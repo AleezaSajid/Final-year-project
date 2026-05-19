@@ -2565,8 +2565,14 @@ app.patch('/orders/:orderId', requireAuth, async (req, res) => {
       if (clientOid && clientOid !== oid) {
         patchStatusRooms.push(clientOid, `map_order:${clientOid}`);
       }
-      if (patchStatusRooms.length) {
-        emitToRoomUnion(io, patchStatusRooms, 'order:statusUpdated', payload);
+      const custNotify =
+        persisted.customerId != null ? String(persisted.customerId).trim() : '';
+      const statusNotifyRooms = [...patchStatusRooms];
+      if (custNotify) {
+        statusNotifyRooms.push(custNotify, userRoomName(custNotify));
+      }
+      if (statusNotifyRooms.length) {
+        emitToRoomUnion(io, statusNotifyRooms, 'order:statusUpdated', payload);
       }
 
       const tId = payload.tailorId != null && String(payload.tailorId).trim() !== '' ? String(payload.tailorId).trim() : '';
@@ -2610,14 +2616,16 @@ app.patch('/orders/:orderId', requireAuth, async (req, res) => {
           rejectedBy:
             persisted.rejectedBy != null ? String(persisted.rejectedBy).trim() : tId,
         };
-        const rejectRooms = [...patchStatusRooms];
-        const cust = persisted.customerId != null ? String(persisted.customerId).trim() : '';
-        if (cust) {
-          rejectRooms.push(cust);
-          const uroom = userRoomName(cust);
-          if (uroom && uroom !== cust) rejectRooms.push(uroom);
-        }
+        const rejectRooms = [...statusNotifyRooms];
         emitToRoomUnion(io, rejectRooms, 'orderRejected', rej);
+        emitToRoomUnion(io, rejectRooms, 'order:statusUpdated', {
+          ...payload,
+          status: payload.status || 'rejected',
+          workflowStatus: payload.workflowStatus || 'rejected',
+          rejectionReason: rej.rejectionReason,
+          rejectedAt: rej.rejectedAt,
+          rejectedBy: rej.rejectedBy,
+        });
       }
     } catch (socketErr) {
       console.error('[Socket Sync] PATCH /orders emit error', socketErr);
@@ -3101,9 +3109,14 @@ io.on('connection', (socket) => {
       const tailorId = data.tailorId != null ? String(data.tailorId).trim() : '';
       const customerId = data.customerId != null ? String(data.customerId).trim() : '';
       const orderId = data.orderId != null ? String(data.orderId).trim() : '';
+      console.log('[SERVER] tailor:selected target tailorId', tailorId || '(none)', 'orderId', orderId || '(none)');
       if (!tailorId || !orderId) return;
+      if (!isRealTailorId(tailorId)) {
+        console.warn('[SERVER] tailor:selected ignored — not a real tailor shop id', tailorId);
+        return;
+      }
 
-      io.to(tailorId).emit('tailor:popup', {
+      const popupPayload = {
         type: 'NEW_ORDER_REQUEST',
         orderId,
         customerId,
@@ -3111,7 +3124,10 @@ io.on('connection', (socket) => {
         garmentType: data.garmentType || data.dressType || '—',
         budget: data.budget != null ? String(data.budget) : '—',
         message: 'A customer selected you for an order',
-      });
+      };
+      const popupRooms = [tailorId, userRoomName(tailorId)].filter(Boolean);
+      console.log('[SERVER] emitting tailor:popup to room', popupRooms.join(', '));
+      emitToRoomUnion(io, popupRooms, 'tailor:popup', popupPayload);
     } catch (e) {
       console.error('[socket] tailor:selected handler', e);
     }

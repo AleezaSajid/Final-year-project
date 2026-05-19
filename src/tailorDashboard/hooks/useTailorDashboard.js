@@ -10,6 +10,7 @@ import {
   dedupeConversationsByOrderId,
   getOrderChatConversationId,
   isOrderEligibleForChat,
+  isOrderHiddenFromTailorChatList,
   isOrderRejected,
   logConversationRowsValidation,
   messageBelongsToOrderChat,
@@ -24,7 +25,7 @@ import {
 import {
   isPlaceholderTailorShopId,
   looksLikeTailorShopId,
-  resolveTailorIdWhenViewingAsTailor,
+  resolveLoggedInTailorShopId,
   syncTailorSessionFromTailorUser,
 } from "../../utils/chatIdentity.js";
 import {
@@ -45,6 +46,7 @@ import {
   getPriorityScore,
   getTrackingStatus,
   getWorkflowIndex,
+  getTailorOrderScheduleDate,
   isTailorCurrentTaskOrder,
   isTailorMeasurementReviewOrder,
 } from "../../utils/workflowEngine.js";
@@ -126,7 +128,18 @@ function tailorConvRowIndex(list, rawId) {
 export function useTailorDashboard() {
   const { user } = useAuth();
   const navigate = useNavigate();
-  const activeTailorShopId = useMemo(() => resolveTailorIdWhenViewingAsTailor(user), [user]);
+  const activeTailorShopId = useMemo(() => resolveLoggedInTailorShopId(user), [user]);
+
+  useEffect(() => {
+    if (user?.role !== "tailor") return;
+    console.log("[TailorDashboard] logged user", {
+      id: user?.id,
+      tailorShopId: user?.tailorShopId,
+      tailorId: user?.tailorId,
+      role: user?.role,
+    });
+    console.log("[TailorDashboard] activeTailorShopId", activeTailorShopId || "(none)");
+  }, [user, activeTailorShopId]);
   const [profiles, setProfiles] = useState(() => ({ ...defaultProfiles }));
 
   const [orders, setOrders] = useState(() => []);
@@ -234,11 +247,20 @@ export function useTailorDashboard() {
       const list = Array.isArray(data?.conversations) ? data.conversations : [];
       logConversationRowsValidation(list, "tailor fetch");
       console.log("[ChatSync tailor] fetched conversations", list.length, list);
-      setTailorChatConversations(sortTailorConversationsDesc(list));
+      const visible = list.filter((row) => {
+        const oid = normalizeConversationId(row?.orderId ?? row?.conversationId);
+        if (!oid) return false;
+        const order = orders.find((o) => {
+          const a = String(o?.id ?? o?._id ?? "").trim();
+          return a === oid;
+        });
+        return !isOrderHiddenFromTailorChatList(order, row);
+      });
+      setTailorChatConversations(sortTailorConversationsDesc(visible));
     } catch (e) {
       console.error("[ChatSync tailor] fetch conversations failed", e);
     }
-  }, [activeTailorShopId, user?.role]);
+  }, [activeTailorShopId, user?.role, orders]);
 
   const scheduleTailorConversationsReconcile = useCallback(
     (reason) => {
@@ -313,8 +335,10 @@ export function useTailorDashboard() {
     socket.connect();
 
     const joinRoom = () => {
-      console.log("[TailorDashboard] join_user:", activeTailorShopId);
-      socket.emit("join_user", { userId: activeTailorShopId });
+      const room = String(activeTailorShopId || "").trim();
+      if (!room) return;
+      console.log("[TailorDashboard] joined room", room);
+      socket.emit("join_user", { userId: room });
     };
     const handleNewNotification = (payload) => {
       if (payload?.type !== "new_message") return;
@@ -858,8 +882,8 @@ export function useTailorDashboard() {
       const acceptedAtIso = new Date().toISOString();
       const acceptPatch = {
         tailorId,
-        status: "pending",
-        workflowStatus: "pending",
+        status: "accepted",
+        workflowStatus: "order_placed",
         currentStepIndex: 0,
         currentStep: 0,
         isActive: true,
@@ -928,10 +952,8 @@ export function useTailorDashboard() {
           mergeOrderPatch(existingRow || { id: oid }, {
             ...(updated && typeof updated === "object" ? updated : {}),
             tailorId,
-            status: updated?.status ? normalizeStatus(updated.status) : "pending",
-            workflowStatus: updated?.workflowStatus
-              ? normalizeStatus(updated.workflowStatus)
-              : "pending",
+            status: "accepted",
+            workflowStatus: updated?.workflowStatus || "order_placed",
             currentStepIndex: 0,
             currentStep: 0,
             isActive: true,
@@ -947,6 +969,10 @@ export function useTailorDashboard() {
           );
         });
         setActiveOrderId(oid);
+        setDisplayStats((prev) => ({
+          ...prev,
+          inProgress: Math.max(prev.inProgress, 1),
+        }));
         setTailorChatConversations((prev) => {
           const list = Array.isArray(prev) ? [...prev] : [];
           const nOid = normalizeConversationId(oid);
@@ -1055,13 +1081,16 @@ export function useTailorDashboard() {
         if (String(activeOrderId ?? "").trim() === oid) {
           setActiveOrderId(null);
         }
+        const nOid = normalizeConversationId(oid);
         setTailorChatConversations((prev) =>
-          (Array.isArray(prev) ? prev : []).map((r) =>
-            normalizeConversationId(r?.orderId ?? r?.conversationId) === normalizeConversationId(oid)
-              ? { ...r, status: "rejected" }
-              : r
+          (Array.isArray(prev) ? prev : []).filter(
+            (r) => normalizeConversationId(r?.orderId ?? r?.conversationId) !== nOid
           )
         );
+        if (normalizeConversationId(activeConversationId) === nOid) {
+          setActiveConversationId("");
+          setIsChatOpen(false);
+        }
         window.dispatchEvent(new CustomEvent("sewserve:orders-refresh"));
         void fetchTailorConversations();
         setNotifications((prev) => [
@@ -1082,6 +1111,7 @@ export function useTailorDashboard() {
     [
       activeTailorShopId,
       activeOrderId,
+      activeConversationId,
       fetchOrders,
       fetchTailorConversations,
       orders,
@@ -1284,8 +1314,10 @@ export function useTailorDashboard() {
         .filter((o) => !isOrderRejected(o))
         .filter((o) => resolveOrderWorkflowState(o).internalStatus !== "completed")
         .filter((o) => isTailorCurrentTaskOrder(o))
-        .filter((o) => o.dueDate || o.date)
-        .sort((a, b) => String(a.dueDate || a.date).localeCompare(String(b.dueDate || b.date)))
+        .filter((o) => getTailorOrderScheduleDate(o))
+        .sort((a, b) =>
+          String(getTailorOrderScheduleDate(a)).localeCompare(String(getTailorOrderScheduleDate(b)))
+        )
         .slice(0, 2),
     [tailorOrders]
   );

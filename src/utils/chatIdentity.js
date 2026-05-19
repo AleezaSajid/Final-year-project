@@ -29,10 +29,10 @@ export function resolveCustomerIdForChat(user) {
 }
 
 /**
- * Tailor id when acting as tailor: auth first, then persisted session, then default.
+ * Real tailor shop id for socket rooms and order ownership — never demo placeholders.
  * @param {object | null | undefined} user
  */
-export function resolveTailorIdWhenViewingAsTailor(user) {
+export function resolveLoggedInTailorShopId(user) {
   if (user && typeof user === "object") {
     const shop = user.tailorShopId != null ? String(user.tailorShopId).trim() : "";
     if (shop && looksLikeTailorShopId(shop)) return shop;
@@ -45,7 +45,33 @@ export function resolveTailorIdWhenViewingAsTailor(user) {
   } catch {
     /* ignore */
   }
+  return "";
+}
+
+/**
+ * Tailor id when acting as tailor: real shop id first; demo default only for non-tailor legacy flows.
+ * @param {object | null | undefined} user
+ */
+export function resolveTailorIdWhenViewingAsTailor(user) {
+  const resolved = resolveLoggedInTailorShopId(user);
+  if (resolved) return resolved;
+  if (user?.role === "tailor") return "";
   return DEFAULT_TAILOR_CHAT_ID;
+}
+
+/**
+ * Resolve tailorShopId from a public tailor card/API row (never Mongo card id or display name).
+ * @param {object | null | undefined} tailor
+ */
+export function resolveTailorShopIdFromPublicTailor(tailor) {
+  if (!tailor || typeof tailor !== "object") return "";
+  const shop = tailor.tailorShopId != null ? String(tailor.tailorShopId).trim() : "";
+  if (looksLikeTailorShopId(shop)) return shop;
+  const alt = tailor.shopId != null ? String(tailor.shopId).trim() : "";
+  if (looksLikeTailorShopId(alt)) return alt;
+  const id = tailor.id != null ? String(tailor.id).trim() : "";
+  if (looksLikeTailorShopId(id)) return id;
+  return "";
 }
 
 /**
@@ -92,7 +118,8 @@ export function resolveTailorIdForCustomerChat(user) {
 
 /** Persist resolved tailor id so customer chat uses the same shop id on this device. */
 export function syncTailorSessionFromTailorUser(user) {
-  const id = resolveTailorIdWhenViewingAsTailor(user);
+  const id = resolveLoggedInTailorShopId(user);
+  if (!id) return "";
   try {
     localStorage.setItem(TAILOR_SESSION_STORAGE_KEY, id);
   } catch {

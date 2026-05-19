@@ -2,8 +2,10 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { MapContainer, Marker, Popup, TileLayer, useMap } from "react-leaflet";
 import "leaflet/dist/leaflet.css";
-import { getOrderById, patchOrderWizardFields } from "../../api/ordersApi.js";
-import { isOrderRejected } from "../../chatUtils.js";
+import { patchOrderWizardFields } from "../../api/ordersApi.js";
+import CustomerOrderDeclinedModal from "../../components/customer/CustomerOrderDeclinedModal.jsx";
+import { useCustomerRejectedRequest } from "../../hooks/useCustomerRejectedRequest.js";
+import { declinedNoticeFromSocketPayload } from "../../utils/customerRejectedOrders.js";
 import { ensureSocketThen, socket } from "../../socket";
 import { fetchPublicTailors } from "../../api/tailorsPublicApi.js";
 import MapDashboardNav from "./components/MapDashboardNav";
@@ -14,8 +16,15 @@ import NearbyTailorsSection from "./components/NearbyTailorsSection";
 import TailorCard from "./components/TailorCard";
 import { distanceKm, formatDistance } from "./utils/haversine";
 import { useAuth } from "../../context/AuthContext.jsx";
-import { looksLikeTailorShopId, resolveCustomerIdForChat } from "../../utils/chatIdentity.js";
-import { getLinkedWizardOrderId } from "../../utils/measurementWizardOrderSync.js";
+import {
+  looksLikeTailorShopId,
+  resolveTailorShopIdFromPublicTailor,
+} from "../../utils/chatIdentity.js";
+import { resolveOrderCustomerId } from "../../utils/measurementOrderPayload.js";
+import {
+  getLinkedWizardOrderId,
+  shouldRestoreWizardLinkedOrderId,
+} from "../../utils/measurementWizardOrderSync.js";
 import { getCustomerMeta, putCustomerMeta } from "../../api/accountApi.js";
 import { tailorMarkerIcon, userMarkerIcon } from "./markerIcons.js";
 
@@ -103,17 +112,6 @@ function isRejectedStatusValue(st) {
   return s === "rejected" || s === "declined";
 }
 
-function resolveTailorDisplayName(tailorId, catalog, lastRequest) {
-  const fromRef = lastRequest?.tailorName;
-  if (fromRef && String(fromRef).trim()) return String(fromRef).trim();
-  const tid = String(tailorId || "").trim();
-  if (!tid) return "the tailor";
-  const hit = (Array.isArray(catalog) ? catalog : []).find(
-    (t) => String(t.tailorShopId || "") === tid || String(t.id || "") === tid
-  );
-  return hit?.name || hit?.shopName || "the tailor";
-}
-
 function orderEventMatches(orderEvent, oid) {
   if (!orderEvent || !oid) return false;
   const o = String(oid).trim();
@@ -171,7 +169,6 @@ export default function NearbyTailorsMap() {
 
   const [apiTailors, setApiTailors] = useState([]);
   const [orderLiveHint, setOrderLiveHint] = useState("");
-  const [requestDeclinedNotice, setRequestDeclinedNotice] = useState(null);
   const redirectedRef = useRef(false);
   const lastMapTailorRequestRef = useRef(null);
 
@@ -189,7 +186,9 @@ export default function NearbyTailorsMap() {
       const meta = await getCustomerMeta(user);
       if (cancelled) return;
       const pending = (meta?.lastWizardOrderId || "").trim();
-      if (pending) navigate(`/map?orderId=${encodeURIComponent(pending)}`, { replace: true });
+      if (pending && (await shouldRestoreWizardLinkedOrderId(pending))) {
+        navigate(`/map?orderId=${encodeURIComponent(pending)}`, { replace: true });
+      }
     })();
     return () => {
       cancelled = true;
@@ -329,28 +328,59 @@ export default function NearbyTailorsMap() {
     }
   }, [user]);
 
-  const applyOrderDeclined = useCallback(
-    ({ tailorId = "", rejectionReason = "" } = {}) => {
-      const tid = String(tailorId || lastMapTailorRequestRef.current?.tailorId || "").trim();
-      const reason = String(rejectionReason || "").trim();
-      const tailorName = resolveTailorDisplayName(
-        tid,
-        allTailorsRef.current,
-        lastMapTailorRequestRef.current
-      );
-      void clearLastMapTailorRequest();
-      setMatchStatus("idle");
-      setAssignSuccess(false);
-      setAssignError("");
-      setRequestDeclinedNotice({ tailorId: tid, tailorName, reason });
-      window.dispatchEvent(new CustomEvent("sewserve:orders-refresh"));
-    },
-    [clearLastMapTailorRequest]
+  const linkedOrderId = useMemo(
+    () => (wizardOrderId || getLinkedWizardOrderId() || "").trim(),
+    [wizardOrderId]
   );
+
+  const tailorCatalogForDecline = useMemo(
+    () =>
+      allTailors.map((t) => ({
+        id: t.id,
+        tailorShopId: t.tailorShopId ? String(t.tailorShopId) : "",
+        name: t.name,
+        shopName: t.name,
+      })),
+    [allTailors]
+  );
+
+  const onRequestDeclined = useCallback(() => {
+    void clearLastMapTailorRequest();
+    setMatchStatus("idle");
+    setAssignSuccess(false);
+    setAssignError("");
+    setInterestedTailors([]);
+    window.dispatchEvent(new CustomEvent("sewserve:orders-refresh"));
+  }, [clearLastMapTailorRequest]);
+
+  const {
+    declinedNotice: requestDeclinedNotice,
+    showDeclinedNotice,
+    dismissNotice,
+    syncDeclinedFromOrder,
+    applyDeclinedNotice,
+    isTailorHidden,
+    rejectedTailorIds,
+  } = useCustomerRejectedRequest({
+    user,
+    linkedOrderId,
+    tailorCatalog: tailorCatalogForDecline,
+    lastRequestRef: lastMapTailorRequestRef,
+    onDeclined: onRequestDeclined,
+    debugTag: "MapReject",
+  });
+
+  const syncFocusedOrderRejection = useCallback(async () => {
+    const oid = linkedOrderId;
+    if (!oid || user?.role !== "customer") return false;
+    return syncDeclinedFromOrder(oid);
+  }, [linkedOrderId, user?.role, syncDeclinedFromOrder]);
 
   const selectTailorsSorted = useMemo(() => {
     if (!isSelectMode) return [];
-    let list = allTailors.filter((t) => t.distanceKm <= SELECT_MODE_RADIUS_KM);
+    let list = allTailors.filter(
+      (t) => !isTailorHidden(t) && t.distanceKm <= SELECT_MODE_RADIUS_KM
+    );
     const q = search.trim().toLowerCase();
     if (q) {
       list = list.filter(
@@ -358,7 +388,7 @@ export default function NearbyTailorsMap() {
       );
     }
     return sortTailorsSelectMode(list);
-  }, [isSelectMode, allTailors, search]);
+  }, [isSelectMode, allTailors, search, isTailorHidden]);
 
 
   useEffect(() => {
@@ -370,7 +400,6 @@ export default function NearbyTailorsMap() {
 
   useEffect(() => {
     if (!wizardOrderId) {
-      setRequestDeclinedNotice(null);
       return;
     }
     activeOrderIdRef.current = wizardOrderId;
@@ -386,6 +415,9 @@ export default function NearbyTailorsMap() {
     };
 
     void (async () => {
+      const rejected = await syncFocusedOrderRejection();
+      if (cancelled || rejected) return;
+
       let restoredSent = false;
       if (lastMapTailorRequestRef.current) {
         restoredSent = applyRestore(lastMapTailorRequestRef.current);
@@ -404,28 +436,23 @@ export default function NearbyTailorsMap() {
         setInterestedTailors([]);
         setSelectedId(null);
       }
-
-      try {
-        const order = await getOrderById(wizardOrderId);
-        if (cancelled || !order || !isOrderRejected(order)) return;
-        applyOrderDeclined({
-          tailorId: order.tailorId,
-          rejectionReason: order.rejectionReason,
-        });
-      } catch {
-        /* order fetch optional */
-      }
     })();
 
     return () => {
       cancelled = true;
     };
-  }, [wizardOrderId, user, applyOrderDeclined]);
+  }, [wizardOrderId, user, syncFocusedOrderRejection]);
+
+  useEffect(() => {
+    console.log("[MapReject] modal visible", showDeclinedNotice);
+    console.log("[MapReject] dismissed ids", [...rejectedTailorIds]);
+  }, [showDeclinedNotice, requestDeclinedNotice, rejectedTailorIds]);
 
   /** Join order room + surface status updates on the map (same events as order tracking). */
   useEffect(() => {
     const oid = (wizardOrderId || "").trim();
     if (!oid) {
+      console.log("[CustomerDecline Map] order socket listeners OFF — no orderId in URL");
       setOrderLiveHint("");
       return undefined;
     }
@@ -436,6 +463,33 @@ export default function NearbyTailorsMap() {
     ensureSocketThen(join);
     socket.on("connect", join);
 
+    const applyMapRejectFromPayload = (payload = {}, data = null) => {
+      console.log("[MapReject] event received", { payload, data, oid });
+      const built = declinedNoticeFromSocketPayload(
+        { ...payload, orderId: payload?.orderId || data?.orderId || oid },
+        allTailorsRef.current,
+        lastMapTailorRequestRef.current
+      );
+      if (built) {
+        console.log("[MapReject] notice built", built);
+        applyDeclinedNotice(built);
+        return;
+      }
+      if (data && isRejectedStatusValue(data.status || data.workflowStatus || data.fullOrder?.status)) {
+        applyDeclinedNotice({
+          orderId: oid,
+          tailorId: data.tailorId ?? data.fullOrder?.tailorId ?? payload?.tailorId,
+          tailorName: lastMapTailorRequestRef.current?.tailorName,
+          reason:
+            data.rejectionReason ??
+            data.fullOrder?.rejectionReason ??
+            data.patch?.rejectionReason ??
+            payload?.rejectionReason ??
+            "",
+        });
+      }
+    };
+
     const onOrderEvent = (data) => {
       if (!data || !orderEventMatches(data, oid)) return;
       const st =
@@ -445,13 +499,18 @@ export default function NearbyTailorsMap() {
         "";
       if (st) {
         if (isRejectedStatusValue(st)) {
-          applyOrderDeclined({
-            tailorId: data.tailorId ?? data.fullOrder?.tailorId,
-            rejectionReason:
-              data.rejectionReason ??
-              data.fullOrder?.rejectionReason ??
-              data.patch?.rejectionReason,
-          });
+          applyMapRejectFromPayload(
+            {
+              orderId: oid,
+              tailorId: data.tailorId ?? data.fullOrder?.tailorId,
+              rejectionReason:
+                data.rejectionReason ??
+                data.fullOrder?.rejectionReason ??
+                data.patch?.rejectionReason,
+              status: st,
+            },
+            data
+          );
           return;
         }
         setOrderLiveHint(`Latest: ${st}`);
@@ -468,10 +527,7 @@ export default function NearbyTailorsMap() {
     };
     const onRejected = (payload = {}) => {
       if (!payload || !orderEventMatches(payload, oid)) return;
-      applyOrderDeclined({
-        tailorId: payload.tailorId,
-        rejectionReason: payload.rejectionReason,
-      });
+      applyMapRejectFromPayload(payload);
     };
     socket.on("orderAccepted", onAccepted);
     socket.on("orderRejected", onRejected);
@@ -482,7 +538,7 @@ export default function NearbyTailorsMap() {
       socket.off("orderAccepted", onAccepted);
       socket.off("orderRejected", onRejected);
     };
-  }, [wizardOrderId, navigate, applyOrderDeclined]);
+  }, [wizardOrderId, navigate, applyDeclinedNotice]);
 
   const listTailors = useMemo(() => {
     const list = [...interestedTailors];
@@ -499,7 +555,7 @@ export default function NearbyTailorsMap() {
   }, [interestedTailors, sortBy, search]);
 
   const browseBaseTailors = useMemo(() => {
-    let list = [...allTailors];
+    let list = allTailors.filter((t) => !isTailorHidden(t));
     list = list.filter((t) => t.distanceKm <= radiusKm);
     const q = search.trim().toLowerCase();
     if (q) {
@@ -510,7 +566,7 @@ export default function NearbyTailorsMap() {
     if (sortBy === "rating") list.sort((a, b) => b.rating - a.rating);
     else list.sort((a, b) => a.distanceKm - b.distanceKm);
     return list;
-  }, [allTailors, radiusKm, search, sortBy]);
+  }, [allTailors, radiusKm, search, sortBy, isTailorHidden]);
 
   const interestedTailorIds = useMemo(() => {
     return new Set(interestedTailors.map((t) => t.id));
@@ -588,7 +644,7 @@ export default function NearbyTailorsMap() {
   const handleSelectTailor = useCallback(
     async (tailor) => {
       const oid = (wizardOrderId || activeOrderIdRef.current || getLinkedWizardOrderId() || "").trim();
-      const tailorShopId = String(tailor?.tailorShopId || "").trim();
+      const tailorShopId = resolveTailorShopIdFromPublicTailor(tailor);
       if (!oid) {
         setAssignError("Complete the measurement wizard before selecting a tailor.");
         return;
@@ -599,7 +655,7 @@ export default function NearbyTailorsMap() {
       }
       setAssignBusy(true);
       setAssignError("");
-      setRequestDeclinedNotice(null);
+      dismissNotice();
       try {
         await patchOrderWizardFields(
           oid,
@@ -612,7 +668,7 @@ export default function NearbyTailorsMap() {
           },
           { operation: "Select tailor" }
         );
-        const customerId = resolveCustomerIdForChat(user);
+        const customerId = resolveOrderCustomerId(user);
         ensureSocketThen(() => {
           socket.emit("tailor:selected", {
             tailorId: tailorShopId,
@@ -644,7 +700,7 @@ export default function NearbyTailorsMap() {
         setAssignBusy(false);
       }
     },
-    [wizardOrderId, user, userCenter, navigate]
+    [wizardOrderId, user, userCenter, navigate, dismissNotice]
   );
 
   const handleConfirmWizardTailor = useCallback(async () => {
@@ -776,34 +832,18 @@ export default function NearbyTailorsMap() {
               </div>
             ) : null}
 
-            {!isSelectMode && wizardOrderId && requestDeclinedNotice ? (
-              <div
-                className="mt-6 rounded-apple-card border border-rose-200/70 bg-rose-50/80 px-4 py-3 text-rose-950 shadow-sm shadow-rose-900/5 backdrop-blur-md sm:px-5 sm:py-4"
-                role="status"
-              >
-                <p className="text-sm font-semibold">
-                  Your request was declined by {requestDeclinedNotice.tailorName}.
-                </p>
-                {requestDeclinedNotice.reason ? (
-                  <p className="mt-1 text-sm text-rose-900/90">
-                    Reason: {requestDeclinedNotice.reason}
-                  </p>
-                ) : null}
-                <button
-                  type="button"
-                  onClick={() => {
-                    setRequestDeclinedNotice(null);
-                    setMatchStatus("idle");
-                    setSelectedId(null);
-                  }}
-                  className="mt-3 rounded-xl border border-rose-200/80 bg-white/90 px-4 py-2 text-sm font-semibold text-rose-900 shadow-sm transition hover:bg-white focus:outline-none focus-visible:ring-2 focus-visible:ring-rose-400/40"
-                >
-                  Find another tailor
-                </button>
-              </div>
-            ) : null}
+            <CustomerOrderDeclinedModal
+              open={showDeclinedNotice}
+              notice={requestDeclinedNotice}
+              onDismiss={dismissNotice}
+              onChooseAnotherTailor={() => {
+                dismissNotice();
+                setMatchStatus("idle");
+                setSelectedId(null);
+              }}
+            />
 
-            {!isSelectMode && wizardOrderId && !requestDeclinedNotice ? (
+            {!isSelectMode && wizardOrderId && !showDeclinedNotice ? (
               <div
                 className="mt-6 rounded-apple-card border border-emerald-200/70 bg-emerald-50/85 px-4 py-3 text-emerald-950 shadow-sm sm:px-5 sm:py-4"
                 role="status"

@@ -2,7 +2,7 @@ import React, { useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import { useNavigate } from "react-router-dom";
 import { Check, FileText, PackageCheck, Shirt, UserPlus } from "lucide-react";
-import { api } from "../api/client.js";
+import { openFreshMeasurementWizard } from "../utils/wizardNavigation.js";
 
 const sectionReveal = {
   hidden: { opacity: 0, y: 20 },
@@ -130,18 +130,8 @@ function StepPill({ item, stepIndex, isActive, onSelect }) {
  */
 export default function HowItWorksSplitSection() {
   const navigate = useNavigate();
-  const goToMeasurementWizard = async () => {
-    try {
-      const data = await api("/api/auth/me");
-      const role = data?.user?.role ? String(data.user.role).trim() : "";
-      if (data?.user && role === "customer") {
-        navigate("/features/measurement-wizard");
-        return;
-      }
-    } catch {
-      // ignore
-    }
-    navigate("/login", { state: { from: "/features/measurement-wizard" } });
+  const goToMeasurementWizard = () => {
+    void openFreshMeasurementWizard(navigate);
   };
   const [activeId, setActiveId] = useState(() => HOW_IT_WORKS_ITEMS[0].id);
   const active =

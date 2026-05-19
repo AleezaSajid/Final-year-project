@@ -6,6 +6,10 @@ import { LandingStylePageBackground } from "./components/LandingStylePageBackgro
 import DashboardNavbar from "./components/DashboardNavbar.jsx";
 import { useAuth } from "./context/AuthContext.jsx";
 import { getCustomerMeta, putCustomerMeta } from "./api/accountApi.js";
+import {
+  getLinkedWizardOrderId,
+  shouldRestoreWizardLinkedOrderId,
+} from "./utils/measurementWizardOrderSync.js";
 
 function normalizeText(v) {
   return String(v ?? "").trim();
@@ -108,11 +112,16 @@ export default function LocationStep() {
       }
     }
 
-    let pendingOrderId = normalizeText(location.state?.wizardOrderId || location.state?.orderId);
+    let pendingOrderId = normalizeText(
+      location.state?.wizardOrderId || location.state?.orderId || getLinkedWizardOrderId()
+    );
     if (!pendingOrderId && user?.id && user.role === "customer") {
       try {
         const meta = await getCustomerMeta(user);
-        pendingOrderId = normalizeText(meta?.lastWizardOrderId);
+        const fromMeta = normalizeText(meta?.lastWizardOrderId);
+        if (fromMeta && (await shouldRestoreWizardLinkedOrderId(fromMeta))) {
+          pendingOrderId = fromMeta;
+        }
       } catch {
         pendingOrderId = "";
       }

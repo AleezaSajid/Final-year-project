@@ -11,6 +11,7 @@ import {
   isOrderAwaitingTailorAccept,
   isOrderChatEnabled,
   isOrderEligibleForChat,
+  isOrderHiddenFromTailorChatList,
   normalizeConversationId,
 } from "../../chatUtils.js";
 import { resolveOrderWorkflowState } from "../../tailorDashboard/constants.js";
@@ -118,10 +119,14 @@ export default function TailorWhatsAppWorkspace({
     tailorChatConversations,
   ]);
 
-  const sidebarRows = useMemo(
-    () => mergeSidebarRowsWithInjected(tailorChatConversations, injectedSidebarRow),
-    [tailorChatConversations, injectedSidebarRow]
-  );
+  const sidebarRows = useMemo(() => {
+    const merged = mergeSidebarRowsWithInjected(tailorChatConversations, injectedSidebarRow);
+    return merged.filter((conv) => {
+      const oid = normalizeConversationId(conv.orderId ?? conv.conversationId ?? "");
+      const order = orders.find((o) => String(o.id ?? o._id) === oid);
+      return !isOrderHiddenFromTailorChatList(order, conv);
+    });
+  }, [tailorChatConversations, injectedSidebarRow, orders]);
 
   const activeRow = useMemo(() => {
     if (!normalizedActive) return null;

@@ -2,6 +2,7 @@ import { useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { Ruler, X } from "lucide-react";
 import { api } from "../api/client.js";
+import { startWizardFresh } from "../utils/measurementWizardOrderSync.js";
 
 /**
  * Entry from Browse: send the customer through the Measurement Wizard so the tailor gets full design + measurements.
@@ -32,19 +33,21 @@ export default function SendRequestModal({ open, tailor, onClose }) {
         specialty: tailor.specialty,
         tailorShopId: tailor.tailorShopId,
       },
+      fresh: true,
       startWizardFresh: true,
     };
     try {
       const data = await api("/api/auth/me");
       const role = data?.user?.role ? String(data.user.role).trim() : "";
       if (data?.user && role === "customer") {
+        startWizardFresh({ user: data.user });
         navigate("/features/measurement-wizard", { state: nextState });
         return;
       }
     } catch {
       // ignore
     }
-    navigate("/login", { state: { from: "/features/measurement-wizard", ...nextState } });
+    navigate("/login", { state: { from: "/features/measurement-wizard", fresh: true, ...nextState } });
   }
 
   return (

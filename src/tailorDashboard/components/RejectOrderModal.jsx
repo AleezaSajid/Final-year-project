@@ -4,9 +4,9 @@ import { TD_GLASS_CARD, TD_INPUT_CLASS, TD_REJECT_BUTTON_CLASS } from "../tailor
 
 export const REJECT_QUICK_REASONS = [
   "Fully booked",
-  "Not available",
-  "Design not supported",
   "Out of service area",
+  "Design not supported",
+  "Not available",
   "Other",
 ];
 
@@ -43,7 +43,7 @@ export default function RejectOrderModal({
 
   return (
     <div
-      className="fixed inset-0 z-[80] flex items-center justify-center p-4"
+      className="fixed inset-0 z-[10060] flex items-center justify-center p-4"
       role="dialog"
       aria-modal="true"
       aria-labelledby="reject-order-title"
@@ -58,10 +58,10 @@ export default function RejectOrderModal({
         <div className="flex items-start justify-between gap-3">
           <div>
             <h2 id="reject-order-title" className="text-lg font-bold text-[#1F2933]">
-              Reject order request?
+              Decline Request
             </h2>
             <p className="mt-1.5 text-sm leading-relaxed text-[#6B7280]">
-              The customer will see that {orderLabel} was declined. You can add an optional note below.
+              {orderLabel} will be declined. Add an optional reason below, or confirm without one.
             </p>
           </div>
           <button
@@ -128,7 +128,7 @@ export default function RejectOrderModal({
             onClick={() => onConfirm?.(resolvedReason)}
             className={TD_REJECT_BUTTON_CLASS}
           >
-            {busy ? "Rejecting…" : "Reject order"}
+            {busy ? "Declining…" : "Decline request"}
           </button>
         </div>
       </div>

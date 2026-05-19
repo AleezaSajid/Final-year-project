@@ -11,6 +11,7 @@ import {
   forgotPasswordHref,
   forgotPasswordLinkState,
 } from "./utils/forgotPasswordRoutes.js";
+import { startWizardFresh } from "./utils/measurementWizardOrderSync.js";
 
 const LOGO_SRC = `${process.env.PUBLIC_URL || ""}/images/hero/sewserve-logo.png`;
 
@@ -613,8 +614,13 @@ export default function SignInPage() {
       setUserRole("customer");
       toast.success("Welcome back", "Signing you in…", { durationMs: 1400 });
       const from = location?.state?.from;
+      const fresh = location?.state?.fresh === true;
+      if (fresh) {
+        startWizardFresh({ user: data.user });
+      }
+      const dest = typeof from === "string" && from.trim() ? from : "/customer/dashboard";
       window.setTimeout(() => {
-        navigate(typeof from === "string" && from.trim() ? from : "/customer/dashboard", { replace: true });
+        navigate(dest, { replace: true, state: fresh ? { fresh: true } : undefined });
       }, 260);
     } catch (err) {
       const msg = err?.message || "Sign in failed";
