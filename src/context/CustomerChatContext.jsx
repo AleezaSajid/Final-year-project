@@ -1,4 +1,4 @@
-import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
+﻿import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import CustomerChatWindow from "../CustomerChatWindow.jsx";
 import { ensureSocketThen, socket } from "../socket.js";
@@ -107,7 +107,7 @@ export function CustomerChatProvider({ children }) {
   const [modalChatRow, setModalChatRow] = useState(null);
   const customerReconcileRefetchAtRef = useRef(0);
 
-  /** Legacy hook for review pages — sets modal thread from order row only (no global tailor). */
+  /** Legacy hook for review pages â€” sets modal thread from order row only (no global tailor). */
   const syncCustomerOrderChatFromOrder = useCallback(
     (order) => {
       if (!order || !order.tailorId) {
@@ -175,18 +175,16 @@ export function CustomerChatProvider({ children }) {
   const tailorIdForChat = "";
   const conversationId = "";
 
-  /** Join customer user socket rooms on every page — server emits orderAccepted to these rooms. */
+  /** Join customer user socket rooms on every page â€” server emits orderAccepted to these rooms. */
   useEffect(() => {
     if (user?.role !== "customer" || !user) return undefined;
     const joinCustomerRooms = () => {
       const primary = authCustomerIdForApi;
       const alt = resolveCustomerIdForChat(user);
       if (primary) {
-        console.log("[chat] joining room", primary);
         socket.emit("join_user", { userId: primary });
       }
       if (alt && alt !== primary) {
-        console.log("[chat] joining room", alt);
         socket.emit("join_user", { userId: alt });
       }
     };
@@ -211,17 +209,13 @@ export function CustomerChatProvider({ children }) {
       const acceptedOrderId = resolveAcceptedOrderId(payload);
 
       if (onWizard) {
-        console.log("[wizard] current order", currentWizardOrderId || "(none)");
-        console.log("[wizard] accepted order", acceptedOrderId || "(none)");
         if (!currentWizardOrderId || !acceptedOrderId) return;
         if (!wizardOrderAcceptMatches(payload, currentWizardOrderId)) return;
-        console.log("[Customer] orderAccepted (wizard match) → /customer/dashboard");
         navigate("/customer/dashboard", { replace: true });
         return;
       }
 
       if (location.pathname === "/customer/dashboard") return;
-      console.log("[Customer] orderAccepted → navigating to /customer/dashboard");
       navigate("/customer/dashboard", { replace: true });
     };
     socket.on("orderAccepted", onOrderAccepted);
@@ -243,7 +237,6 @@ export function CustomerChatProvider({ children }) {
       }
       const list = Array.isArray(data?.conversations) ? data.conversations : [];
       logConversationRowsValidation(list, "customer fetch");
-      console.log("[ChatSync customer] fetched conversations", list.length, list);
       setCustomerChatConversations(sortCustomerConversationsDesc(list));
     } catch (e) {
       console.error("[ChatSync customer] fetch conversations failed", e);
@@ -255,7 +248,6 @@ export function CustomerChatProvider({ children }) {
       const now = Date.now();
       if (now - customerReconcileRefetchAtRef.current < 1600) return;
       customerReconcileRefetchAtRef.current = now;
-      console.log("[ChatSync] reconcile refetch customer conversations", reason);
       void fetchCustomerConversations();
     },
     [fetchCustomerConversations]
@@ -290,7 +282,6 @@ export function CustomerChatProvider({ children }) {
     if (!isCustomerChatPath(location.pathname) || user?.role !== "customer") return undefined;
 
     const onConversationUpdated = (payload) => {
-      console.log("[ChatSync] conversation:updated (customer)", payload);
       const nCid = normalizeConversationId(payload?.conversationId);
       if (!nCid) return;
       setCustomerChatConversations((prev) => {
@@ -330,7 +321,6 @@ export function CustomerChatProvider({ children }) {
     };
 
     const onMessageSidebar = (message) => {
-      console.log("[ChatSync] message_received (customer conv list)", message);
       const nCid = normalizeConversationId(message?.conversationId);
       if (!nCid) return;
       setCustomerChatConversations((prev) => {

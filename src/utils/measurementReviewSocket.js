@@ -1,4 +1,4 @@
-import { ensureSocketThen, socket } from "../socket.js";
+﻿import { ensureSocketThen, socket } from "../socket.js";
 import { resolveTailorIdForCustomerChat } from "./chatIdentity.js";
 import { patchOrderWizardFields } from "../api/ordersApi.js";
 import { resolveOrderCustomerId, resolveWizardTailorShopIdForOrder } from "./measurementOrderPayload.js";
@@ -20,9 +20,9 @@ function cloneWizardState(wizardData) {
 }
 
 /**
- * Sets stable `wizardData.image` for socket/API (data URL or remote URL only — no blob: URLs).
+ * Sets stable `wizardData.image` for socket/API (data URL or remote URL only â€” no blob: URLs).
  * Prefers `referenceImage.dataUrl`, then existing string `image`.
- * @param {Record<string, unknown>} wd — cloned wizard payload (mutated)
+ * @param {Record<string, unknown>} wd â€” cloned wizard payload (mutated)
  */
 function normalizeWizardImageForEmit(wd) {
   if (!wd || typeof wd !== "object" || Array.isArray(wd)) return;
@@ -95,13 +95,13 @@ function buildMeasurementReviewSocketPayload(orderId, tailorId, full) {
 /**
  * Lightweight payload for map matching (`newOrder` on server). No full measurements or address text.
  * @param {string} orderId
- * @param {Record<string, unknown>} full — cloned wizard snapshot
+ * @param {Record<string, unknown>} full â€” cloned wizard snapshot
  */
 function buildMapNewOrderPayload(orderId, full) {
   const garment =
     (full && typeof full.customGarmentType === "string" && full.customGarmentType.trim()) ||
     (full && typeof full.selectedGarmentType === "string" && full.selectedGarmentType.trim()) ||
-    "—";
+    "â€”";
   const design = full && full.designBrief && typeof full.designBrief === "object" ? full.designBrief : {};
   const notes = typeof design.designNotes === "string" ? design.designNotes.trim() : "";
   const urgency = typeof design.urgency === "string" ? design.urgency.trim() : "";
@@ -110,7 +110,7 @@ function buildMapNewOrderPayload(orderId, full) {
     garmentType: garment,
     dressType: garment,
     radiusKm: 5,
-    budget: "—",
+    budget: "â€”",
     ...(notes ? { notes } : {}),
     ...(urgency ? { dueDate: urgency } : {}),
   };
@@ -119,7 +119,7 @@ function buildMapNewOrderPayload(orderId, full) {
 /**
  * Persists the order, stores the complete wizard state on the order document, then emits
  * measurement:review with a single unfiltered `wizardData` object.
- * @param {Record<string, unknown>} wizardData — entire wizard state (no field picking)
+ * @param {Record<string, unknown>} wizardData â€” entire wizard state (no field picking)
  * @param {object | null} authUser
  * @param {{ tailorResolutionHints?: { activeChatTailorShopId?: string; latestConversationTailorShopId?: string } }} [emitOptions]
  */
@@ -167,7 +167,6 @@ export async function emitWizardMeasurementReview(wizardData, authUser, emitOpti
     console.warn("[measurement:review emit] missing tailor shop id; socket payload may not route to a shop.");
   }
   const socketPayload = buildMeasurementReviewSocketPayload(orderId, tailorId, full);
-  console.log("[measurement:review emit] wizardData.image:", socketPayload?.wizardData?.image);
   socket.emit("measurement:review", socketPayload);
 
   const mapPayload = buildMapNewOrderPayload(orderId, full);

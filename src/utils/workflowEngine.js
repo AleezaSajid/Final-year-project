@@ -1,4 +1,4 @@
-const WORKFLOW_DEBUG = true;
+const WORKFLOW_DEBUG = false;
 
 export const workflowStages = [
   { status: "pending", label: "Order Placed" },

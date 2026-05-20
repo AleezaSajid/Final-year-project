@@ -10,8 +10,7 @@ import {
   TD_INPUT_CLASS,
   TD_PRIMARY_BUTTON_CLASS,
 } from "./tailorDashboard/tailorDashboardClassNames";
-
-const API_BASE_URL = "http://localhost:5000";
+import { getApiBaseUrl } from "./api/client.js";
 const CURRENT_TAILOR_ID = "T-A1";
 
 const statusLabel = (status) => {
@@ -172,7 +171,9 @@ export default function LastReviewPage() {
 
     const fetchOrder = async () => {
       try {
-        const response = await fetch(`${API_BASE_URL}/orders/tailor/${CURRENT_TAILOR_ID}`);
+        const base = getApiBaseUrl();
+        if (!base) return;
+        const response = await fetch(`${base}/orders/tailor/${CURRENT_TAILOR_ID}`);
         if (!response.ok) return;
         const payload = await response.json();
         if (!isMounted || !Array.isArray(payload)) return;
@@ -280,7 +281,9 @@ export default function LastReviewPage() {
     if (!safeOrder?.id) return;
     setIsSubmitting(true);
     try {
-      await fetch(`${API_BASE_URL}/orders/${safeOrder.id}`, {
+      const base = getApiBaseUrl();
+      if (!base) return;
+      await fetch(`${base}/orders/${safeOrder.id}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({

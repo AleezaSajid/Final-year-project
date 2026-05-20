@@ -3,6 +3,7 @@ import { ArrowRight, Clock3, Home, Scissors, TrendingUp, UserPlus } from "lucide
 import { useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import LandingNavbar from "../components/LandingNavbar";
+import { LandingStylePageBackground } from "../components/LandingStylePageBackground.jsx";
 import { useSewServeLogoProcessedSrc } from "../hooks/useSewServeLogoProcessedSrc";
 
 const navLinks = [
@@ -128,39 +129,6 @@ export default function EmpowerHer() {
             font-weight: 600;
             letter-spacing: -0.03em;
             line-height: 1.08;
-          }
-
-          /* Premium full-viewport wash — softer, editorial */
-          .ss-page-bg-anim {
-            position: fixed;
-            inset: 0;
-            z-index: 0;
-            pointer-events: none;
-            overflow: hidden;
-            background:
-              radial-gradient(ellipse 120% 90% at 8% -10%, rgba(204, 251, 241, 0.55), transparent 50%),
-              radial-gradient(ellipse 100% 80% at 92% 5%, rgba(224, 231, 255, 0.45), transparent 48%),
-              radial-gradient(ellipse 90% 70% at 50% 105%, rgba(237, 233, 254, 0.35), transparent 52%),
-              radial-gradient(ellipse 55% 45% at 72% 48%, rgba(241, 245, 249, 0.85), transparent 55%),
-              linear-gradient(165deg, #f8fafc 0%, #f1f5f9 38%, #eef2ff 72%, #faf5ff 100%);
-            background-size: 150% 150%;
-            animation: ss-bg-gradient-drift 56s ease-in-out infinite alternate;
-            filter: blur(32px) brightness(1.04) saturate(1.02);
-          }
-
-          .ss-page-bg-anim::after {
-            content: "";
-            position: absolute;
-            inset: 0;
-            z-index: 1;
-            pointer-events: none;
-            background: radial-gradient(ellipse 92% 88% at 50% 45%, transparent 38%, rgba(15, 23, 42, 0.04) 100%);
-          }
-
-          @keyframes ss-bg-gradient-drift {
-            0% { background-position: 0% 0%; }
-            50% { background-position: 100% 50%; }
-            100% { background-position: 30% 100%; }
           }
 
           .emp-hero-shell {
@@ -694,7 +662,7 @@ export default function EmpowerHer() {
           }
         `}
       </style>
-      <div className="ss-page-bg-anim" aria-hidden="true" />
+      <LandingStylePageBackground />
       <div className="relative z-50">
         <LandingNavbar
           logoDisplaySrc={logoDisplaySrc}

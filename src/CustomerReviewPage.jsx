@@ -9,7 +9,7 @@ import { useCustomerChat } from "./context/CustomerChatContext.jsx";
 import { createTestimonial } from "./api/testimonialsApi.js";
 import { getApiBaseUrl } from "./api/client.js";
 
-const API_BASE_URL = getApiBaseUrl() || "http://localhost:5000";
+const apiBase = () => getApiBaseUrl();
 
 const C = {
   heading: "#1a1a1a",
@@ -61,7 +61,9 @@ export default function CustomerReviewPage() {
 
     const fetchOrder = async () => {
       try {
-        const response = await fetch(`${API_BASE_URL}/orders/${orderId}`, { credentials: "include" });
+        const base = apiBase();
+        if (!base) return;
+        const response = await fetch(`${base}/orders/${orderId}`, { credentials: "include" });
         if (!response.ok) {
           if (isMounted) setOrder(null);
           return;
@@ -122,7 +124,9 @@ export default function CustomerReviewPage() {
     if (!safeOrder?.id) return;
     setIsSubmitting(true);
     try {
-      const response = await fetch(`${API_BASE_URL}/orders/${safeOrder.id}`, {
+      const base = apiBase();
+      if (!base) return;
+      const response = await fetch(`${base}/orders/${safeOrder.id}`, {
         method: "PUT",
         credentials: "include",
         headers: { "Content-Type": "application/json" },

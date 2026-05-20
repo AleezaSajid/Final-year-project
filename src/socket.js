@@ -7,7 +7,10 @@ function resolveSocketUrl() {
   }
   const base = typeof window !== "undefined" ? getApiBaseUrl() : "";
   if (base) return base;
-  return "http://localhost:5000";
+  if (process.env.NODE_ENV === "development") {
+    return "http://localhost:5000";
+  }
+  return "";
 }
 
 const url = resolveSocketUrl();
@@ -79,8 +82,6 @@ export function reconnectSocketSession() {
     }
 
     socket.connect();
-
-    console.log("[socket] reconnected after auth");
   } catch (error) {
     console.error("[socket] reconnectSocketSession failed", error);
   }

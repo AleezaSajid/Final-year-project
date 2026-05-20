@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import {
   ArrowRight,
@@ -91,6 +92,12 @@ function filterPillClass(isActive) {
   return `browse-filter-pill${isActive ? " browse-filter-pill--active" : ""}`;
 }
 
+function filterOptionClass(isSelected) {
+  return `flex w-full rounded-xl px-3 py-2.5 text-left text-sm font-medium transition-all duration-300 hover:bg-emerald-50 ${
+    isSelected ? "bg-emerald-100 text-emerald-900" : "text-gray-800"
+  }`;
+}
+
 function BrowseSkeletonCard() {
   return (
     <li className="browse-skeleton-card" aria-hidden>
@@ -124,6 +131,14 @@ export default function BrowseTailors() {
   const [tailorsLoading, setTailorsLoading] = useState(true);
   const [visibleCount, setVisibleCount] = useState(TAILORS_PAGE_SIZE);
   const popoverRef = useRef(null);
+  const portalMenuRef = useRef(null);
+  const filterTriggerRefs = useRef({
+    rating: null,
+    experience: null,
+    price: null,
+    delivery: null,
+  });
+  const [menuPosition, setMenuPosition] = useState(null);
   const urlHydrated = useRef(false);
 
   useEffect(() => {
@@ -195,14 +210,40 @@ export default function BrowseTailors() {
   useEffect(() => {
     function onPointerDown(e) {
       if (!filterMenu) return;
-      const el = popoverRef.current;
-      if (el && !el.contains(e.target)) setFilterMenu(null);
+      const target = e.target;
+      if (popoverRef.current?.contains(target)) return;
+      if (portalMenuRef.current?.contains(target)) return;
+      setFilterMenu(null);
     }
     document.addEventListener("mousedown", onPointerDown);
     document.addEventListener("touchstart", onPointerDown);
     return () => {
       document.removeEventListener("mousedown", onPointerDown);
       document.removeEventListener("touchstart", onPointerDown);
+    };
+  }, [filterMenu]);
+
+  useEffect(() => {
+    if (!filterMenu) {
+      setMenuPosition(null);
+      return undefined;
+    }
+    const updatePosition = () => {
+      const trigger = filterTriggerRefs.current[filterMenu];
+      if (!trigger) return;
+      const rect = trigger.getBoundingClientRect();
+      setMenuPosition({
+        top: rect.bottom + 8,
+        left: rect.left + rect.width / 2,
+        minWidth: Math.max(220, rect.width),
+      });
+    };
+    updatePosition();
+    window.addEventListener("resize", updatePosition);
+    window.addEventListener("scroll", updatePosition, true);
+    return () => {
+      window.removeEventListener("resize", updatePosition);
+      window.removeEventListener("scroll", updatePosition, true);
     };
   }, [filterMenu]);
 
@@ -303,8 +344,93 @@ export default function BrowseTailors() {
     setFilterMenu(null);
   };
 
-  const menuPanelClass =
-    "absolute left-1/2 top-[calc(100%+0.5rem)] z-30 min-w-[220px] -translate-x-1/2 rounded-2xl border border-white/40 bg-white/95 p-2 shadow-xl backdrop-blur-lg";
+  const filterMenuPortal =
+    filterMenu && menuPosition && typeof document !== "undefined"
+      ? createPortal(
+          <div
+            ref={portalMenuRef}
+            id={`browse-filter-${filterMenu}-menu`}
+            className="browse-filter-dropdown-menu browse-filter-dropdown-menu--portal"
+            role="listbox"
+            aria-labelledby={`browse-filter-${filterMenu}-trigger`}
+            style={{
+              top: menuPosition.top,
+              left: menuPosition.left,
+              minWidth: menuPosition.minWidth,
+            }}
+          >
+            {filterMenu === "rating"
+              ? RATING_OPTIONS.map((o) => (
+                  <button
+                    key={o.value}
+                    type="button"
+                    role="option"
+                    aria-selected={rating === o.value}
+                    onClick={() => {
+                      setRating(o.value);
+                      setFilterMenu(null);
+                    }}
+                    className={filterOptionClass(rating === o.value)}
+                  >
+                    {o.label}
+                  </button>
+                ))
+              : null}
+            {filterMenu === "experience"
+              ? EXPERIENCE_BAR_OPTIONS.map((o) => (
+                  <button
+                    key={o.value}
+                    type="button"
+                    role="option"
+                    aria-selected={experienceBar === o.value}
+                    onClick={() => {
+                      setExperienceBar(o.value);
+                      setFilterMenu(null);
+                    }}
+                    className={filterOptionClass(experienceBar === o.value)}
+                  >
+                    {o.label}
+                  </button>
+                ))
+              : null}
+            {filterMenu === "price"
+              ? PRICE_OPTIONS.map((o) => (
+                  <button
+                    key={o.value}
+                    type="button"
+                    role="option"
+                    aria-selected={price === o.value}
+                    onClick={() => {
+                      setPrice(o.value);
+                      setFilterMenu(null);
+                    }}
+                    className={filterOptionClass(price === o.value)}
+                  >
+                    {o.label}
+                  </button>
+                ))
+              : null}
+            {filterMenu === "delivery"
+              ? DELIVERY_OPTIONS.map((o) => (
+                  <button
+                    key={o.value}
+                    type="button"
+                    role="option"
+                    aria-selected={delivery === o.value}
+                    onClick={() => {
+                      setDelivery(o.value);
+                      setFilterMenu(null);
+                    }}
+                    className={filterOptionClass(delivery === o.value)}
+                  >
+                    {o.label}
+                  </button>
+                ))
+              : null}
+          </div>,
+          document.body
+        )
+      : null;
 
   return (
     <div className="relative isolate min-h-screen bg-transparent text-slate-600 antialiased">
@@ -338,6 +464,7 @@ export default function BrowseTailors() {
       </style>
 
       <div className="relative z-10 font-['Inter',sans-serif]">
+        {filterMenuPortal}
         <LandingNavbar
           logoDisplaySrc={logoDisplaySrc}
           navLinks={navLinks}
@@ -345,7 +472,7 @@ export default function BrowseTailors() {
         />
 
         <main id="home" className="relative">
-          <div className="browse-hero-shell relative isolate overflow-hidden border-b border-white/25">
+          <div className="browse-hero-shell relative isolate overflow-visible border-b border-white/25">
             <div className="browse-hero-grid" aria-hidden="true" />
             <div
               className="browse-hero-glow browse-hero-glow--mint pointer-events-none absolute -left-24 top-0 h-[min(18rem,70vw)] w-[min(18rem,70vw)] rounded-full"
@@ -399,8 +526,11 @@ export default function BrowseTailors() {
                 </div>
 
                 <div ref={popoverRef} className="browse-hero-filters relative flex flex-wrap justify-center gap-2">
-              <div className="relative">
+              <div className="browse-filter-dropdown-wrap">
                 <button
+                  ref={(el) => {
+                    filterTriggerRefs.current.rating = el;
+                  }}
                   type="button"
                   className={filterPillClass(rating !== "any")}
                   onClick={() => openMenu("rating")}
@@ -411,28 +541,12 @@ export default function BrowseTailors() {
                   {quickLabelRating(rating)}
                   <ChevronDown className="h-4 w-4 opacity-70" aria-hidden />
                 </button>
-                {filterMenu === "rating" && (
-                  <div id="browse-filter-rating-menu" className={menuPanelClass} role="listbox" aria-labelledby="browse-filter-rating-trigger">
-                    {RATING_OPTIONS.map((o) => (
-                      <button
-                        key={o.value}
-                        type="button"
-                        onClick={() => {
-                          setRating(o.value);
-                          setFilterMenu(null);
-                        }}
-                        className={`flex w-full rounded-xl px-3 py-2.5 text-left text-sm font-medium transition-all duration-300 hover:bg-emerald-50 ${
-                          rating === o.value ? "bg-emerald-100 text-emerald-900" : "text-gray-800"
-                        }`}
-                      >
-                        {o.label}
-                      </button>
-                    ))}
-                  </div>
-                )}
               </div>
-              <div className="relative">
+              <div className="browse-filter-dropdown-wrap">
                 <button
+                  ref={(el) => {
+                    filterTriggerRefs.current.experience = el;
+                  }}
                   type="button"
                   className={filterPillClass(experienceBar !== "any")}
                   onClick={() => openMenu("experience")}
@@ -443,28 +557,12 @@ export default function BrowseTailors() {
                   {quickLabelExperience(experienceBar)}
                   <ChevronDown className="h-4 w-4 opacity-70" aria-hidden />
                 </button>
-                {filterMenu === "experience" && (
-                  <div id="browse-filter-experience-menu" className={menuPanelClass} aria-labelledby="browse-filter-experience-trigger">
-                    {EXPERIENCE_BAR_OPTIONS.map((o) => (
-                      <button
-                        key={o.value}
-                        type="button"
-                        onClick={() => {
-                          setExperienceBar(o.value);
-                          setFilterMenu(null);
-                        }}
-                        className={`flex w-full rounded-xl px-3 py-2.5 text-left text-sm font-medium transition-all duration-300 hover:bg-emerald-50 ${
-                          experienceBar === o.value ? "bg-emerald-100 text-emerald-900" : "text-gray-800"
-                        }`}
-                      >
-                        {o.label}
-                      </button>
-                    ))}
-                  </div>
-                )}
               </div>
-              <div className="relative">
+              <div className="browse-filter-dropdown-wrap">
                 <button
+                  ref={(el) => {
+                    filterTriggerRefs.current.price = el;
+                  }}
                   type="button"
                   className={filterPillClass(price !== "any")}
                   onClick={() => openMenu("price")}
@@ -475,28 +573,12 @@ export default function BrowseTailors() {
                   {quickLabelPrice(price)}
                   <ChevronDown className="h-4 w-4 opacity-70" aria-hidden />
                 </button>
-                {filterMenu === "price" && (
-                  <div id="browse-filter-price-menu" className={menuPanelClass} aria-labelledby="browse-filter-price-trigger">
-                    {PRICE_OPTIONS.map((o) => (
-                      <button
-                        key={o.value}
-                        type="button"
-                        onClick={() => {
-                          setPrice(o.value);
-                          setFilterMenu(null);
-                        }}
-                        className={`flex w-full rounded-xl px-3 py-2.5 text-left text-sm font-medium transition-all duration-300 hover:bg-emerald-50 ${
-                          price === o.value ? "bg-emerald-100 text-emerald-900" : "text-gray-800"
-                        }`}
-                      >
-                        {o.label}
-                      </button>
-                    ))}
-                  </div>
-                )}
               </div>
-              <div className="relative">
+              <div className="browse-filter-dropdown-wrap">
                 <button
+                  ref={(el) => {
+                    filterTriggerRefs.current.delivery = el;
+                  }}
                   type="button"
                   className={filterPillClass(delivery !== "any")}
                   onClick={() => openMenu("delivery")}
@@ -507,25 +589,6 @@ export default function BrowseTailors() {
                   {quickLabelDelivery(delivery)}
                   <ChevronDown className="h-4 w-4 opacity-70" aria-hidden />
                 </button>
-                {filterMenu === "delivery" && (
-                  <div id="browse-filter-delivery-menu" className={menuPanelClass} aria-labelledby="browse-filter-delivery-trigger">
-                    {DELIVERY_OPTIONS.map((o) => (
-                      <button
-                        key={o.value}
-                        type="button"
-                        onClick={() => {
-                          setDelivery(o.value);
-                          setFilterMenu(null);
-                        }}
-                        className={`flex w-full rounded-xl px-3 py-2.5 text-left text-sm font-medium transition-all duration-300 hover:bg-emerald-50 ${
-                          delivery === o.value ? "bg-emerald-100 text-emerald-900" : "text-gray-800"
-                        }`}
-                      >
-                        {o.label}
-                      </button>
-                    ))}
-                  </div>
-                )}
               </div>
               <button
                 type="button"

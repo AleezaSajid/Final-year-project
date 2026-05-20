@@ -367,7 +367,6 @@ export default function NearbyTailorsMap() {
     tailorCatalog: tailorCatalogForDecline,
     lastRequestRef: lastMapTailorRequestRef,
     onDeclined: onRequestDeclined,
-    debugTag: "MapReject",
   });
 
   const syncFocusedOrderRejection = useCallback(async () => {
@@ -399,15 +398,15 @@ export default function NearbyTailorsMap() {
   }, [isSelectMode, wizardOrderId]);
 
   useEffect(() => {
-    if (!wizardOrderId) {
+    if (!linkedOrderId) {
       return;
     }
-    activeOrderIdRef.current = wizardOrderId;
+    activeOrderIdRef.current = linkedOrderId;
     setOrderLiveHint("");
     let cancelled = false;
 
     const applyRestore = (last) => {
-      if (last && orderIdsMatch(last.orderId, wizardOrderId)) {
+      if (last && orderIdsMatch(last.orderId, linkedOrderId)) {
         setMatchStatus("confirmed");
         return true;
       }
@@ -416,7 +415,12 @@ export default function NearbyTailorsMap() {
 
     void (async () => {
       const rejected = await syncFocusedOrderRejection();
-      if (cancelled || rejected) return;
+      if (cancelled) return;
+      if (rejected) {
+        setMatchStatus("idle");
+        setAssignSuccess(false);
+        return;
+      }
 
       let restoredSent = false;
       if (lastMapTailorRequestRef.current) {
@@ -441,18 +445,12 @@ export default function NearbyTailorsMap() {
     return () => {
       cancelled = true;
     };
-  }, [wizardOrderId, user, syncFocusedOrderRejection]);
-
-  useEffect(() => {
-    console.log("[MapReject] modal visible", showDeclinedNotice);
-    console.log("[MapReject] dismissed ids", [...rejectedTailorIds]);
-  }, [showDeclinedNotice, requestDeclinedNotice, rejectedTailorIds]);
+  }, [linkedOrderId, user, syncFocusedOrderRejection]);
 
   /** Join order room + surface status updates on the map (same events as order tracking). */
   useEffect(() => {
-    const oid = (wizardOrderId || "").trim();
+    const oid = linkedOrderId;
     if (!oid) {
-      console.log("[CustomerDecline Map] order socket listeners OFF — no orderId in URL");
       setOrderLiveHint("");
       return undefined;
     }
@@ -464,14 +462,12 @@ export default function NearbyTailorsMap() {
     socket.on("connect", join);
 
     const applyMapRejectFromPayload = (payload = {}, data = null) => {
-      console.log("[MapReject] event received", { payload, data, oid });
       const built = declinedNoticeFromSocketPayload(
         { ...payload, orderId: payload?.orderId || data?.orderId || oid },
         allTailorsRef.current,
         lastMapTailorRequestRef.current
       );
       if (built) {
-        console.log("[MapReject] notice built", built);
         applyDeclinedNotice(built);
         return;
       }
@@ -538,7 +534,7 @@ export default function NearbyTailorsMap() {
       socket.off("orderAccepted", onAccepted);
       socket.off("orderRejected", onRejected);
     };
-  }, [wizardOrderId, navigate, applyDeclinedNotice]);
+  }, [linkedOrderId, navigate, applyDeclinedNotice]);
 
   const listTailors = useMemo(() => {
     const list = [...interestedTailors];

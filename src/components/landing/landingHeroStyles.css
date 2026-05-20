@@ -46,9 +46,34 @@
   z-index: 2;
 }
 
+.landing-hero-root {
+  overflow-x: clip;
+  /* Preserves layout gap after removing the in-flow wave SVG (was 52–88px tall). */
+  padding-bottom: 3.25rem;
+}
+
+@media (min-width: 640px) {
+  .landing-hero-root {
+    padding-bottom: 4.5rem;
+  }
+}
+
+@media (min-width: 768px) {
+  .landing-hero-root {
+    padding-bottom: 5.5rem;
+  }
+}
+
+.landing-hero-root #home {
+  position: relative;
+  z-index: 1;
+}
+
 .hero-slider-root {
   position: relative;
   z-index: 1;
+  margin-bottom: 0.25rem;
+  padding-bottom: 0.5rem;
 }
 .hero-slider-bloom {
   position: absolute;

@@ -65,47 +65,12 @@ export function MapOrderAlertProvider({ children }) {
   }, [dismissIncomingOrder, mapInterestTailorId]);
 
   useEffect(() => {
-    const onConnect = () => {
-      // eslint-disable-next-line no-console
-      console.warn("[MapOrderAlert DEBUG] socket connect", { id: socket.id, connected: socket.connected });
-    };
-
     const onTailorMapNewOrder = (payload) => {
-      // eslint-disable-next-line no-console
-      console.warn("[MapOrderAlert DEBUG] newOrder RAW (any payload)", payload);
-      if (!payload || typeof payload !== "object") {
-        // eslint-disable-next-line no-console
-        console.warn("[MapOrderAlert DEBUG] SKIP: invalid payload");
-        return;
-      }
-      if (Array.isArray(payload)) {
-        // eslint-disable-next-line no-console
-        console.warn("[MapOrderAlert DEBUG] SKIP: array payload");
-        return;
-      }
-      if (payload.fullOrder != null) {
-        // eslint-disable-next-line no-console
-        console.warn("[MapOrderAlert DEBUG] SKIP: fullOrder branch (wizard/API order, not map broadcast)", {
-          keys: Object.keys(payload),
-        });
-        return;
-      }
+      if (!payload || typeof payload !== "object" || Array.isArray(payload)) return;
+      if (payload.fullOrder != null) return;
       const orderId = payload.orderId != null ? String(payload.orderId).trim() : "";
-      if (!orderId) {
-        // eslint-disable-next-line no-console
-        console.warn("[MapOrderAlert DEBUG] SKIP: missing orderId", payload);
-        return;
-      }
-      const order = payload;
-      // eslint-disable-next-line no-console
-      console.warn("[MapOrderAlert DEBUG] newOrder RECEIVED:", order);
-      if (process.env.NODE_ENV === "development") {
-        // eslint-disable-next-line no-console
-        console.info("[MapOrderAlert] newOrder", orderId, payload);
-      }
+      if (!orderId) return;
       setIncomingOrder(payload);
-      // eslint-disable-next-line no-console
-      console.warn("[MapOrderAlert DEBUG] pendingOrder SET:", order);
       clearAutoClose();
       autoCloseRef.current = window.setTimeout(() => {
         setIncomingOrder(null);
@@ -113,26 +78,15 @@ export function MapOrderAlertProvider({ children }) {
       }, POPUP_AUTO_DISMISS_MS);
     };
 
-    // eslint-disable-next-line no-console
-    console.warn("[MapOrderAlert DEBUG] registering newOrder listener", {
-      socketConnected: socket.connected,
-      socketId: socket.id,
-    });
-    socket.on("connect", onConnect);
     socket.on("newOrder", onTailorMapNewOrder);
-    if (socket.connected) onConnect();
-
     return () => {
-      socket.off("connect", onConnect);
       socket.off("newOrder", onTailorMapNewOrder);
       clearAutoClose();
     };
   }, [clearAutoClose]);
 
-  const __DEBUG_FORCE_POPUP__ = true;
   const isTailorRoute = shouldShowMapOrderPopup(location.pathname);
-  const showPopup =
-    (__DEBUG_FORCE_POPUP__ || isTailorRoute) && incomingOrder != null;
+  const showPopup = isTailorRoute && incomingOrder != null;
 
   const value = useMemo(
     () => ({
@@ -147,24 +101,17 @@ export function MapOrderAlertProvider({ children }) {
     <MapOrderAlertContext.Provider value={value}>
       {children}
       {typeof document !== "undefined" && showPopup
-        ? (() => {
-            // eslint-disable-next-line no-console
-            console.log("[MapOrderAlert DEBUG] RENDERING POPUP", {
-              route: location.pathname,
-              hasOrder: !!incomingOrder,
-            });
-            return createPortal(
-              <AnimatePresence>
-                <OrderPopup
-                  key={incomingOrder.orderId}
-                  order={incomingOrder}
-                  onInterested={onIncomingOrderInterested}
-                  onIgnore={dismissIncomingOrder}
-                />
-              </AnimatePresence>,
-              document.body
-            );
-          })()
+        ? createPortal(
+            <AnimatePresence>
+              <OrderPopup
+                key={incomingOrder.orderId}
+                order={incomingOrder}
+                onInterested={onIncomingOrderInterested}
+                onIgnore={dismissIncomingOrder}
+              />
+            </AnimatePresence>,
+            document.body
+          )
         : null}
     </MapOrderAlertContext.Provider>
   );

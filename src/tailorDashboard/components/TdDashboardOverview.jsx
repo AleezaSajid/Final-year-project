@@ -17,6 +17,7 @@ import {
   formatStatusLabel,
   getStatusIndex,
   resolveOrderWorkflowState,
+  TAILOR_CURRENT_TASKS_VISIBLE_MAX,
   workflowStages,
 } from "../constants";
 import {
@@ -94,6 +95,12 @@ function EmptyState({ icon: Icon, message, compact = false }) {
   );
 }
 
+/** Decline confirmations belong in Recent Messages only, not the top amber pills. */
+function shouldShowTopBannerNotification(note, toText) {
+  const text = toText(note);
+  return !/order request declined/i.test(text);
+}
+
 function SectionHeader({ icon: Icon, title, subtitle, accentClass = "bg-[#E8F3EE] text-[#1F6B52]" }) {
   return (
     <div className="mb-3 flex items-start gap-2.5 border-b border-[#EEF0EE]/90 pb-3">
@@ -153,7 +160,7 @@ export default function TdDashboardOverview({
 
     const filtered = [...list].sort((a, b) => getPriorityScore(a) - getPriorityScore(b));
 
-    return filtered.map((order) => {
+    return filtered.slice(0, TAILOR_CURRENT_TASKS_VISIBLE_MAX).map((order) => {
       const workflow = taskWorkflowMeta(order);
       const idStr = String(order._id ?? order.id ?? "");
       const _idStr = order._id != null ? String(order._id) : idStr;
@@ -234,6 +241,11 @@ export default function TdDashboardOverview({
   const secondaryNavyBtn = TD_SECONDARY_NAVY_BTN;
   const primaryBtn = TD_PRIMARY_BUTTON_CLASS;
 
+  const topBannerNotifications = useMemo(
+    () => notifications.filter((note) => shouldShowTopBannerNotification(note, notificationText)),
+    [notifications, notificationText]
+  );
+
   const handleRejectConfirm = async (reason) => {
     if (!rejectTarget?.id || !rejectOrderFromPending) return;
     setRejectBusy(true);
@@ -254,9 +266,9 @@ export default function TdDashboardOverview({
         onClose={() => !rejectBusy && setRejectTarget(null)}
         onConfirm={handleRejectConfirm}
       />
-      {notifications.length > 0 ? (
+      {topBannerNotifications.length > 0 ? (
         <div className="flex flex-wrap gap-2">
-          {notifications.map((note, index) => (
+          {topBannerNotifications.map((note, index) => (
             <motion.div
               key={`${index}-${notificationText(note)}`}
               initial={{ opacity: 0, y: 6 }}
@@ -359,11 +371,11 @@ export default function TdDashboardOverview({
               />
             ) : (
               <div
-                className="max-h-[min(28rem,52vh)] overflow-y-auto overflow-x-hidden pr-1 [-webkit-overflow-scrolling:touch] scroll-smooth"
+                className="max-h-[min(22rem,48vh)] shrink-0 overflow-x-hidden overflow-y-auto overscroll-contain pr-1 [-webkit-overflow-scrolling:touch] scroll-smooth"
                 role="region"
-                aria-label="Current tasks (scroll for more)"
+                aria-label="Current tasks"
               >
-                <ul className="space-y-2.5 pb-1">
+                <ul className="space-y-2">
                   {tasks.map((task) => {
                     const rowKey = String(task._id ?? task.id ?? "").trim();
                     const activeIdx =
@@ -654,7 +666,7 @@ export default function TdDashboardOverview({
           </motion.section>
         </div>
 
-        <div className="flex flex-col gap-4 lg:col-span-4">
+        <div className="flex w-full flex-col gap-4 self-start lg:col-span-4">
           <RecentChatsPreviewCard
             mode="tailor"
             conversations={tailorChatConversations}

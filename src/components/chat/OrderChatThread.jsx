@@ -1,4 +1,4 @@
-  import React, { useEffect, useRef, useState } from "react";
+﻿  import React, { useEffect, useRef, useState } from "react";
   import {
     buildOutgoingChatMessage,
     messageBelongsToOrderChat,
@@ -42,7 +42,7 @@
 
   /**
    * Core order chat UI + socket behavior (same as ChatWindow / CustomerChatWindow).
-   * @param {'tailor'|'customer'} props.mode — customer path joins with customerId as sender
+   * @param {'tailor'|'customer'} props.mode â€” customer path joins with customerId as sender
    */
   export default function OrderChatThread({
     isActive,
@@ -54,7 +54,7 @@
     orderId,
     peerDisplayName = "",
     conversationId,
-    /** 'whatsapp' | 'glass' — glass matches legacy modal look */
+    /** 'whatsapp' | 'glass' â€” glass matches legacy modal look */
     theme = "whatsapp",
     className = "",
     /** Optional top bar inside thread (WhatsApp layout supplies header outside) */
@@ -143,11 +143,7 @@
       if (mode === "customer" && (!sId || !rId)) return;
       const runJoin = () => {
         activeConversationRef.current = cId;
-        if (socket.connected) {
-          console.log("[chat] socket connected", socket.id);
-        }
         if (sId) {
-          console.log("[chat] joining room", sId);
           socket.emit("join_user", { userId: sId });
         }
         notifyConversationRoomJoined(cId);
@@ -170,16 +166,6 @@
       const content = inputValue.trim();
       if (!content) return;
       if (!cId || !sId || !rId) return;
-
-      console.log("[chat send computed]", {
-        conversationId: cId,
-        orderId: oId,
-        senderId: sId,
-        receiverId: rId,
-        customerId: normalizeChatId(orderCustomerId),
-        tailorId: normalizeChatId(orderTailorId),
-        mode,
-      });
 
       const newMessage = buildOutgoingChatMessage({
         senderId: sId,
@@ -274,7 +260,7 @@
                               className="translate-y-px text-[8px] font-normal leading-none text-sky-500/35"
                               aria-hidden
                             >
-                              ✓
+                              âœ“
                             </span>
                           ) : null}
                         </div>
@@ -300,7 +286,7 @@
               role="status"
             >
               <span className="mt-0.5 text-amber-600" aria-hidden>
-                ●
+                â—
               </span>
               <p className="text-left text-xs font-medium leading-relaxed text-amber-950">{lockedMessage}</p>
             </div>
@@ -343,7 +329,7 @@
                     handleSend();
                   }
                 }}
-                placeholder={locked ? lockedMessage : "Type your message…"}
+                placeholder={locked ? lockedMessage : "Type your messageâ€¦"}
                 disabled={inputDisabled}
                 className="w-full resize-none rounded-xl border border-slate-200/90 bg-white/70 px-3 py-2.5 text-sm text-slate-800 shadow-inner shadow-slate-900/5 placeholder:text-slate-400 focus:border-emerald-300/80 focus:outline-none focus:ring-2 focus:ring-emerald-600/20 disabled:cursor-not-allowed disabled:opacity-60"
               />

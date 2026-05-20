@@ -18,6 +18,7 @@ import {
 
 import { SiFacebook, SiInstagram, SiPinterest, SiWhatsapp } from "react-icons/si";
 import LandingNavbar from "./components/LandingNavbar.jsx";
+import { LandingStylePageBackground } from "./components/LandingStylePageBackground.jsx";
 import LandingHeroSection from "./components/landing/LandingHeroSection.jsx";
 import HowItWorksSplitSection from "./components/HowItWorksSplitSection.jsx";
 import { useSewServeLogoProcessedSrc } from "./hooks/useSewServeLogoProcessedSrc";
@@ -232,38 +233,6 @@ export default function SewServeLandingPage() {
 .ss-nav-underline:hover::after,
 .ss-nav-underline:focus-visible::after { width: 100%; }
 
-/* Full-viewport animated wash â€” sits at z-0 inside isolated root; never blocks pointer events */
-.ss-page-bg-anim {
-  position: fixed;
-  inset: 0;
-  z-index: 0;
-  pointer-events: none;
-  overflow: hidden;
-  background:
-    radial-gradient(ellipse 95% 75% at 8% 4%, rgba(186, 230, 217, 0.62), transparent 58%),
-    radial-gradient(ellipse 88% 68% at 92% 12%, rgba(186, 215, 245, 0.58), transparent 54%),
-    radial-gradient(ellipse 80% 55% at 50% 98%, rgba(255, 248, 235, 0.72), transparent 58%),
-    radial-gradient(ellipse 55% 45% at 68% 48%, rgba(232, 247, 243, 0.45), transparent 52%),
-    linear-gradient(165deg, #e8f7f2 0%, #e4eff9 42%, #faf8f4 78%, #fcfaf7 100%);
-  background-size: 140% 140%;
-  animation: ss-bg-gradient-drift 52s ease-in-out infinite alternate;
-  filter: blur(22px) brightness(1.04);
-}
-/* Far depth â€” soft vignette for separation from mid layers */
-.ss-page-bg-anim::after {
-  content: "";
-  position: absolute;
-  inset: 0;
-  z-index: 1;
-  pointer-events: none;
-  background: radial-gradient(ellipse 95% 90% at 50% 48%, transparent 42%, rgba(15, 23, 42, 0.065) 100%);
-}
-@keyframes ss-bg-gradient-drift {
-  0% { background-position: 0% 0%; }
-  50% { background-position: 100% 50%; }
-  100% { background-position: 30% 100%; }
-}
-
 /* Apple-style frosted panels â€” sections / chrome (low fill, strong blur + saturation) */
 .ss-glass-surface {
   background: linear-gradient(180deg, rgba(255, 255, 255, 0.22) 0%, rgba(255, 255, 255, 0.08) 100%);
@@ -290,7 +259,7 @@ export default function SewServeLandingPage() {
 `}
       </style>
 
-      <div className="ss-page-bg-anim" aria-hidden="true" />
+      <LandingStylePageBackground />
 
       {/* Nav outside z-10 wrapper so it stacks above the fixed page wash; glassmorphism + scroll elevation */}
       <LandingNavbar
@@ -309,7 +278,7 @@ export default function SewServeLandingPage() {
         {/* Features Section */}
         <motion.section
           id="about"
-          className="ss-glass-surface relative z-[2] mt-5 border-t border-white/35 py-20 shadow-[0_-16px_48px_-20px_rgba(26,53,88,0.1),0_24px_64px_-28px_rgba(26,53,88,0.08)] sm:mt-7 sm:py-24 md:mt-10 md:py-28"
+          className="ss-glass-surface relative z-[2] border-t border-white/35 pt-12 pb-20 shadow-[0_-8px_32px_-16px_rgba(26,53,88,0.08),0_20px_56px_-24px_rgba(26,53,88,0.08)] sm:pt-14 sm:pb-24 md:pt-16 md:pb-28"
           variants={sectionReveal}
           initial="hidden"
           whileInView="visible"

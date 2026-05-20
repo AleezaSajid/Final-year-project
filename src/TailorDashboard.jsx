@@ -89,17 +89,9 @@ export default function TailorDashboard() {
     if (!allowed) return undefined;
 
     const tailorShopId = String(dash.activeTailorShopId || "").trim();
-    console.log("[TailorDashboard] logged user", {
-      id: user?.id,
-      tailorShopId: user?.tailorShopId,
-      tailorId: user?.tailorId,
-      role: user?.role,
-    });
-    console.log("[TailorDashboard] activeTailorShopId", tailorShopId || "(none)");
 
     const joinTailorRoom = () => {
       if (!tailorShopId) return;
-      console.log("[TailorDashboard] joined room", tailorShopId);
       socket.emit("join_user", { userId: tailorShopId });
     };
     ensureSocketThen(joinTailorRoom);
@@ -113,7 +105,6 @@ export default function TailorDashboard() {
       if (!okRoute) return;
       if (!payload || typeof payload !== "object" || Array.isArray(payload)) return;
       if (payload.orderId == null || String(payload.orderId).trim() === "") return;
-      console.log("[TailorDashboard] tailor:popup", String(payload.orderId).trim());
       setIncomingOrder({
         orderId: payload.orderId,
         dressType: payload.garmentType || payload.dressType || "—",

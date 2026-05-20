@@ -31,7 +31,7 @@ export default function RecentChatsPreviewCard({
   const navigate = useNavigate();
   const isTailor = mode === "tailor";
 
-  const previewRows = useMemo(() => sortConversationsDesc(conversations).slice(0, 3), [conversations]);
+  const previewRows = useMemo(() => sortConversationsDesc(conversations).slice(0, 2), [conversations]);
 
   const resolveName = (conv) => {
     const oid = normalizeConversationId(conv?.orderId ?? conv?.conversationId ?? "");
@@ -57,12 +57,14 @@ export default function RecentChatsPreviewCard({
   const defaultCardClass =
     "rounded-2xl border border-slate-200/80 bg-white/45 p-4 shadow-lg backdrop-blur-xl";
 
+  const cardClass = [glassCardClass || defaultCardClass].filter(Boolean).join(" ");
+
   return (
     <section
-      className={`flex min-h-0 w-full flex-col ${glassCardClass || defaultCardClass}`.trim()}
+      className={`flex w-full flex-col ${cardClass}`.trim()}
       aria-label="Recent chats"
     >
-      <div className="flex items-center justify-between gap-3">
+      <div className="flex shrink-0 items-center justify-between gap-3">
         <div className="flex items-center gap-2.5">
           <span
             className={
@@ -86,7 +88,13 @@ export default function RecentChatsPreviewCard({
         </div>
       </div>
 
-      <ul className={`mt-3.5 min-h-0 flex-1 ${isTailor ? "space-y-2.5" : "space-y-1.5"}`}>
+      <ul
+        className={
+          isTailor
+            ? "mt-3 max-h-[12.5rem] shrink-0 space-y-2 overflow-y-auto overscroll-contain pr-0.5"
+            : "mt-3.5 min-h-0 flex-1 space-y-1.5 overflow-y-auto overscroll-contain"
+        }
+      >
         {previewRows.length === 0 ? (
           <li
             className={
@@ -111,7 +119,7 @@ export default function RecentChatsPreviewCard({
                 key={oid || `${name}-${conv?.lastMessageAt || "row"}`}
                 className={
                   isTailor
-                    ? "flex items-center gap-3 rounded-2xl border border-[rgba(140,170,160,0.16)] bg-[rgba(255,255,255,0.55)] px-3 py-3 transition-all duration-200 ease-out hover:-translate-y-[2px] hover:border-[rgba(46,125,90,0.2)] hover:bg-[rgba(255,255,255,0.82)] hover:shadow-[0_8px_22px_-12px_rgba(15,23,42,0.08)]"
+                    ? "flex items-center gap-3 rounded-2xl border border-[rgba(140,170,160,0.16)] bg-[rgba(255,255,255,0.55)] px-3 py-2.5 transition-all duration-200 ease-out hover:-translate-y-[2px] hover:border-[rgba(46,125,90,0.2)] hover:bg-[rgba(255,255,255,0.82)] hover:shadow-[0_8px_22px_-12px_rgba(15,23,42,0.08)]"
                     : "flex items-center gap-3 rounded-xl border border-white/50 bg-white/40 px-3 py-2.5 transition-colors hover:bg-white/55"
                 }
               >
@@ -157,7 +165,7 @@ export default function RecentChatsPreviewCard({
         onClick={() => navigate(messagesPath)}
         className={
           isTailor
-            ? `mt-4 inline-flex w-full items-center justify-center gap-2 ${TD_CHATS_OPEN_BTN}`
+            ? `mt-2.5 shrink-0 inline-flex w-full items-center justify-center gap-2 ${TD_CHATS_OPEN_BTN}`
             : "mt-4 inline-flex w-full items-center justify-center gap-2 rounded-xl border border-emerald-800/20 bg-gradient-to-b from-[#3d6b4a] to-[#2f5a42] px-4 py-2.5 text-sm font-semibold text-white shadow-md transition hover:brightness-105 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-600/45 focus-visible:ring-offset-2"
         }
       >

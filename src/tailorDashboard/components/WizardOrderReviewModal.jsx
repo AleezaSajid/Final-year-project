@@ -1,4 +1,4 @@
-import React, { useEffect } from "react";
+﻿import React, { useEffect } from "react";
 import { createPortal } from "react-dom";
 import { motion, AnimatePresence } from "framer-motion";
 import { Ruler, Scissors, User, X } from "lucide-react";
@@ -92,10 +92,10 @@ function resolveWizardView(order) {
     }
   }
   const p = rawPayload && typeof rawPayload === "object" && !Array.isArray(rawPayload) ? rawPayload : null;
-  const customerName = p?.customer?.name ?? order?.customerName ?? "—";
+  const customerName = p?.customer?.name ?? order?.customerName ?? "â€”";
   const customerPhone = p?.customer?.phone ?? order?.customerPhone ?? "";
   const customerId = p?.customer?.id ?? order?.customerId ?? "";
-  const garmentType = p?.garment?.type ?? order?.garmentType ?? "—";
+  const garmentType = p?.garment?.type ?? order?.garmentType ?? "â€”";
   const garmentCategory = p?.garment?.category ?? order?.garmentCategory ?? "";
   const measurements = {
     ...(p?.measurements && typeof p.measurements === "object" ? p.measurements : {}),
@@ -151,7 +151,6 @@ export default function WizardOrderReviewModal({ order, open, onClose, acceptOrd
 
   useEffect(() => {
     if (!open) return;
-    console.log("view.image:", view?.image);
   }, [open, view?.image]);
 
   const measurementKeys =
@@ -220,7 +219,7 @@ export default function WizardOrderReviewModal({ order, open, onClose, acceptOrd
           <div className="flex shrink-0 items-start justify-between gap-3 border-b border-white/35 bg-gradient-to-r from-emerald-50/50 via-white/20 to-sky-50/30 px-5 py-4">
             <div className="min-w-0">
               <p id="wizard-review-title" className="text-lg font-semibold tracking-tight text-slate-900">
-                Customer request — measurements &amp; design
+                Customer request â€” measurements &amp; design
               </p>
               <p className="mt-0.5 truncate text-sm text-slate-600">{view.customerName}</p>
               <p className="truncate text-xs text-slate-500">{view.garmentType}</p>
@@ -318,7 +317,7 @@ export default function WizardOrderReviewModal({ order, open, onClose, acceptOrd
                     value={
                       view.fullWizardMeta.hasReferenceImage
                         ? view.fullWizardMeta.referenceImageName
-                          ? `Yes — ${view.fullWizardMeta.referenceImageName}`
+                          ? `Yes â€” ${view.fullWizardMeta.referenceImageName}`
                           : "Yes"
                         : ""
                     }

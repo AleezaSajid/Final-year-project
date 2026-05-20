@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+﻿import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "../../context/AuthContext.jsx";
 import { patchOrderWizardFields } from "../../api/ordersApi.js";
@@ -130,16 +130,6 @@ export function useTailorDashboard() {
   const navigate = useNavigate();
   const activeTailorShopId = useMemo(() => resolveLoggedInTailorShopId(user), [user]);
 
-  useEffect(() => {
-    if (user?.role !== "tailor") return;
-    console.log("[TailorDashboard] logged user", {
-      id: user?.id,
-      tailorShopId: user?.tailorShopId,
-      tailorId: user?.tailorId,
-      role: user?.role,
-    });
-    console.log("[TailorDashboard] activeTailorShopId", activeTailorShopId || "(none)");
-  }, [user, activeTailorShopId]);
   const [profiles, setProfiles] = useState(() => ({ ...defaultProfiles }));
 
   const [orders, setOrders] = useState(() => []);
@@ -178,7 +168,7 @@ export function useTailorDashboard() {
   const [unreadChatCount, setUnreadChatCount] = useState(0);
   const [activeChatCustomer, setActiveChatCustomer] = useState({ id: "", name: "Customer" });
   const [activeConversationId, setActiveConversationId] = useState("");
-  /** From GET /conversations/tailor/:id — source for dashboard chat list + unread. */
+  /** From GET /conversations/tailor/:id â€” source for dashboard chat list + unread. */
   const [tailorChatConversations, setTailorChatConversations] = useState([]);
   const [reviewModalOpen, setReviewModalOpen] = useState(false);
   const [reviewModalOrder, setReviewModalOrder] = useState(null);
@@ -246,7 +236,6 @@ export function useTailorDashboard() {
       }
       const list = Array.isArray(data?.conversations) ? data.conversations : [];
       logConversationRowsValidation(list, "tailor fetch");
-      console.log("[ChatSync tailor] fetched conversations", list.length, list);
       const visible = list.filter((row) => {
         const oid = normalizeConversationId(row?.orderId ?? row?.conversationId);
         if (!oid) return false;
@@ -267,7 +256,6 @@ export function useTailorDashboard() {
       const now = Date.now();
       if (now - tailorReconcileRefetchAtRef.current < 1600) return;
       tailorReconcileRefetchAtRef.current = now;
-      console.log("[ChatSync] reconcile refetch tailor conversations", reason);
       void fetchTailorConversations();
     },
     [fetchTailorConversations]
@@ -337,7 +325,6 @@ export function useTailorDashboard() {
     const joinRoom = () => {
       const room = String(activeTailorShopId || "").trim();
       if (!room) return;
-      console.log("[TailorDashboard] joined room", room);
       socket.emit("join_user", { userId: room });
     };
     const handleNewNotification = (payload) => {
@@ -379,7 +366,6 @@ export function useTailorDashboard() {
     };
 
     const onConversationUpdated = (payload) => {
-      console.log("[ChatSync] conversation:updated", payload);
       const nCid = normalizeConversationId(payload?.conversationId);
       if (!nCid) return;
       setTailorChatConversations((prev) => {
@@ -419,7 +405,6 @@ export function useTailorDashboard() {
     };
 
     const onMessageReceivedSidebar = (message) => {
-      console.log("[ChatSync] message_received (tailor sidebar)", message);
       const nCid = normalizeConversationId(message?.conversationId);
       if (!nCid) return;
       setTailorChatConversations((prev) => {
@@ -458,14 +443,12 @@ export function useTailorDashboard() {
     const onMeasurementUpdated = (payload) => {
       const raw = payload?.fullOrder || payload?.order;
       if (!raw || typeof raw !== "object") return;
-      console.log("[Tailor Sync] measurement:updated", raw.id ?? raw._id ?? "");
       setOrders((prev) => upsertOrdersMerged(prev, raw, activeTailorShopId));
     };
 
     const onOrderNew = (payload) => {
       const raw = payload?.fullOrder || payload?.order;
       if (!raw || typeof raw !== "object") return;
-      console.log("[Tailor Sync] order:new", raw.id ?? raw._id ?? "");
       setOrders((prev) => upsertOrdersMerged(prev, raw, activeTailorShopId));
     };
 
@@ -473,7 +456,6 @@ export function useTailorDashboard() {
       if (!data) return;
       const raw = data.fullOrder;
       if (raw && typeof raw === "object") {
-        console.log("[Tailor Sync] order:statusUpdated fullOrder", raw.id ?? raw._id ?? "");
         setOrders((prev) => upsertOrdersMerged(prev, raw, activeTailorShopId));
         return;
       }
@@ -481,7 +463,6 @@ export function useTailorDashboard() {
       const oid = String(data.orderId);
       const st = data.status != null ? String(data.status) : "";
       if (!st) return;
-      console.log("[Tailor Sync] order:statusUpdated patch", oid, st);
       setOrders((prev) => prev.map((order) => {
         const id = String(order.id ?? order._id ?? "");
         if (id !== oid) return order;
@@ -490,8 +471,6 @@ export function useTailorDashboard() {
     };
 
     const onMeasurementReviewed = (data) => {
-      console.log("[CLIENT] Received review data:", data);
-      console.log("[CLIENT] wizardData.image:", data?.wizardData?.image);
 
       if (!data || typeof data !== "object") return;
 
@@ -504,7 +483,7 @@ export function useTailorDashboard() {
               ? String(data.fullOrder._id).trim()
               : "";
       if (!oidRaw) {
-        console.warn("[Tailor Sync] measurement:reviewed ignored — no orderId", data);
+        console.warn("[Tailor Sync] measurement:reviewed ignored â€” no orderId", data);
         return;
       }
 
@@ -514,10 +493,9 @@ export function useTailorDashboard() {
       }
       measurementReviewDedupeRef.current = dedupeKey;
 
-      console.log("[Tailor Sync] measurement:reviewed", oidRaw);
       const wd = data.wizardData;
       if (!wd || typeof wd !== "object" || Array.isArray(wd)) {
-        console.warn("[Tailor Sync] measurement:reviewed ignored — bad wizardData");
+        console.warn("[Tailor Sync] measurement:reviewed ignored â€” bad wizardData");
         return;
       }
 
@@ -627,14 +605,6 @@ export function useTailorDashboard() {
     };
   }, [fetchOrders, fetchTailorConversations, scheduleTailorConversationsReconcile, activeTailorShopId]);
 
-  useEffect(() => {
-    console.log("[TailorDashboard] isChatOpen:", isChatOpen);
-  }, [isChatOpen]);
-
-  useEffect(() => {
-    console.log("[TailorDashboard] conversationId:", activeConversationId);
-  }, [activeConversationId]);
-
   const tailorOrders = useMemo(
     () => orders.filter((order) => String(order.tailorId ?? "").trim() === String(activeTailorShopId).trim()),
     [orders, activeTailorShopId]
@@ -665,11 +635,9 @@ export function useTailorDashboard() {
     const joinActive = (isReconnect) => {
       if (isReconnect) {
         clearConversationJoinRegistry();
-        console.log("[ChatSync Socket] rejoined room (connect)");
       }
       if (isConversationRoomJoined(activeId)) return;
       notifyConversationRoomJoined(activeId);
-      console.log("[ChatSync Socket] joined room", activeId, "active_conversation");
       socket.emit("join_conversation", { conversationId: activeId });
     };
     joinActive(false);
@@ -1285,7 +1253,7 @@ export function useTailorDashboard() {
     );
     if (pend[0]) {
       lines.push(
-        `Finish ${pend[0].customerName} ${pend[0].garmentType} — Due ${pend[0].dueDate || pend[0].date || "soon"}`
+        `Finish ${pend[0].customerName} ${pend[0].garmentType} â€” Due ${pend[0].dueDate || pend[0].date || "soon"}`
       );
     }
     const any = tailorOrders.find(
@@ -1295,14 +1263,14 @@ export function useTailorDashboard() {
         isTailorCurrentTaskOrder(o)
     );
     if (any && lines.length < 2) {
-      lines.push(`Review ${any.customerName} request — Awaiting approval`);
+      lines.push(`Review ${any.customerName} request â€” Awaiting approval`);
     }
     if (lines.length < 2) {
       const fallback = tailorOrders.find(
         (o) => !isOrderRejected(o) && isTailorCurrentTaskOrder(o)
       );
       if (fallback) {
-        lines.push(`${fallback.garmentType} for ${fallback.customerName} — in workflow`);
+        lines.push(`${fallback.garmentType} for ${fallback.customerName} â€” in workflow`);
       }
     }
     return lines.slice(0, 2);
@@ -1346,11 +1314,11 @@ export function useTailorDashboard() {
   }, [displayStats]);
 
   const expectedDeliveryLabel = useMemo(() => {
-    if (!activeOrder?.dueDate) return "—";
+    if (!activeOrder?.dueDate) return "â€”";
     const d = new Date(activeOrder.dueDate);
     const now = new Date();
     const diff = Math.ceil((d.getTime() - now.getTime()) / 86400000);
-    if (!Number.isFinite(diff)) return "—";
+    if (!Number.isFinite(diff)) return "â€”";
     return diff >= 0 ? `${diff} Days` : "Overdue";
   }, [activeOrder]);
 

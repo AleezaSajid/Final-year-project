@@ -1,4 +1,4 @@
-import { putCustomerMeta, putWizardDraft } from "../api/accountApi.js";
+﻿import { putCustomerMeta, putWizardDraft } from "../api/accountApi.js";
 import { getOrderById, patchOrderWizardFields } from "../api/ordersApi.js";
 import {
   buildMeasurementOrderPayload,
@@ -74,7 +74,7 @@ export function getLinkedWizardOrderId() {
 }
 
 /**
- * Customer linked order id: URL ?orderId= → session → account meta (first valid).
+ * Customer linked order id: URL ?orderId= â†’ session â†’ account meta (first valid).
  * @param {{ urlOrderId?: string, metaOrderId?: string }} [options]
  */
 export function resolveLinkedCustomerOrderId(options = {}) {
@@ -149,11 +149,6 @@ export async function shouldRestoreWizardLinkedOrderId(linkedId) {
   try {
     const order = await getOrderById(oid);
     if (!isOrderEditableWizardDraft(order)) {
-      console.log("[wizard restore skipped] previous order is not editable draft", {
-        orderId: oid,
-        status: order?.status,
-        workflowStatus: order?.workflowStatus,
-      });
       return false;
     }
     return true;
@@ -172,7 +167,6 @@ export function startWizardFresh(options = {}) {
   clearCustomerTailorShopSession();
   clearWizardEphemeralLocalStorage();
   clearCustomerRejectedRequestSession();
-  console.log("[wizard fresh start] cleared previous draft state");
 
   if (user?.id) {
     void putWizardDraft(user, null).catch(() => {});
@@ -295,7 +289,7 @@ function pickPatchBody(flat) {
 /**
  * @param {object} snapshot
  * @param {object | null} authUser
- * @param {{ rejectOnCreateFailure?: boolean }} [options] — when true (final wizard submit), surface API errors instead of failing silently.
+ * @param {{ rejectOnCreateFailure?: boolean }} [options] â€” when true (final wizard submit), surface API errors instead of failing silently.
  */
 export async function syncWizardOrderToServer(snapshot, authUser, options = {}) {
   const { rejectOnCreateFailure = false, tailorResolutionHints } = options;

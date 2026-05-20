@@ -1,6 +1,6 @@
 import React from "react";
 
-/** Same full-viewport animated wash as SewServeLandingPage — used on login routes only. */
+/** Same full-viewport animated wash as SewServeLandingPage (homepage). */
 const LANDING_PAGE_BG_CSS = `
 .ss-page-bg-anim {
   position: fixed;
@@ -9,14 +9,14 @@ const LANDING_PAGE_BG_CSS = `
   pointer-events: none;
   overflow: hidden;
   background:
-    radial-gradient(ellipse 100% 80% at 10% 0%, rgba(167, 243, 208, 0.5), transparent 55%),
-    radial-gradient(ellipse 90% 70% at 95% 15%, rgba(186, 230, 253, 0.52), transparent 52%),
-    radial-gradient(ellipse 85% 60% at 50% 100%, rgba(216, 180, 254, 0.38), transparent 55%),
-    radial-gradient(ellipse 60% 50% at 70% 55%, rgba(226, 232, 240, 0.45), transparent 50%),
-    linear-gradient(180deg, #eef2f7 0%, #e2e8f0 35%, #f1f5f9 70%, #f8fafc 100%);
+    radial-gradient(ellipse 95% 75% at 8% 4%, rgba(186, 230, 217, 0.62), transparent 58%),
+    radial-gradient(ellipse 88% 68% at 92% 12%, rgba(186, 215, 245, 0.58), transparent 54%),
+    radial-gradient(ellipse 80% 55% at 50% 98%, rgba(255, 248, 235, 0.72), transparent 58%),
+    radial-gradient(ellipse 55% 45% at 68% 48%, rgba(232, 247, 243, 0.45), transparent 52%),
+    linear-gradient(165deg, #e8f7f2 0%, #e4eff9 42%, #faf8f4 78%, #fcfaf7 100%);
   background-size: 140% 140%;
   animation: ss-bg-gradient-drift 52s ease-in-out infinite alternate;
-  filter: blur(28px) brightness(1.06);
+  filter: blur(22px) brightness(1.04);
 }
 .ss-page-bg-anim::after {
   content: "";

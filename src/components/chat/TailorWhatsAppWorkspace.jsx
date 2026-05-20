@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+﻿import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
   ArrowLeft,
   Image as ImageIcon,
@@ -60,7 +60,7 @@ function buildOrderStubFromConv(conv, activeTailorShopId) {
 }
 
 /**
- * WhatsApp Web–style 3-panel layout for tailor dashboard. Uses existing openChatForOrder + OrderChatThread (same sockets).
+ * WhatsApp Webâ€“style 3-panel layout for tailor dashboard. Uses existing openChatForOrder + OrderChatThread (same sockets).
  */
 export default function TailorWhatsAppWorkspace({
   tailorChatConversations = [],
@@ -171,33 +171,6 @@ export default function TailorWhatsAppWorkspace({
     });
   }, [sidebarRows, orders, filter, search, normalizedActive]);
 
-  useEffect(() => {
-    const api = Array.isArray(tailorChatConversations) ? tailorChatConversations : [];
-    const activeInFetched = Boolean(
-      normalizedActive &&
-        api.some((r) => normalizeConversationId(r?.orderId ?? r?.conversationId) === normalizedActive)
-    );
-    console.log("[Workspace Sidebar]", {
-      role: "tailor",
-      fetchedCount: api.length,
-      renderedMergedCount: sidebarRows.length,
-      activeConversationId: normalizedActive || null,
-      filteredCount: filteredConversations.length,
-      activeRowInFetchedList: activeInFetched,
-      syntheticRowForActive: Boolean(injectedSidebarRow),
-      filter,
-      searchSnippet: search.trim().slice(0, 32),
-    });
-  }, [
-    tailorChatConversations,
-    sidebarRows.length,
-    normalizedActive,
-    filteredConversations.length,
-    injectedSidebarRow,
-    filter,
-    search,
-  ]);
-
   const chatStub = useMemo(() => {
     if (!normalizedActive || !activeTailorShopId) return null;
     if (activeOrder) return activeOrder;
@@ -262,7 +235,7 @@ export default function TailorWhatsAppWorkspace({
       aria-label="Order messages"
     >
       <div className={`flex w-full flex-col lg:flex-row ${layoutMinH}`}>
-        {/* Left — conversation list */}
+        {/* Left â€” conversation list */}
         <aside
           className={`flex w-full shrink-0 flex-col border-slate-200/80 bg-white lg:w-[320px] lg:max-w-[320px] lg:border-r ${
             mobilePanel === "chat" || mobilePanel === "detail" ? "hidden lg:flex" : "flex"
@@ -302,7 +275,7 @@ export default function TailorWhatsAppWorkspace({
                   const preview =
                     (conv.lastMessage && String(conv.lastMessage).trim()) || "Start conversation";
                   const ts = conv.lastMessageAt || conv.updatedAt;
-                  const timeLabel = formatConversationTime(ts) || "—";
+                  const timeLabel = formatConversationTime(ts) || "â€”";
                   const unread = Math.max(0, Number(conv.unreadTailor || 0));
                   const selected = oid && oid === normalizedActive;
                   return (
@@ -348,7 +321,7 @@ export default function TailorWhatsAppWorkspace({
           </div>
         </aside>
 
-        {/* Center — active thread */}
+        {/* Center â€” active thread */}
         <div
           className={`flex min-h-0 min-w-0 flex-1 flex-col bg-[#e5ddd5] ${
             mobilePanel === "list" ? "hidden lg:flex" : "flex"
@@ -377,10 +350,10 @@ export default function TailorWhatsAppWorkspace({
                   </div>
                   <p className="truncate text-xs text-slate-500">
                     {headerOrderShort ? `Order ${headerOrderShort}` : "Order chat"}
-                    {activeOrder?.garmentType ? ` · ${String(activeOrder.garmentType)}` : ""}
-                    {" · "}
+                    {activeOrder?.garmentType ? ` Â· ${String(activeOrder.garmentType)}` : ""}
+                    {" Â· "}
                     <span className={socket.connected ? "text-emerald-700" : "text-amber-700"}>
-                      {socket.connected ? "Online" : "Connecting…"}
+                      {socket.connected ? "Online" : "Connectingâ€¦"}
                     </span>
                   </p>
                 </div>
@@ -405,7 +378,7 @@ export default function TailorWhatsAppWorkspace({
                     onClick={() => void handleAcceptActiveOrder()}
                     className="mt-3 rounded-xl bg-gradient-to-b from-[#4a7c59] to-[#355542] px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:brightness-105 disabled:opacity-60"
                   >
-                    {acceptBusy ? "Accepting…" : "Accept order"}
+                    {acceptBusy ? "Acceptingâ€¦" : "Accept order"}
                   </button>
                 </div>
               ) : null}
@@ -437,7 +410,7 @@ export default function TailorWhatsAppWorkspace({
           )}
         </div>
 
-        {/* Right — profile / order */}
+        {/* Right â€” profile / order */}
         <aside
           className={`w-full shrink-0 border-slate-200/80 bg-white xl:w-[300px] xl:max-w-[300px] xl:border-l xl:flex xl:flex-col ${
             mobilePanel === "detail"
@@ -464,7 +437,7 @@ export default function TailorWhatsAppWorkspace({
                   {activeOrder?.garmentType ? String(activeOrder.garmentType) : "Order conversation"}
                 </p>
                 <p className={`mt-2 text-xs font-medium ${socket.connected ? "text-emerald-700" : "text-amber-700"}`}>
-                  {socket.connected ? "Online" : "Connecting…"}
+                  {socket.connected ? "Online" : "Connectingâ€¦"}
                 </p>
               </div>
               <div className="space-y-4 p-4">
@@ -478,7 +451,7 @@ export default function TailorWhatsAppWorkspace({
                     <div className="flex justify-between gap-2">
                       <dt className="text-slate-500">Summary</dt>
                       <dd className="text-right text-slate-900">
-                        {activeOrder.garmentType || "—"}
+                        {activeOrder.garmentType || "â€”"}
                       </dd>
                     </div>
                     <div className="flex justify-between gap-2">
@@ -492,7 +465,7 @@ export default function TailorWhatsAppWorkspace({
                       <dd className="text-right text-slate-900">
                         {activeOrder.createdAt
                           ? formatConversationTime(activeOrder.createdAt)
-                          : "—"}
+                          : "â€”"}
                       </dd>
                     </div>
                   </dl>

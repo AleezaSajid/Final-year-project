@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+﻿import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   Truck,
@@ -43,19 +43,19 @@ const SUPPORT_FAQ = [
     id: "update-measurements",
     question: "How to update measurements?",
     answer:
-      "Open the Measurement Wizard from “Update Measurements” on this dashboard, enter your latest numbers, and save. Your profile and new orders will use the updated measurements.",
+      "Open the Measurement Wizard from â€œUpdate Measurementsâ€ on this dashboard, enter your latest numbers, and save. Your profile and new orders will use the updated measurements.",
   },
   {
     id: "change-order",
     question: "Can I change my order?",
     answer:
-      "Contact us as soon as possible with your order ID. Changes depend on whether tailoring has started—we’ll confirm what’s possible and help you update details or timing.",
+      "Contact us as soon as possible with your order ID. Changes depend on whether tailoring has startedâ€”weâ€™ll confirm whatâ€™s possible and help you update details or timing.",
   },
   {
     id: "stitching-time",
     question: "How long does stitching take?",
     answer:
-      "Typical turnaround depends on garment complexity and urgency you selected. You’ll see status updates in Recent Orders; use Track Order anytime to jump back to that list.",
+      "Typical turnaround depends on garment complexity and urgency you selected. Youâ€™ll see status updates in Recent Orders; use Track Order anytime to jump back to that list.",
   },
   {
     id: "contact-tailor",
@@ -71,7 +71,7 @@ const WEDDING_CLASSIC_INSPIRATION = {
   src: `${PUB}/images/hero/mannequin.png`,
 };
 
-/** Design tokens — match dashboard mockup */
+/** Design tokens â€” match dashboard mockup */
 const C = {
   heading: "#1a1a1a",
   green: "#4c7c4c",
@@ -144,7 +144,7 @@ function buildPinterestStyleSearchUrl(order) {
   return `https://www.pinterest.com/search/pins/?q=${encodeURIComponent(query)}`;
 }
 
-/** Glass panel — matches marketing nav glass feel */
+/** Glass panel â€” matches marketing nav glass feel */
 const GLASS_CARD =
   "overflow-hidden rounded-2xl border border-white/40 bg-white/45 shadow-[0_8px_32px_-12px_rgba(15,23,42,0.14)] backdrop-blur-xl";
 
@@ -243,7 +243,7 @@ function StatusPill({ variant }) {
   );
 }
 
-/** Three-column status cards — icon row, copy row, tinted footer + pill */
+/** Three-column status cards â€” icon row, copy row, tinted footer + pill */
 function StatusSummaryCard({
   icon: Icon,
   iconBgClass,
@@ -284,7 +284,7 @@ function StatusSummaryCard({
 }
 
 function formatProfileValue(value, unit) {
-  if (value == null || value === "") return "—";
+  if (value == null || value === "") return "â€”";
   return unit ? `${value} ${unit}` : String(value);
 }
 
@@ -440,7 +440,7 @@ function upsertCustomerOrderList(prev, raw, customerId) {
   return sortOrdersByNewestFirst(next);
 }
 
-/** Garment label for “Showing details for…” (API + nested payload + table fallback). */
+/** Garment label for â€œShowing details forâ€¦â€ (API + nested payload + table fallback). */
 function profileContextGarmentLabel(order) {
   if (!order || typeof order !== "object") return "Latest Order";
   const fromGarment =
@@ -457,13 +457,13 @@ function profileContextGarmentLabel(order) {
   const combined = fromGarment || fromPayloadGarment || fromGarmentType;
   if (combined) return combined;
   const item = mapApiOrderToRecentRow(order).item;
-  return item && item !== "—" ? item : "Latest Order";
+  return item && item !== "â€”" ? item : "Latest Order";
 }
 
 function formatRawOrderStatus(order) {
-  if (!order || typeof order !== "object") return "—";
+  if (!order || typeof order !== "object") return "â€”";
   const s = order.status;
-  if (s == null || String(s).trim() === "") return "—";
+  if (s == null || String(s).trim() === "") return "â€”";
   const t = String(s).replace(/_/g, " ").trim();
   return t.charAt(0).toUpperCase() + t.slice(1);
 }
@@ -505,7 +505,7 @@ function HelpSupportCard({ orders, onTrackOrder }) {
     const order = orders.find((o) => orderIdentity(o) === reportOrderKey) || orders[0];
     if (!order) return;
     const row = mapApiOrderToRecentRow(order);
-    const subject = `SewServe: Issue report — ${row.orderId}`;
+    const subject = `SewServe: Issue report â€” ${row.orderId}`;
     const body = `Order ID: ${row.orderId}\nItem: ${row.item}\nStatus: ${formatRawOrderStatus(order)}\n\n${reportText.trim() || "(no details provided)"}`;
     setReportOpen(false);
     setReportText("");
@@ -515,11 +515,11 @@ function HelpSupportCard({ orders, onTrackOrder }) {
   const openContactMailtoFromModal = () => {
     const subject =
       latestOrder != null
-        ? `SewServe support — ${latestRow?.orderId ?? "Order"}`
+        ? `SewServe support â€” ${latestRow?.orderId ?? "Order"}`
         : "SewServe support question";
     const body =
       latestOrder != null
-        ? `Hi SewServe team,\n\nI need help with my order.\n\nOrder: ${latestRow?.orderId ?? "—"}\nItem: ${latestRow?.item ?? "—"}\n\n`
+        ? `Hi SewServe team,\n\nI need help with my order.\n\nOrder: ${latestRow?.orderId ?? "â€”"}\nItem: ${latestRow?.item ?? "â€”"}\n\n`
         : "Hi SewServe team,\n\n";
     setContactOpen(false);
     window.location.href = `mailto:${SUPPORT_EMAIL}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
@@ -696,7 +696,7 @@ function HelpSupportCard({ orders, onTrackOrder }) {
                 const r = mapApiOrderToRecentRow(o);
                 return (
                   <option key={id || r.orderId} value={id}>
-                    {r.orderId} — {r.item}
+                    {r.orderId} â€” {r.item}
                   </option>
                 );
               })}
@@ -853,7 +853,6 @@ export default function CustomerDashboard() {
       const raw = payload?.fullOrder || payload?.order;
       if (!raw || typeof raw !== "object") return;
       if (String(raw.customerId || "").trim() !== cid) return;
-      console.log("[Customer Sync] order:new", raw.id ?? raw._id ?? "");
       setOrders((prev) => upsertCustomerOrderList(prev, raw, cid));
     };
 
@@ -861,7 +860,6 @@ export default function CustomerDashboard() {
       const raw = payload?.fullOrder || payload?.order;
       if (!raw || typeof raw !== "object") return;
       if (String(raw.customerId || "").trim() !== cid) return;
-      console.log("[Customer Sync] measurement:updated", raw.id ?? raw._id ?? "");
       setOrders((prev) => upsertCustomerOrderList(prev, raw, cid));
     };
 
@@ -870,14 +868,12 @@ export default function CustomerDashboard() {
       if (data.fullOrder && typeof data.fullOrder === "object") {
         const raw = data.fullOrder;
         if (String(raw.customerId || "").trim() !== cid) return;
-        console.log("[Customer Sync] order:statusUpdated fullOrder", raw.id ?? raw._id ?? "");
         setOrders((prev) => upsertCustomerOrderList(prev, raw, cid));
         return;
       }
       if (data.orderId == null || data.status == null) return;
       const oid = String(data.orderId);
       const st = String(data.status);
-      console.log("[Customer Sync] order:statusUpdated patch", oid, st);
       setOrders((prev) =>
         prev.map((o) => (orderIdentity(o) === oid ? mergeOrderPatch(o, { status: st }) : o))
       );
@@ -886,7 +882,6 @@ export default function CustomerDashboard() {
     const onOrderRejected = (data) => {
       if (!data?.orderId) return;
       const oid = String(data.orderId);
-      console.log("[Customer Sync] orderRejected", oid);
       setOrders((prev) =>
         prev.map((o) =>
           orderIdentity(o) === oid
@@ -968,7 +963,7 @@ export default function CustomerDashboard() {
       <div className="relative z-10 font-['Inter',system-ui,sans-serif] text-slate-600">
         <main className="w-full">
           <div className="mx-auto max-w-7xl px-4 py-10 sm:px-6 lg:px-8 lg:py-12">
-            {/* Row 1 — three status cards */}
+            {/* Row 1 â€” three status cards */}
             <div className="grid grid-cols-1 gap-5 sm:grid-cols-3 lg:gap-6">
               <StatusSummaryCard
                 icon={Truck}
@@ -978,14 +973,14 @@ export default function CustomerDashboard() {
                 titleClassName=""
                 description={
                   ordersLoading
-                    ? "Loading your orders…"
+                    ? "Loading your ordersâ€¦"
                     : statusCounts.inTransit > 0
                       ? `${statusCounts.inTransit} order${statusCounts.inTransit === 1 ? "" : "s"} in transit.`
                       : "No orders currently in transit."
                 }
                 badgeLabel={
                   ordersLoading
-                    ? "—"
+                    ? "â€”"
                     : `${statusCounts.inTransit} In Transit`
                 }
                 badgeStyle={{ backgroundColor: C.green }}
@@ -999,14 +994,14 @@ export default function CustomerDashboard() {
                 titleClassName="!text-[#d4a017]"
                 description={
                   ordersLoading
-                    ? "Loading your orders…"
+                    ? "Loading your ordersâ€¦"
                     : statusCounts.delivered > 0
                       ? `${statusCounts.delivered} delivered order${statusCounts.delivered === 1 ? "" : "s"}.`
                       : "No delivered orders yet."
                 }
                 badgeLabel={
                   ordersLoading
-                    ? "—"
+                    ? "â€”"
                     : `${statusCounts.delivered} Completed`
                 }
                 badgeStyle={{ backgroundColor: C.green }}
@@ -1020,14 +1015,14 @@ export default function CustomerDashboard() {
                 titleClassName="!text-[#1e3a5f]"
                 description={
                   ordersLoading
-                    ? "Loading your orders…"
+                    ? "Loading your ordersâ€¦"
                     : statusCounts.alteration > 0
                       ? `${statusCounts.alteration} order${statusCounts.alteration === 1 ? "" : "s"} needs alteration.`
                       : "No orders flagged for alteration."
                 }
                 badgeLabel={
                   ordersLoading
-                    ? "—"
+                    ? "â€”"
                     : `${statusCounts.alteration} Alteration`
                 }
                 badgeStyle={{ backgroundColor: C.green }}
@@ -1099,7 +1094,7 @@ export default function CustomerDashboard() {
                       {ordersLoading ? (
                         <tr>
                           <td colSpan={5} className="py-8 text-center text-sm text-slate-500">
-                            Loading orders…
+                            Loading ordersâ€¦
                           </td>
                         </tr>
                       ) : recentRows.length === 0 ? (
@@ -1180,7 +1175,7 @@ export default function CustomerDashboard() {
               </div>
             </div>
 
-            {/* Row 3 — equal-height cards (grid stretch + h-full flex columns) */}
+            {/* Row 3 â€” equal-height cards (grid stretch + h-full flex columns) */}
             <div className="mt-8 grid grid-cols-1 items-stretch gap-5 md:grid-cols-3 lg:mt-10">
               <section
                 className={`flex h-full min-h-0 flex-col p-3 sm:p-4 ${GLASS_CARD}`}

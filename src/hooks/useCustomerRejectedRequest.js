@@ -18,6 +18,12 @@ import {
   readRejectedTailorIdsForRequest,
 } from "../utils/customerRejectedRequest.js";
 
+const REJECTION_DEBUG = false;
+const debugTag = "[CustomerReject]";
+const logDebug = (...args) => {
+  if (REJECTION_DEBUG) console.log(debugTag, ...args);
+};
+
 function isRejectedStatusToken(st) {
   const s = String(st || "")
     .trim()
@@ -57,17 +63,8 @@ export function useCustomerRejectedRequest({
   lastRequest = null,
   lastRequestRef = null,
   onDeclined = null,
-  debugTag = "",
 } = {}) {
   const oid = String(linkedOrderId || "").trim();
-  const logDebug = useCallback(
-    (message, detail) => {
-      if (!debugTag) return;
-      if (detail !== undefined) console.log(`[${debugTag}] ${message}`, detail);
-      else console.log(`[${debugTag}] ${message}`);
-    },
-    [debugTag]
-  );
   const [declinedNotice, setDeclinedNotice] = useState(null);
   const [rejectedTailorIds, setRejectedTailorIds] = useState(() => readRejectedTailorIdsForRequest(oid));
   const dismissedRejectionRef = useRef(null);
@@ -123,7 +120,7 @@ export function useCustomerRejectedRequest({
       setDeclinedNotice(notice);
       onDeclined?.(notice);
     },
-    [trackHiddenTailorFromNotice, isNoticeSuppressed, onDeclined, logDebug]
+    [trackHiddenTailorFromNotice, isNoticeSuppressed, onDeclined]
   );
 
   const dismissNotice = useCallback(() => {
@@ -165,7 +162,10 @@ export function useCustomerRejectedRequest({
         return;
       }
       if (!payloadMatchesLinkedOrder(payload, oid) && !payloadMatchesLinkedOrder(data, oid)) {
-        logDebug("skip — order id mismatch", { payloadOrderId: payload?.orderId, dataOrderId: data?.orderId });
+        logDebug("skip — order id mismatch", {
+          payloadOrderId: payload?.orderId,
+          dataOrderId: data?.orderId,
+        });
         return;
       }
       const built = declinedNoticeFromSocketPayload(
@@ -211,8 +211,13 @@ export function useCustomerRejectedRequest({
       }
       void syncDeclinedFromOrder(oid);
     },
-    [oid, tailorCatalog, resolveLastRequest, applyDeclinedNotice, syncDeclinedFromOrder, logDebug]
+    [oid, tailorCatalog, resolveLastRequest, applyDeclinedNotice, syncDeclinedFromOrder]
   );
+
+  useEffect(() => {
+    if (!oid || user?.role !== "customer") return;
+    void syncDeclinedFromOrder(oid);
+  }, [oid, user?.role, syncDeclinedFromOrder]);
 
   useEffect(() => {
     if (!user?.id || user.role !== "customer") return undefined;
@@ -227,7 +232,6 @@ export function useCustomerRejectedRequest({
       void syncDeclinedFromOrder(oid);
     };
     const onRejected = (payload = {}) => {
-      logDebug("socket orderRejected", payload);
       ingestSocketPayload(payload);
     };
     const onStatus = (data = {}) => {
@@ -237,7 +241,6 @@ export function useCustomerRejectedRequest({
         .trim()
         .toLowerCase();
       if (st === "rejected" || st === "declined") {
-        logDebug("socket order:statusUpdated rejected", data);
         ingestSocketPayload({ ...data, orderId: data.orderId || oid, status: st }, data);
       }
     };
@@ -251,17 +254,16 @@ export function useCustomerRejectedRequest({
       socket.off("orderRejected", onRejected);
       socket.off("order:statusUpdated", onStatus);
     };
-  }, [user, oid, syncDeclinedFromOrder, ingestSocketPayload, logDebug]);
+  }, [user, oid, syncDeclinedFromOrder, ingestSocketPayload]);
 
   const showDeclinedNotice = Boolean(
     declinedNotice && !isNoticeSuppressed(declinedNotice)
   );
 
   useEffect(() => {
-    if (!debugTag) return;
     logDebug("modal visible", showDeclinedNotice);
     logDebug("dismissed ids", [...rejectedTailorIds]);
-  }, [debugTag, showDeclinedNotice, declinedNotice, rejectedTailorIds, logDebug]);
+  }, [showDeclinedNotice, declinedNotice, rejectedTailorIds]);
 
   const isTailorHidden = useCallback(
     (tailor) => isPublicTailorHiddenForRejectedRequest(tailor, rejectedTailorIds),

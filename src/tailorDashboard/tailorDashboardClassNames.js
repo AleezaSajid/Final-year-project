@@ -46,7 +46,7 @@ export const TD_SIDEBAR_NAV_IDLE =
   "border border-transparent bg-transparent hover:bg-[rgba(46,125,90,0.05)] hover:-translate-y-[2px]";
 
 export const TD_CHATS_SURFACE = [
-  "flex min-h-[15.5rem] flex-col rounded-[28px] p-4",
+  "flex h-auto w-full max-h-[26rem] min-h-0 flex-col rounded-[28px] p-4",
   "border border-[rgba(140,170,160,0.18)] bg-[rgba(255,255,255,0.72)]",
   "shadow-[0_14px_40px_rgba(15,23,42,0.06)] backdrop-blur-[18px]",
   TD_HOVER_LIFT,

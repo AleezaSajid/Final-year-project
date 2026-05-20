@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+﻿import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
   ArrowLeft,
   Image as ImageIcon,
@@ -58,7 +58,7 @@ function buildOrderStubFromConv(conv, authCustomerId) {
 }
 
 /**
- * WhatsApp Web–style layout for customer dashboard. Active thread peers come from the selected row only.
+ * WhatsApp Webâ€“style layout for customer dashboard. Active thread peers come from the selected row only.
  */
 export default function CustomerWhatsAppWorkspace({
   customerChatConversations = [],
@@ -131,31 +131,6 @@ export default function CustomerWhatsAppWorkspace({
       return tailorLabel.includes(q) || preview.includes(q);
     });
   }, [sidebarRows, orders, filter, search, normalizedActive]);
-
-  useEffect(() => {
-    const api = Array.isArray(customerChatConversations) ? customerChatConversations : [];
-    const activeInFetched = Boolean(
-      normalizedActive &&
-        api.some((r) => normalizeConversationId(r?.orderId ?? r?.conversationId) === normalizedActive)
-    );
-    console.log("[Workspace Sidebar]", {
-      role: "customer",
-      fetchedCount: api.length,
-      renderedMergedCount: sidebarRows.length,
-      activeConversationId: normalizedActive || null,
-      filteredCount: filteredConversations.length,
-      activeRowInFetchedList: activeInFetched,
-      filter,
-      searchSnippet: search.trim().slice(0, 32),
-    });
-  }, [
-    customerChatConversations,
-    sidebarRows.length,
-    normalizedActive,
-    filteredConversations.length,
-    filter,
-    search,
-  ]);
 
   useEffect(() => {
     if (selectedConversationId || !sidebarRows.length || !customerId) return;
@@ -284,7 +259,7 @@ export default function CustomerWhatsAppWorkspace({
                   const preview =
                     (conv.lastMessage && String(conv.lastMessage).trim()) || "Start conversation";
                   const ts = conv.lastMessageAt || conv.updatedAt;
-                  const timeLabel = formatConversationTime(ts) || "—";
+                  const timeLabel = formatConversationTime(ts) || "â€”";
                   const unread = Math.max(0, Number(conv.unreadCustomer || 0));
                   const selected = oid && oid === normalizedActive;
                   return (
@@ -358,10 +333,10 @@ export default function CustomerWhatsAppWorkspace({
                   </div>
                   <p className="truncate text-xs text-slate-500">
                     {headerOrderShort ? `Order ${headerOrderShort}` : "Order chat"}
-                    {activeOrder?.garmentType ? ` · ${String(activeOrder.garmentType)}` : ""}
-                    {" · "}
+                    {activeOrder?.garmentType ? ` Â· ${String(activeOrder.garmentType)}` : ""}
+                    {" Â· "}
                     <span className={socket.connected ? "text-emerald-700" : "text-amber-700"}>
-                      {socket.connected ? "Online" : "Connecting…"}
+                      {socket.connected ? "Online" : "Connectingâ€¦"}
                     </span>
                   </p>
                 </div>
@@ -428,7 +403,7 @@ export default function CustomerWhatsAppWorkspace({
                   <p className="mt-1 text-center text-sm text-slate-500">Tailor ID: {String(activeOrder.tailorId)}</p>
                 ) : null}
                 <p className={`mt-2 text-xs font-medium ${socket.connected ? "text-emerald-700" : "text-amber-700"}`}>
-                  {socket.connected ? "Online" : "Connecting…"}
+                  {socket.connected ? "Online" : "Connectingâ€¦"}
                 </p>
               </div>
               <div className="space-y-4 p-4">
@@ -443,7 +418,7 @@ export default function CustomerWhatsAppWorkspace({
                   <dl className="mt-3 space-y-2 text-sm">
                     <div className="flex justify-between gap-2">
                       <dt className="text-slate-500">Summary</dt>
-                      <dd className="text-right text-slate-900">{activeOrder.garmentType || "—"}</dd>
+                      <dd className="text-right text-slate-900">{activeOrder.garmentType || "â€”"}</dd>
                     </div>
                     <div className="flex justify-between gap-2">
                       <dt className="text-slate-500">Status</dt>
@@ -454,7 +429,7 @@ export default function CustomerWhatsAppWorkspace({
                     <div className="flex justify-between gap-2">
                       <dt className="text-slate-500">Created</dt>
                       <dd className="text-right text-slate-900">
-                        {activeOrder.createdAt ? formatConversationTime(activeOrder.createdAt) : "—"}
+                        {activeOrder.createdAt ? formatConversationTime(activeOrder.createdAt) : "â€”"}
                       </dd>
                     </div>
                   </dl>

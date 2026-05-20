@@ -14,7 +14,7 @@ export const DEFAULT_TAILOR_SHOP_ID = "T-A1";
 /** Same cap for “Current Tasks” and “Measurements to Review” (priority-sorted). */
 export const TAILOR_CURRENT_TASKS_VISIBLE_MAX = 2;
 export const DEFAULT_CUSTOMER_ID = "CU-001";
-export const API_BASE_URL = "http://localhost:5000";
+/** @deprecated Use getApiBaseUrl() from ../api/client.js */
 export const DEFAULT_AVATAR = `data:image/svg+xml;utf8,${encodeURIComponent(
   `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 120">
     <rect width="120" height="120" fill="#FFF7ED"/>

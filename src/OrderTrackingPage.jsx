@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+﻿import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { motion } from "framer-motion";
 import { Navigate, useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import { FaTwitter } from "react-icons/fa6";
@@ -38,7 +38,7 @@ const sectionReveal = {
 };
 
 function formatLongDate(iso) {
-  if (!iso) return "—";
+  if (!iso) return "â€”";
   const d = new Date(`${String(iso).slice(0, 10)}T12:00:00`);
   if (Number.isNaN(d.getTime())) return String(iso);
   return d.toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" });
@@ -70,7 +70,7 @@ function SewServeFooter() {
           <a
             href="#home"
             className="inline-flex items-center focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-[#BAC095]"
-            aria-label="SewServe — home"
+            aria-label="SewServe â€” home"
           >
             <SewServeBrandImg
               decorative
@@ -122,7 +122,7 @@ function SewServeFooter() {
             </a>
           </div>
         </div>
-        <p className="text-sm text-[#4B5563]">© 2026 SewServe. All rights reserved.</p>
+        <p className="text-sm text-[#4B5563]">Â© 2026 SewServe. All rights reserved.</p>
       </div>
     </footer>
   );
@@ -312,10 +312,8 @@ export default function OrderTrackingPage() {
 
     const onLiveUpdate = (data) => {
       if (data?.fullOrder && orderIdsMatch(data.orderId, currentOrderId)) {
-        console.log("[Customer Sync] order:liveUpdate fullOrder", data.orderId);
         setOrder(data.fullOrder);
       } else if (data && orderIdsMatch(data.orderId, currentOrderId)) {
-        console.log("[Customer Sync] order:liveUpdate patch", data.orderId);
         setOrderStatus(data.status);
         setActivityMessage(getOrderActivityMessage(data.status));
       }
@@ -324,10 +322,8 @@ export default function OrderTrackingPage() {
 
     const onStatusUpdatedRelay = (data) => {
       if (data?.fullOrder && orderIdsMatch(data.orderId, currentOrderId)) {
-        console.log("[Customer Sync] order:statusUpdated fullOrder", data.orderId);
         setOrder(data.fullOrder);
       } else if (data && orderIdsMatch(data.orderId, currentOrderId)) {
-        console.log("[Customer Sync] order:statusUpdated patch", data.orderId);
         setOrderStatus(data.status);
         setActivityMessage(getOrderActivityMessage(data.status));
       }
@@ -380,7 +376,7 @@ export default function OrderTrackingPage() {
   }, [order?.rejectionReason]);
 
   const customerDisplayName = useMemo(() => {
-    if (!order) return "—";
+    if (!order) return "â€”";
     return (
       order.customerName ||
       order.orderPayload?.customerName ||
@@ -390,7 +386,7 @@ export default function OrderTrackingPage() {
   }, [order, user?.fullName]);
 
   const tailorDisplayName = useMemo(() => {
-    if (!order) return "—";
+    if (!order) return "â€”";
     return (
       order.tailorName ||
       order.tailorShopName ||
@@ -401,7 +397,7 @@ export default function OrderTrackingPage() {
   }, [order]);
 
   const garmentDisplay = useMemo(() => {
-    if (!order) return "—";
+    if (!order) return "â€”";
     return (
       order.garmentType ||
       order.orderPayload?.garment?.type ||
@@ -411,21 +407,21 @@ export default function OrderTrackingPage() {
   }, [order]);
 
   const orderRef = useMemo(() => {
-    if (!order) return "—";
+    if (!order) return "â€”";
     const raw = order.id ?? order._id;
-    if (raw == null || raw === "") return "—";
+    if (raw == null || raw === "") return "â€”";
     return `#SS${String(raw).replace(/^#/, "")}`;
   }, [order]);
 
   const orderDateDisplay = useMemo(() => {
-    if (!order) return "—";
+    if (!order) return "â€”";
     if (typeof order.orderDate === "string" && order.orderDate.trim() !== "") return order.orderDate.trim();
     const iso = isoFromMaybeDate(order.createdAt ?? order.date);
     return formatLongDate(iso || undefined);
   }, [order]);
 
   const expectedDeliveryDisplay = useMemo(() => {
-    if (!order) return "—";
+    if (!order) return "â€”";
     if (typeof order.expectedDelivery === "string" && order.expectedDelivery.trim() !== "") {
       return order.expectedDelivery.trim();
     }
@@ -436,12 +432,12 @@ export default function OrderTrackingPage() {
   }, [order]);
 
   const currentStageLabel = useMemo(() => {
-    if (!order) return "—";
-    return ORDER_WORKFLOW_STEPS[activeIdx]?.label ?? "—";
+    if (!order) return "â€”";
+    return ORDER_WORKFLOW_STEPS[activeIdx]?.label ?? "â€”";
   }, [order, activeIdx]);
 
   const nextStageLabel = useMemo(() => {
-    if (!order) return "—";
+    if (!order) return "â€”";
     return getNextWorkflowLabel(activeIdx);
   }, [order, activeIdx]);
 
@@ -506,7 +502,7 @@ export default function OrderTrackingPage() {
               </div>
 
               {loading ? (
-                <div className="mt-12 text-center text-ink-muted">Loading…</div>
+                <div className="mt-12 text-center text-ink-muted">Loadingâ€¦</div>
               ) : !order ? (
                 <div className="mt-12 text-center text-ink-muted">No active order found.</div>
               ) : orderRejected ? (
@@ -516,7 +512,7 @@ export default function OrderTrackingPage() {
                   </span>
                   <h2 className="mt-4 text-xl font-semibold text-ink">This request was declined</h2>
                   <p className="mt-2 text-sm leading-relaxed text-ink-muted">
-                    {tailorDisplayName !== "—"
+                    {tailorDisplayName !== "â€”"
                       ? `${tailorDisplayName} is unable to take this order right now.`
                       : "The tailor is unable to take this order right now."}
                   </p>
@@ -607,7 +603,7 @@ export default function OrderTrackingPage() {
                               <p className="text-sm leading-[1.5] text-ink">{activityMessage}</p>
                               <div className="flex flex-wrap gap-x-2">
                                 <dt className="font-medium text-ink-muted">Status</dt>
-                                <dd className="font-semibold text-ink">Completed ✔</dd>
+                                <dd className="font-semibold text-ink">Completed âœ”</dd>
                               </div>
                             </>
                           ) : (

@@ -20,10 +20,20 @@ const { sendMailSafe, sendOtpMail, getMailFrom, verifySmtpOnStartup, OTP_EMAIL_F
 const { makeWelcomeEmail } = require('./email/templates/welcomeEmail');
 
 const app = express();
-const PORT = 5000;
+const PORT = Number(process.env.PORT) || 5000;
 const server = http.createServer(app);
-const ALLOWED_ORIGINS = ['http://localhost:3000', 'http://127.0.0.1:3000'];
 const IS_PRODUCTION = process.env.NODE_ENV === 'production';
+
+function buildAllowedOrigins() {
+  const defaults = ['http://localhost:3000', 'http://127.0.0.1:3000'];
+  const fromEnv = String(process.env.CORS_ORIGINS || process.env.FRONTEND_URL || '')
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean);
+  return [...new Set([...defaults, ...fromEnv])];
+}
+
+const ALLOWED_ORIGINS = buildAllowedOrigins();
 
 function corsOrigin(origin, callback) {
   if (!IS_PRODUCTION) {
@@ -39,6 +49,9 @@ function corsOrigin(origin, callback) {
     const u = new URL(origin);
     if (u.hostname === 'localhost' || u.hostname === '127.0.0.1') {
       return callback(null, origin);
+    }
+    if (process.env.ALLOW_VERCEL_PREVIEWS === 'true' && u.hostname.endsWith('.vercel.app')) {
+      return callback(null, true);
     }
   } catch {
     // ignore
@@ -436,8 +449,10 @@ const upload = multer({
   }),
 });
 
+const MONGODB_URI = process.env.MONGODB_URI || 'mongodb://127.0.0.1:27017/sewserve';
+
 mongoose
-  .connect('mongodb://127.0.0.1:27017/sewserve')
+  .connect(MONGODB_URI)
   .then(async () => {
     console.log('DB CONNECTED');
     // Do NOT auto-verify users without OTP — that blocks the email verification flow.
@@ -3501,7 +3516,7 @@ io.on('connection', (socket) => {
 });
 
 server.listen(PORT, () => {
-  console.log(`Server running on http://localhost:${PORT}`);
+  console.log(`SewServe API listening on port ${PORT}`);
   verifySmtpOnStartup().catch((err) => {
     console.error('[email] SMTP startup verify error', err);
   });
