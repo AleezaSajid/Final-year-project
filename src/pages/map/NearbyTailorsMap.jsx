@@ -223,7 +223,7 @@ export default function NearbyTailorsMap() {
     return () => {
       cancelled = true;
     };
-  }, [user?.id, user?.email, user?.role]);
+  }, [user]);
 
   const requestLocation = useCallback(() => {
     if (!navigator.geolocation) {
@@ -360,7 +360,6 @@ export default function NearbyTailorsMap() {
     syncDeclinedFromOrder,
     applyDeclinedNotice,
     isTailorHidden,
-    rejectedTailorIds,
   } = useCustomerRejectedRequest({
     user,
     linkedOrderId,

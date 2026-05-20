@@ -1,10 +1,6 @@
 import { Clock3, Heart, MapPin, Star, Tag } from "lucide-react";
 import { getApiBaseUrl } from "../../../api/client.js";
 
-function avatarUrl(imgId) {
-  return `https://i.pravatar.cc/128?img=${imgId}`;
-}
-
 const DEFAULT_PROFILE_PLACEHOLDER =
   "data:image/svg+xml;charset=UTF-8," +
   encodeURIComponent(`
@@ -69,8 +65,6 @@ export default function TailorCard({
   const distanceLabel = typeof tailor.distanceLabel === "string" ? tailor.distanceLabel : "";
   const specialty = typeof tailor.specialty === "string" ? tailor.specialty : "";
   const deliveryDays = tailor.deliveryDays ?? "";
-  const avatarSeed = tailor.avatarImg ?? tailor.id ?? 1;
-  const displayName = tailor.shopName || tailor.name || "Tailor";
   const imageSrc = resolveTailorImageSrc(tailor) || DEFAULT_PROFILE_PLACEHOLDER;
   const showRange = safeMin != null && safeMax != null && safeMax > safeMin;
 
