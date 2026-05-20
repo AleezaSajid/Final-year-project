@@ -140,6 +140,7 @@ export default function BrowseTailors() {
   });
   const [menuPosition, setMenuPosition] = useState(null);
   const urlHydrated = useRef(false);
+  const skipUrlSyncRef = useRef(true);
 
   useEffect(() => {
     document.title = "Browse Tailors | SewServe";
@@ -165,25 +166,31 @@ export default function BrowseTailors() {
     };
   }, []);
 
-  // Hydrate filter state from the URL once, then keep the query string in sync with filters.
-  // eslint-disable-next-line react-hooks/exhaustive-deps -- searchParams is read only on first run; adding it loops with setSearchParams.
+  // Hydrate filter state from the URL once.
   useEffect(() => {
-    if (!urlHydrated.current) {
-      urlHydrated.current = true;
-      const q = searchParams.get("q");
-      if (q) setSearch(q);
-      const r = searchParams.get("rating");
-      if (r && ["any", "4", "4.5"].includes(r)) setRating(r);
-      const pr = searchParams.get("price");
-      if (pr && ["any", "low", "mid", "high"].includes(pr)) setPrice(pr);
-      const d = searchParams.get("delivery");
-      if (d && ["any", "fast", "standard", "flex"].includes(d)) setDelivery(d);
-      const s = searchParams.get("sort");
-      if (s && ["rating", "price-asc", "price-desc", "orders"].includes(s)) setSortBy(s);
-      const ex = searchParams.get("exp");
-      if (ex && ["any", "5", "10"].includes(ex)) setExperienceBar(ex);
-      const cats = searchParams.get("cats");
-      if (cats) setCategoryUi(categorySetFromParam(cats));
+    if (urlHydrated.current) return;
+    urlHydrated.current = true;
+    const q = searchParams.get("q");
+    if (q) setSearch(q);
+    const r = searchParams.get("rating");
+    if (r && ["any", "4", "4.5"].includes(r)) setRating(r);
+    const pr = searchParams.get("price");
+    if (pr && ["any", "low", "mid", "high"].includes(pr)) setPrice(pr);
+    const d = searchParams.get("delivery");
+    if (d && ["any", "fast", "standard", "flex"].includes(d)) setDelivery(d);
+    const s = searchParams.get("sort");
+    if (s && ["rating", "price-asc", "price-desc", "orders"].includes(s)) setSortBy(s);
+    const ex = searchParams.get("exp");
+    if (ex && ["any", "5", "10"].includes(ex)) setExperienceBar(ex);
+    const cats = searchParams.get("cats");
+    if (cats) setCategoryUi(categorySetFromParam(cats));
+  }, [searchParams]);
+
+  // Keep the query string in sync with filters after initial hydration (skip first pass).
+  useEffect(() => {
+    if (!urlHydrated.current) return;
+    if (skipUrlSyncRef.current) {
+      skipUrlSyncRef.current = false;
       return;
     }
     const p = new URLSearchParams();

@@ -1,4 +1,4 @@
-﻿import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
+import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import CustomerChatWindow from "../CustomerChatWindow.jsx";
 import { ensureSocketThen, socket } from "../socket.js";
@@ -102,7 +102,7 @@ export function CustomerChatProvider({ children }) {
   const isChatOpenRef = useRef(false);
   const [unreadChatCount, setUnreadChatCount] = useState(0);
   const [lastChatPreview, setLastChatPreview] = useState(() => readStoredChatPreview());
-  const [orderRoomCustomerId, setOrderRoomCustomerId] = useState(() => readChatRoomCustomerIdFromStorage());
+  const [, setOrderRoomCustomerId] = useState(() => readChatRoomCustomerIdFromStorage());
   const [customerChatConversations, setCustomerChatConversations] = useState([]);
   const [modalChatRow, setModalChatRow] = useState(null);
   const customerReconcileRefetchAtRef = useRef(0);
@@ -430,7 +430,13 @@ export function CustomerChatProvider({ children }) {
       socket.off("connect", joinRoom);
       socket.off("new_notification", handleNewNotification);
     };
-  }, [authCustomerIdForApi, fetchCustomerConversations, location.pathname, scheduleCustomerConversationsReconcile]);
+  }, [
+    authCustomerIdForApi,
+    customerId,
+    fetchCustomerConversations,
+    location.pathname,
+    scheduleCustomerConversationsReconcile,
+  ]);
 
   useEffect(() => {
     if (!isCustomerChatPath(location.pathname)) return undefined;

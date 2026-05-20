@@ -1,4 +1,4 @@
-﻿import { X } from "lucide-react";
+import { X } from "lucide-react";
 
 /**
  * Premium rose glass banner when a tailor declines a customer request.
