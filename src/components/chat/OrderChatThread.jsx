@@ -1,4 +1,4 @@
-﻿  import React, { useEffect, useRef, useState } from "react";
+  import React, { useEffect, useRef, useState } from "react";
   import {
     buildOutgoingChatMessage,
     messageBelongsToOrderChat,
@@ -70,7 +70,6 @@
     const sId = normalizeChatId(senderId);
     const rId = normalizeChatId(receiverId);
     const cId = normalizeConversationId(conversationId);
-    const oId = normalizeConversationId(orderId) || cId;
     const locked = chatLocked || !isChatEnabled;
     const [messages, setMessages] = useState([]);
     const [inputValue, setInputValue] = useState("");
