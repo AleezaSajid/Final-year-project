@@ -1,4 +1,4 @@
-﻿import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "../../context/AuthContext.jsx";
 import { patchOrderWizardFields } from "../../api/ordersApi.js";
@@ -37,7 +37,6 @@ import {
   normalizeStatus,
   resolveOrderWorkflowState,
   TAILOR_CURRENT_TASKS_VISIBLE_MAX,
-  WORKFLOW_NON_COMPLETED_STATUSES,
   workflowStages,
 } from "../constants";
 import { getTailorProfileSelf, patchTailorProfileSelf } from "../../api/accountApi.js";
@@ -104,10 +103,6 @@ function upsertOrdersMerged(prev, raw, tailorIdFilter) {
 
 function toStoreOrder(raw) {
   return normalizeOrder(raw);
-}
-
-function orderIsActiveCurrentTask(order) {
-  return isTailorCurrentTaskOrder(order);
 }
 
 function sortTailorConversationsDesc(rows) {
@@ -317,7 +312,7 @@ export function useTailorDashboard() {
     return () => {
       cancelled = true;
     };
-  }, [user?.id, user?.email, user?.role, activeTailorShopId]);
+  }, [user, activeTailorShopId]);
 
   useEffect(() => {
     socket.connect();
@@ -746,13 +741,13 @@ export function useTailorDashboard() {
       .sort((a, b) => new Date(b.createdAt || b.date).getTime() - new Date(a.createdAt || a.date).getTime());
   }, [tailorOrders]);
 
-  const orderMatchesId = (order, orderId) => {
+  const orderMatchesId = useCallback((order, orderId) => {
     const target = String(orderId ?? "").trim();
     if (!target) return false;
     const a = String(order?.id ?? "").trim();
     const b = String(order?._id ?? "").trim();
     return a === target || b === target;
-  };
+  }, []);
 
   const updateOrderStatus = async (orderId, newStatus) => {
     const fromAuth = resolveWorkflowControlRole(user);
@@ -987,7 +982,7 @@ export function useTailorDashboard() {
         return false;
       }
     },
-    [activeTailorShopId, fetchOrders, fetchTailorConversations, orders]
+    [activeTailorShopId, fetchOrders, fetchTailorConversations, orders, setActiveOrderId]
   );
 
   const rejectOrderFromPending = useCallback(
@@ -1084,6 +1079,7 @@ export function useTailorDashboard() {
       fetchTailorConversations,
       orders,
       orderMatchesId,
+      setActiveOrderId,
     ]
   );
 

@@ -1,4 +1,4 @@
-﻿import { putCustomerMeta, putWizardDraft } from "../api/accountApi.js";
+import { putCustomerMeta, putWizardDraft } from "../api/accountApi.js";
 import { getOrderById, patchOrderWizardFields } from "../api/ordersApi.js";
 import {
   buildMeasurementOrderPayload,
@@ -292,11 +292,11 @@ function pickPatchBody(flat) {
  * @param {{ rejectOnCreateFailure?: boolean }} [options] â€” when true (final wizard submit), surface API errors instead of failing silently.
  */
 export async function syncWizardOrderToServer(snapshot, authUser, options = {}) {
-  const { rejectOnCreateFailure = false, tailorResolutionHints } = options;
+  const { tailorResolutionHints } = options;
   if (typeof window === "undefined") return;
   if (!snapshot || typeof snapshot !== "object") return;
 
-  const { payload, flat } = buildPayloadAndFlat(snapshot, authUser, { tailorResolutionHints });
+  const { flat } = buildPayloadAndFlat(snapshot, authUser, { tailorResolutionHints });
   if (flat.orderId) setWizardClientOrderId(String(flat.orderId));
 
   let linked = getLinkedWizardOrderId();
