@@ -1,4 +1,4 @@
-﻿import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   Truck,
@@ -10,13 +10,11 @@ import {
   Mail,
   AlertTriangle,
   ListOrdered,
-  MessageCircle,
   CircleHelp,
   X,
 } from "lucide-react";
 
 import {
-  isOrderEligibleForChat,
   notifyChatIdsFromOrderUpdated,
   publishChatRoomCustomerId,
 } from "./chatUtils.js";
@@ -338,7 +336,7 @@ function MeasurementProfileAccordion({ profileFromOrder, ordersLoading, ordersLe
       window.removeEventListener("sewserve:wizard-draft-updated", onDraft);
       window.removeEventListener("focus", onDraft);
     };
-  }, [profileFromOrder, allowWizardFallback, user?.id, user?.email]);
+  }, [profileFromOrder, allowWizardFallback, user]);
 
   const profile = profileFromOrder ?? (allowWizardFallback ? wizardProfile : EMPTY_PROFILE_ROWS);
 

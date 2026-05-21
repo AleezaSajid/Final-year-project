@@ -456,18 +456,18 @@ export default function SewServeLandingPage() {
                 <div className="border-t border-slate-200/50 pt-5">
                   <p className="text-xs text-slate-600">Â© 2026 SewServe. All rights reserved.</p>
                   <div className="mt-3 flex flex-col gap-2 text-xs text-slate-600">
-                    <a
-                      href="#"
-                      className="w-fit transition hover:text-slate-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-600/30"
+                    <button
+                      type="button"
+                      className="w-fit text-left transition hover:text-slate-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-600/30"
                     >
                       Privacy Policy
-                    </a>
-                    <a
-                      href="#"
-                      className="w-fit transition hover:text-slate-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-600/30"
+                    </button>
+                    <button
+                      type="button"
+                      className="w-fit text-left transition hover:text-slate-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-600/30"
                     >
                       Terms &amp; Conditions
-                    </a>
+                    </button>
                   </div>
                 </div>
               </div>

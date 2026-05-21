@@ -1,4 +1,4 @@
-﻿import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { motion } from "framer-motion";
 import { Navigate, useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import { FaTwitter } from "react-icons/fa6";

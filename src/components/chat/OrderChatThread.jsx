@@ -51,7 +51,6 @@
     receiverId,
     customerId: orderCustomerId,
     tailorId: orderTailorId,
-    orderId,
     peerDisplayName = "",
     conversationId,
     /** 'whatsapp' | 'glass' â€” glass matches legacy modal look */

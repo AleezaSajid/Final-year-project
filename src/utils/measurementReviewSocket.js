@@ -1,4 +1,4 @@
-﻿import { ensureSocketThen, socket } from "../socket.js";
+import { ensureSocketThen, socket } from "../socket.js";
 import { resolveTailorIdForCustomerChat } from "./chatIdentity.js";
 import { patchOrderWizardFields } from "../api/ordersApi.js";
 import { resolveOrderCustomerId, resolveWizardTailorShopIdForOrder } from "./measurementOrderPayload.js";

@@ -1,10 +1,10 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import { useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import { Check, ChevronLeft, ChevronRight, Upload } from "lucide-react";
 import WizardNavbar from "./components/WizardNavbar";
 import { saveWizardDraft, loadWizardDraft } from "./api/wizardDraftApi";
-import { putWizardDraft, putCustomerMeta } from "./api/accountApi.js";
+import { putCustomerMeta } from "./api/accountApi.js";
 import { createWizardDraftOrder } from "./api/wizardDraftOrderApi.js";
 import { useAuth } from "./context/AuthContext.jsx";
 import {
@@ -20,7 +20,6 @@ import { resolveOrderCustomerId } from "./utils/measurementOrderPayload.js";
 import {
   clearCustomerTailorShopSession,
   looksLikeTailorShopId,
-  isPlaceholderTailorShopId,
   persistCustomerTailorShopSession,
 } from "./utils/chatIdentity.js";
 
@@ -1140,7 +1139,7 @@ export default function MeasurementWizard() {
     return () => {
       cancelled = true;
     };
-  }, [user?.id, user?.email, location, searchParams]);
+  }, [user, location, searchParams]);
 
   const prevActiveStepForMotionRef = useRef(activeStep);
   let stepTransitionDir = 1;
@@ -1149,46 +1148,6 @@ export default function MeasurementWizard() {
     stepTransitionDir = activeStep > prevStepForMotion ? 1 : -1;
     prevActiveStepForMotionRef.current = activeStep;
   }
-
-  const resetWizardProgress = useCallback(() => {
-    clearLinkedWizardOrderId();
-    if (user?.id) {
-      void putWizardDraft(user, null).catch(() => {});
-    }
-    setActiveStep(3);
-    setCustomerInfo({ ...initialCustomerInfo });
-    setSelectedGarmentType("");
-    setCustomGarmentType("");
-    setReferenceImage(null);
-    setSelectedNeck("v-neck");
-    setMeasurements({ ...initialMeasurements });
-    setStyleOptions({ ...initialStyleOptions });
-    setDesignBrief({ ...initialDesignBrief });
-    setData({ ...initialWizardData });
-    setDraftVersion(0);
-    setAssignedTailorShopId("");
-    setAssignedTailorDisplayName("");
-    clearCustomerTailorShopSession();
-    clearLinkedWizardOrderId();
-    setBrowseTailorBanner(null);
-    lastPersistedSnapshotRef.current = JSON.stringify({
-      activeStep: 3,
-      customerInfo: { ...initialCustomerInfo },
-      selectedGarmentType: "",
-      customGarmentType: "",
-      referenceImage: null,
-      selectedNeck: "v-neck",
-      measurements: { ...initialMeasurements },
-      styleOptions: { ...initialStyleOptions },
-      designBrief: { ...initialDesignBrief },
-      data: { ...initialWizardData },
-      assignedTailorShopId: "",
-      assignedTailorDisplayName: "",
-    });
-    setError("");
-    setFieldInsight(getAdaptiveHint(3));
-    setIsThinking(false);
-  }, [user]);
 
   useEffect(() => {
     const raw = location.state;
