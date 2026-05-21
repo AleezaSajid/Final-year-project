@@ -54,6 +54,7 @@ function getTransport() {
     port: cfg.port,
     secure: cfg.secure,
     auth: { user: cfg.user, pass: cfg.pass },
+    family: 4,
   });
 
   return cachedTransport;
