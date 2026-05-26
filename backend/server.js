@@ -343,6 +343,48 @@ async function resolveTailorShopId(req) {
   return req._resolvedTailorShopId;
 }
 
+/** Collect all ids that represent the logged-in tailor for conversation access. */
+async function resolveTailorConversationAccess(req, requestedTailorId) {
+  const keys = new Set();
+  const shop = await resolveTailorShopId(req);
+  if (shop) keys.add(shop);
+
+  const u = req.authUser || {};
+  const uid = normalizeAuthId(u.id);
+  if (uid) {
+    keys.add(uid);
+    keys.add(`T-U${uid}`);
+  }
+  if (u.tailorShopId != null) keys.add(normalizeAuthId(u.tailorShopId));
+
+  const reqId = normalizeAuthId(requestedTailorId);
+  if (reqId) keys.add(reqId);
+
+  if (u.role === 'tailor' && u.id != null) {
+    try {
+      const tp = await TailorProfile.findOne({ userId: u.id }).select('tailorShopId userId').lean();
+      if (tp) {
+        if (tp.tailorShopId) keys.add(normalizeAuthId(tp.tailorShopId));
+        if (tp.userId != null) keys.add(String(tp.userId).trim());
+      }
+    } catch (e) {
+      console.error('[auth] resolveTailorConversationAccess profile', e);
+    }
+  }
+
+  let shopId = shop || (uid ? `T-U${uid}` : '');
+  if (!shopId && reqId) shopId = reqId;
+  shopId = normalizeAuthId(shopId);
+
+  return { shopId, identityKeys: keys };
+}
+
+function tailorOrderAssignedToIdentity(orderTailorId, identityKeys) {
+  const t = normalizeAuthId(orderTailorId);
+  if (!t || !(identityKeys instanceof Set) || identityKeys.size === 0) return false;
+  return identityKeys.has(t);
+}
+
 /**
  * Tailor PATCH authorization: assigned shop, or explicit accept/claim on unassigned — never steal.
  */
@@ -1027,17 +1069,40 @@ function dedupeConversationsByOrderId(rows) {
 }
 
 /** Lists conversations for a tailor shop id, including legacy rows stored under T-A* while the order now points at this shop. */
-async function fetchConversationRowsForTailorShop(shop) {
-  const shopTrim = String(shop || '').trim();
-  if (!shopTrim) return [];
-  const primary = await Conversation.find({ tailorId: shopTrim }).lean();
+async function fetchConversationRowsForTailorShop(shopTrim, identityKeys = null) {
+  const keys = new Set(
+    [String(shopTrim || '').trim(), ...(identityKeys instanceof Set ? [...identityKeys] : [])].filter(Boolean)
+  );
+  if (keys.size === 0) return [];
+  const tailorIdList = [...keys];
+  const primaryShop = String(shopTrim || tailorIdList[0] || '').trim();
+
+  const primary = await Conversation.find({ tailorId: { $in: tailorIdList } }).lean();
+
+  let byOrder = [];
+  try {
+    const assignedOrders = await Order.find({ tailorId: { $in: tailorIdList } })
+      .select('_id clientOrderId tailorId')
+      .lean();
+    const orderIdKeys = [];
+    for (const o of assignedOrders || []) {
+      orderIdKeys.push(String(o._id));
+      if (o.clientOrderId) orderIdKeys.push(String(o.clientOrderId).trim());
+    }
+    if (orderIdKeys.length) {
+      byOrder = await Conversation.find({ orderId: { $in: orderIdKeys } }).lean();
+    }
+  } catch (e) {
+    console.error('[fetchConversationRowsForTailorShop] assigned orders', e);
+  }
+
   const legacy = await Conversation.find({ tailorId: { $regex: /^T-A\d+$/i } }).lean();
   if (legacy.length === 0) {
-    return sortConversationsByActivity(dedupeConversationsByOrderId(primary));
+    return sortConversationsByActivity(dedupeConversationsByOrderId([...primary, ...byOrder]));
   }
-  const keys = [...new Set(legacy.map((r) => String(r.orderId || '').trim()).filter(Boolean))];
-  const objectIds = keys.filter((k) => mongoose.Types.ObjectId.isValid(k));
-  const clientIds = keys.filter((k) => !mongoose.Types.ObjectId.isValid(k));
+  const orderKeys = [...new Set(legacy.map((r) => String(r.orderId || '').trim()).filter(Boolean))];
+  const objectIds = orderKeys.filter((k) => mongoose.Types.ObjectId.isValid(k));
+  const clientIds = orderKeys.filter((k) => !mongoose.Types.ObjectId.isValid(k));
   const or = [];
   if (objectIds.length) {
     or.push({ _id: { $in: objectIds.map((id) => new mongoose.Types.ObjectId(id)) } });
@@ -1058,12 +1123,10 @@ async function fetchConversationRowsForTailorShop(shop) {
   const matchingIds = new Set();
   const clientToMongo = new Map();
   for (const o of orders || []) {
-    const t = String(o.tailorId || '').trim();
-    if (t === shopTrim) {
-      const mid = String(o._id);
-      matchingIds.add(mid);
-      if (o.clientOrderId) clientToMongo.set(String(o.clientOrderId).trim(), mid);
-    }
+    if (!tailorOrderAssignedToIdentity(o.tailorId, keys)) continue;
+    const mid = String(o._id);
+    matchingIds.add(mid);
+    if (o.clientOrderId) clientToMongo.set(String(o.clientOrderId).trim(), mid);
   }
   const extras = legacy.filter((c) => {
     const k = String(c.orderId || '').trim();
@@ -1071,7 +1134,7 @@ async function fetchConversationRowsForTailorShop(shop) {
     const mapped = clientToMongo.get(k);
     return Boolean(mapped && matchingIds.has(mapped));
   });
-  return sortConversationsByActivity(dedupeConversationsByOrderId([...primary, ...extras]));
+  return sortConversationsByActivity(dedupeConversationsByOrderId([...primary, ...byOrder, ...extras]));
 }
 
 app.get('/conversations/customer/:customerId', requireAuth, requireRole(['customer']), async (req, res) => {
@@ -1095,15 +1158,21 @@ app.get('/conversations/customer/:customerId', requireAuth, requireRole(['custom
 
 app.get('/conversations/tailor/:tailorId', requireAuth, requireRole(['tailor']), async (req, res) => {
   const tid = req.params.tailorId != null ? String(req.params.tailorId).trim() : '';
-  const shop = await resolveTailorShopId(req);
-  if (!tid || !shop || tid !== shop) {
-    log403Conversations(req, 'tailor', tid, { resolvedShop: shop || '(none)' });
-    return res.status(403).json({ conversations: [], message: 'Forbidden.' });
-  }
   try {
-    const rows = await fetchConversationRowsForTailorShop(tid);
+    const { shopId, identityKeys } = await resolveTailorConversationAccess(req, tid);
+    if (!shopId) {
+      return res.json({ conversations: [] });
+    }
+    if (tid && tid !== shopId && !identityKeys.has(tid)) {
+      console.warn('[ChatSync API] tailor conversations param mismatch — using auth shop', {
+        requested: tid,
+        shopId,
+        authUserId: normalizeAuthId(req.authUser && req.authUser.id),
+      });
+    }
+    const rows = await fetchConversationRowsForTailorShop(shopId, identityKeys);
     const ids = rows.map((r) => String(r.orderId || r.conversationId || '').trim());
-    console.log('[ChatSync API] tailor conversations fetched', tid, rows.length, ids);
+    console.log('[ChatSync API] tailor conversations fetched', shopId, rows.length, ids);
     return res.json({ conversations: rows });
   } catch (e) {
     console.error('GET /conversations/tailor/:tailorId', e);
@@ -1124,8 +1193,8 @@ app.get('/messages/:conversationId', requireAuth, async (req, res) => {
     if (u.role === 'customer') {
       if (!authIdsMatch(cust, u.id)) return res.status(403).json({ messages: [] });
     } else if (u.role === 'tailor') {
-      const shopId = await resolveTailorShopId(req);
-      if (!shopId || tail !== shopId) return res.status(403).json({ messages: [] });
+      const { identityKeys } = await resolveTailorConversationAccess(req, u.tailorShopId || '');
+      if (!tailorOrderAssignedToIdentity(tail, identityKeys)) return res.json({ messages: [] });
     } else {
       return res.status(403).json({ messages: [] });
     }
