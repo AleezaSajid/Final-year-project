@@ -1,7 +1,10 @@
+import { isStaleLatLng } from "./locationSafety.js";
+
 /** Placeholder coords stored at signup until complete-profile. */
 export function isTailorPendingLocation(lat, lng) {
   if (!Number.isFinite(lat) || !Number.isFinite(lng)) return true;
   if (Math.abs(lat) < 1e-6 && Math.abs(lng) < 1e-6) return true;
+  if (isStaleLatLng(lat, lng)) return true;
   return false;
 }
 

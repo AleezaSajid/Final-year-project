@@ -15,6 +15,15 @@ import { useToast } from "../components/ToastProvider.jsx";
 import { useAuth } from "../context/AuthContext.jsx";
 import { completeTailorProfile, getTailorOnboardingProfile } from "../api/tailorOnboardingApi.js";
 import { isTailorPendingLocation } from "../utils/tailorOnboarding.js";
+import {
+  FRESH_GEOLOCATION_OPTIONS,
+  geolocationErrorMessage,
+  isStaleAddressText,
+  isStaleLatLng,
+  isTrustworthyProfileCoords,
+  normalizeLocationText,
+  purgeStaleLocationStorage,
+} from "../utils/locationSafety.js";
 import { useSewServeLogoProcessedSrc } from "../hooks/useSewServeLogoProcessedSrc";
 
 const LOGO_SRC = `${process.env.PUBLIC_URL || ""}/images/hero/sewserve-logo.png`;
@@ -218,6 +227,10 @@ export default function TailorCompleteProfilePage() {
   const [address, setAddress] = useState("");
   const [lat, setLat] = useState(null);
   const [lng, setLng] = useState(null);
+  /** True only after a successful GPS read from "Use my location". */
+  const [usedGps, setUsedGps] = useState(false);
+  /** True after map pick or verified coords loaded from the server profile. */
+  const [usedMapPick, setUsedMapPick] = useState(false);
   const [imageFile, setImageFile] = useState(null);
   const [isMapOpen, setIsMapOpen] = useState(false);
   const [locating, setLocating] = useState(false);
@@ -227,8 +240,12 @@ export default function TailorCompleteProfilePage() {
   const [error, setError] = useState("");
   const [locationError, setLocationError] = useState("");
 
+  const hasConfirmedCoords =
+    (usedGps || usedMapPick) && isTrustworthyProfileCoords(lat, lng);
+
   useEffect(() => {
     document.title = "SewServe | Complete your tailor profile";
+    purgeStaleLocationStorage();
     let cancelled = false;
     (async () => {
       try {
@@ -240,14 +257,27 @@ export default function TailorCompleteProfilePage() {
           setExperienceYears(p.experienceYears != null ? String(p.experienceYears) : "");
           setPriceStart(p.priceStart != null ? String(p.priceStart) : "");
           setDeliveryDays(p.deliveryDays != null ? String(p.deliveryDays) : "");
-          setAddress(p.address || "");
+          const profileAddress = normalizeLocationText(p.address);
+          if (profileAddress && !isStaleAddressText(profileAddress)) {
+            setAddress(profileAddress);
+          } else {
+            setAddress("");
+          }
+          const pLat = p.lat != null ? Number(p.lat) : NaN;
+          const pLng = p.lng != null ? Number(p.lng) : NaN;
           if (
-            Number.isFinite(p.lat) &&
-            Number.isFinite(p.lng) &&
-            !isTailorPendingLocation(p.lat, p.lng)
+            isTrustworthyProfileCoords(pLat, pLng) &&
+            !isTailorPendingLocation(pLat, pLng)
           ) {
-            setLat(p.lat);
-            setLng(p.lng);
+            setLat(pLat);
+            setLng(pLng);
+            setUsedMapPick(true);
+            setUsedGps(false);
+          } else {
+            setLat(null);
+            setLng(null);
+            setUsedMapPick(false);
+            setUsedGps(false);
           }
         }
       } catch {
@@ -261,18 +291,36 @@ export default function TailorCompleteProfilePage() {
     };
   }, []);
 
-  const setLocation = async (nextLat, nextLng) => {
+  const applyMapOrGpsLocation = async (nextLat, nextLng, { fromGps }) => {
     setLocationError("");
     const nLat = Number(nextLat);
     const nLng = Number(nextLng);
+    if (!isTrustworthyProfileCoords(nLat, nLng)) {
+      setLocationError(
+        "That location looks like a default Lahore placeholder. Use GPS again or pick your shop on the map."
+      );
+      setLat(null);
+      setLng(null);
+      setUsedGps(false);
+      setUsedMapPick(false);
+      return;
+    }
     setLat(nLat);
     setLng(nLng);
+    setUsedGps(Boolean(fromGps));
+    setUsedMapPick(!fromGps);
     setGeocoding(true);
     try {
       const display = await reverseGeocode(nLat, nLng);
-      setAddress(display || "Selected location");
+      if (display && !isStaleAddressText(display)) {
+        setAddress(display);
+      } else if (!normalizeLocationText(address)) {
+        setAddress("Selected location");
+      }
     } catch {
-      setAddress("Selected location");
+      if (!normalizeLocationText(address)) {
+        setAddress("Selected location");
+      }
     } finally {
       setGeocoding(false);
     }
@@ -281,29 +329,70 @@ export default function TailorCompleteProfilePage() {
   const handleUseMyLocation = () => {
     setLocationError("");
     if (!navigator.geolocation) {
-      setLocationError("Geolocation is not supported.");
+      setLocationError(
+        "Geolocation is not supported. Enter your address manually or pick a point on the map."
+      );
       return;
     }
     setLocating(true);
+    setGeocoding(false);
+    setUsedGps(false);
+    setUsedMapPick(false);
+    setAddress("");
+    setLat(null);
+    setLng(null);
     navigator.geolocation.getCurrentPosition(
       async (pos) => {
+        const nextLat = pos.coords.latitude;
+        const nextLng = pos.coords.longitude;
         setLocating(false);
-        await setLocation(pos.coords.latitude, pos.coords.longitude);
+        if (!Number.isFinite(nextLat) || !Number.isFinite(nextLng)) {
+          setLocationError(
+            "Received invalid coordinates from your device. Enter your address manually or pick a point on the map."
+          );
+          return;
+        }
+        if (isStaleLatLng(nextLat, nextLng)) {
+          setLocationError(
+            "Received a default Lahore location instead of your GPS position. Try again or pick your shop on the map."
+          );
+          return;
+        }
+        await applyMapOrGpsLocation(nextLat, nextLng, { fromGps: true });
       },
-      () => {
+      (geoErr) => {
         setLocating(false);
-        setLocationError("Could not get your location. Pick a point on the map.");
+        setUsedGps(false);
+        setUsedMapPick(false);
+        setLat(null);
+        setLng(null);
+        setLocationError(
+          geolocationErrorMessage(geoErr, {
+            manualHint: "enter your address manually or pick a point on the map",
+          })
+        );
       },
-      { enableHighAccuracy: true, timeout: 12000 }
+      FRESH_GEOLOCATION_OPTIONS
     );
+  };
+
+  const handleAddressChange = (e) => {
+    setAddress(e.target.value);
+    setLocationError("");
+    if (!usedGps && !usedMapPick) {
+      setLat(null);
+      setLng(null);
+    }
   };
 
   async function handleSubmit(e) {
     e.preventDefault();
     setError("");
     setLocationError("");
-    if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
-      setLocationError("Please select your shop location on the map.");
+    if (!hasConfirmedCoords) {
+      setLocationError(
+        "Please use GPS or pick your shop on the map to set coordinates. You can type your address manually, but coordinates are not saved until you do."
+      );
       return;
     }
     setSubmitting(true);
@@ -397,12 +486,12 @@ export default function TailorCompleteProfilePage() {
               Pick on map
             </SecondaryBtn>
           </MapActions>
-          <LocationHint $ok={Number.isFinite(lat) && Number.isFinite(lng)}>
-            {Number.isFinite(lat) && Number.isFinite(lng) ? "Location selected ✓" : "No location selected yet"}
+          <LocationHint $ok={hasConfirmedCoords}>
+            {hasConfirmedCoords ? "Location selected ✓" : "No location selected yet"}
           </LocationHint>
           <Field>
             <Label htmlFor="address">Address</Label>
-            <TextArea id="address" name="address" rows={2} value={address} onChange={(e) => setAddress(e.target.value)} placeholder="Shop address" />
+            <TextArea id="address" name="address" rows={2} value={address} onChange={handleAddressChange} placeholder="Shop address" />
           </Field>
 
           <SubmitBtn type="submit" disabled={submitting}>
@@ -439,7 +528,7 @@ export default function TailorCompleteProfilePage() {
                 <LocationPickerMap
                   onSelect={async (a, b) => {
                     setIsMapOpen(false);
-                    await setLocation(a, b);
+                    await applyMapOrGpsLocation(a, b, { fromGps: false });
                   }}
                 />
               </div>
