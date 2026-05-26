@@ -23,7 +23,7 @@ const STALE_COORD_PAIRS = [
 const LOCATION_STORAGE_KEYS = [
   "userLocation",
   "sewserve_map_last_request",
-  "measurement_wizard_state",
+  // "measurement_wizard_state",
   LOCATION_STEP_MANUAL_ADDRESS_KEY,
 ];
 
