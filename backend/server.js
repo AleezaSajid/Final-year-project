@@ -708,9 +708,51 @@ const DEFAULT_TAILOR_SIGNUP_LAT = 31.5204;
 const TAILOR_PENDING_LAT = 0;
 const TAILOR_PENDING_LNG = 0;
 
+// --- Location safety (customer meta + tailor onboarding) ---
+const STALE_LOCATION_COORD_PAIRS = [
+  { lat: 31.5826, lng: 74.3276 },
+  { lat: 31.5204, lng: 74.3587 },
+];
+
+function isStaleLatLng(lat, lng) {
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return false;
+  return STALE_LOCATION_COORD_PAIRS.some(
+    (p) => Math.abs(lat - p.lat) < 0.001 && Math.abs(lng - p.lng) < 0.001
+  );
+}
+
+function normalizeLocationText(v) {
+  return String(v || '').trim();
+}
+
+function isStaleAddressText(address) {
+  const a = normalizeLocationText(address).toLowerCase();
+  if (!a) return false;
+  if (a.includes('kattra neem wala')) return true;
+  if (a.includes('kattra') && a.includes('neem wala')) return true;
+  return false;
+}
+
+function sanitizeLastKnownLocationInput(input) {
+  if (!input || typeof input !== 'object' || Array.isArray(input)) return null;
+  const address = input.address != null ? normalizeLocationText(input.address) : '';
+  const rawLat = input.lat != null ? Number(input.lat) : NaN;
+  const rawLng = input.lng != null ? Number(input.lng) : NaN;
+  const addressOk = address && !isStaleAddressText(address);
+  const coordsOk = Number.isFinite(rawLat) && Number.isFinite(rawLng) && !isStaleLatLng(rawLat, rawLng);
+  const out = {};
+  if (addressOk) out.address = address;
+  if (coordsOk) {
+    out.lat = rawLat;
+    out.lng = rawLng;
+  }
+  return Object.keys(out).length ? out : null;
+}
+
 function isTailorPendingLocationCoords(lat, lng) {
   if (!Number.isFinite(lat) || !Number.isFinite(lng)) return true;
   if (Math.abs(lat) < 1e-6 && Math.abs(lng) < 1e-6) return true;
+  if (isStaleLatLng(lat, lng)) return true;
   if (
     Math.abs(lat - DEFAULT_TAILOR_SIGNUP_LAT) < 0.0001 &&
     Math.abs(lng - DEFAULT_TAILOR_SIGNUP_LNG) < 0.0001
@@ -1452,6 +1494,15 @@ app.get('/api/account/customer-meta', requireAuth, requireRole(['customer']), as
   try {
     const user = await User.findOne({ id: Number(req.authUser.id), email: String(req.authUser.email) }).exec();
     if (!user) return res.status(403).json({ message: 'Forbidden.' });
+    if (user.lastKnownLocation && sanitizeLastKnownLocationInput(user.lastKnownLocation) == null) {
+      // Auto-clean stale/default Lahore location so it doesn't keep reappearing.
+      user.lastKnownLocation = null;
+      try {
+        await user.save();
+      } catch {
+        /* non-fatal */
+      }
+    }
     return res.json({
       lastWizardOrderId: user.lastWizardOrderId != null ? String(user.lastWizardOrderId) : '',
       lastKnownLocation: user.lastKnownLocation || null,
@@ -1473,8 +1524,7 @@ app.put('/api/account/customer-meta', requireAuth, requireRole(['customer']), as
         b.lastWizardOrderId != null ? String(b.lastWizardOrderId).trim() : '';
     }
     if (b.lastKnownLocation !== undefined) {
-      user.lastKnownLocation =
-        b.lastKnownLocation && typeof b.lastKnownLocation === 'object' ? b.lastKnownLocation : null;
+      user.lastKnownLocation = sanitizeLastKnownLocationInput(b.lastKnownLocation);
     }
     if (b.lastMapTailorRequest !== undefined) {
       user.lastMapTailorRequest =
@@ -1546,6 +1596,7 @@ app.get('/api/tailor/onboarding-profile', requireAuth, requireRole(['tailor']), 
     const lng = Number(coords[0]);
     const lat = Number(coords[1]);
     const pendingLocation = isTailorPendingLocationCoords(lat, lng);
+    const safeAddress = tp.address && !isStaleAddressText(tp.address) ? tp.address : '';
     return res.json({
       profileComplete: resolveTailorProfileComplete(user, tp),
       profile: {
@@ -1556,7 +1607,7 @@ app.get('/api/tailor/onboarding-profile', requireAuth, requireRole(['tailor']), 
         experienceYears: tp.experienceYears ?? 0,
         priceStart: tp.priceStart ?? 1500,
         deliveryDays: tp.deliveryDays ?? 7,
-        address: tp.address || '',
+        address: safeAddress || '',
         lat: pendingLocation ? null : lat,
         lng: pendingLocation ? null : lng,
         imageUrl: tp.imageUrl || '',
@@ -1598,7 +1649,10 @@ app.post(
       tp.experienceYears = Number.isFinite(ey) && ey >= 0 ? ey : 0;
       tp.priceStart = Number.isFinite(ps) && ps > 0 ? ps : 1500;
       tp.deliveryDays = Number.isFinite(dd) && dd > 0 ? dd : 7;
-      if (body.address != null) tp.address = String(body.address).trim();
+      if (body.address != null) {
+        const nextAddr = String(body.address).trim();
+        tp.address = nextAddr && !isStaleAddressText(nextAddr) ? nextAddr : '';
+      }
       tp.location = { type: 'Point', coordinates: [lng, lat] };
       tp.locationVerified = true;
       tp.locationStatus = 'verified';

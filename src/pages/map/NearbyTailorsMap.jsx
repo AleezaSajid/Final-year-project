@@ -27,6 +27,7 @@ import {
 } from "../../utils/measurementWizardOrderSync.js";
 import { getCustomerMeta, putCustomerMeta } from "../../api/accountApi.js";
 import { tailorMarkerIcon, userMarkerIcon } from "./markerIcons.js";
+import { isStaleAddressText, isStaleLocationRecord, isTrustworthyProfileCoords } from "../../utils/locationSafety.js";
 
 /** Fallback center when geolocation is denied or unavailable */
 const FALLBACK_CENTER = [31.5204, 74.3587];
@@ -206,17 +207,28 @@ export default function NearbyTailorsMap() {
       }
       const parsed = meta?.lastKnownLocation;
       if (!parsed || typeof parsed !== "object") return;
+      if (isStaleLocationRecord(parsed)) {
+        try {
+          await putCustomerMeta(user, { lastKnownLocation: null });
+        } catch {
+          /* non-fatal */
+        }
+        return;
+      }
       const lat = typeof parsed.lat === "number" ? parsed.lat : null;
       const lng = typeof parsed.lng === "number" ? parsed.lng : null;
-      if (lat != null && lng != null) {
+      const hasCoords = isTrustworthyProfileCoords(lat, lng);
+      const address =
+        typeof parsed.address === "string" && !isStaleAddressText(parsed.address) ? parsed.address : "";
+      if (hasCoords) {
         setUserCenter([lat, lng]);
         setGeoStatus("ok");
       }
       ensureSocketThen(() => {
         socket.emit("get_nearby_tailors", {
-          lat,
-          lng,
-          address: typeof parsed.address === "string" ? parsed.address : "",
+          lat: hasCoords ? lat : null,
+          lng: hasCoords ? lng : null,
+          address,
         });
       });
     })();

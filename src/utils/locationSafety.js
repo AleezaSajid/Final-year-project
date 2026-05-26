@@ -13,7 +13,6 @@ export const FRESH_GEOLOCATION_OPTIONS = {
 const BASE_LOCATION_STORAGE_KEYS = [
   "userLocation",
   "sewserve_map_last_request",
-  "measurement_wizard_state",
   "sewserve_location_step_manual_address",
   "sewserve_tailor_manual_address",
 ];
