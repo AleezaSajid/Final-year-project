@@ -1,4 +1,5 @@
 const express = require('express');
+const session = require('express-session');
 const cors = require('cors');
 const http = require('http');
 const { Server } = require('socket.io');
@@ -75,6 +76,23 @@ app.use(
   })
 );
 app.use(express.json());
+
+app.set('trust proxy', 1);
+
+app.use(
+  session({
+    secret: process.env.SESSION_SECRET || 'sewserve-secret',
+    resave: false,
+    saveUninitialized: false,
+    proxy: true,
+    cookie: {
+      secure: true,
+      httpOnly: true,
+      sameSite: 'none',
+      maxAge: 1000 * 60 * 60 * 24 * 7,
+    },
+  })
+);
 
 // --- Auth: stateless signed session cookie (no new deps) ---
 const SESSION_COOKIE_NAME = process.env.SESSION_COOKIE_NAME || 'sewserve_session';
