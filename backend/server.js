@@ -1,5 +1,6 @@
 const express = require('express');
 const session = require('express-session');
+const cookieParser = require('cookie-parser');
 const cors = require('cors');
 const http = require('http');
 const { Server } = require('socket.io');
@@ -26,7 +27,11 @@ const server = http.createServer(app);
 const IS_PRODUCTION = process.env.NODE_ENV === 'production';
 
 function buildAllowedOrigins() {
-  const defaults = ['http://localhost:3000', 'http://127.0.0.1:3000'];
+  const defaults = [
+    'http://localhost:3000',
+    'http://127.0.0.1:3000',
+    'https://final-year-project-amzwpq5t4-aleeza-sajid-s-projects.vercel.app',
+  ];
   const fromEnv = String(process.env.CORS_ORIGINS || process.env.FRONTEND_URL || '')
     .split(',')
     .map((s) => s.trim())
@@ -79,25 +84,27 @@ app.use(express.json());
 
 app.set('trust proxy', 1);
 
-app.use(
-  session({
-    secret: process.env.SESSION_SECRET || 'sewserve-secret',
-    resave: false,
-    saveUninitialized: false,
-    proxy: true,
-    cookie: {
-      secure: true,
-      httpOnly: true,
-      sameSite: 'none',
-      maxAge: 1000 * 60 * 60 * 24 * 7,
-    },
-  })
-);
-
 // --- Auth: stateless signed session cookie (no new deps) ---
 const SESSION_COOKIE_NAME = process.env.SESSION_COOKIE_NAME || 'sewserve_session';
 const SESSION_SECRET = process.env.SESSION_SECRET || 'dev-session-secret-change-me';
 const SESSION_TTL_MS = Math.max(5 * 60 * 1000, Number(process.env.SESSION_TTL_MS) || 1000 * 60 * 60 * 24 * 7); // 7d
+
+app.use(cookieParser(SESSION_SECRET));
+
+app.use(
+  session({
+    secret: SESSION_SECRET,
+    resave: false,
+    saveUninitialized: false,
+    proxy: true,
+    cookie: {
+      httpOnly: true,
+      secure: IS_PRODUCTION,
+      sameSite: IS_PRODUCTION ? 'none' : 'lax',
+      maxAge: SESSION_TTL_MS,
+    },
+  })
+);
 const EMAIL_OTP_TTL_MS = 10 * 60 * 1000;
 const PENDING_SIGNUP_TTL_MS = 15 * 60 * 1000;
 const OTP_SIGNUP_EMAIL_FAIL_MSG = 'OTP email failed to send. Please try again.';
@@ -237,32 +244,30 @@ function setSessionCookie(res, user) {
     iat: now,
   };
   const token = signSessionPayload(payload);
-  const cookieParts = [
-    `${SESSION_COOKIE_NAME}=${encodeURIComponent(token)}`,
-    'Path=/',
-    'HttpOnly',
-    'SameSite=Lax',
-    `Max-Age=${Math.floor(SESSION_TTL_MS / 1000)}`,
-  ];
-  if (IS_PRODUCTION) cookieParts.push('Secure');
-  res.setHeader('Set-Cookie', cookieParts.join('; '));
+  res.cookie(SESSION_COOKIE_NAME, token, {
+    httpOnly: true,
+    secure: true,
+    sameSite: 'none',
+    signed: true,
+    maxAge: 1000 * 60 * 60 * 24 * 7,
+    path: '/',
+  });
 }
 
 function clearSessionCookie(res) {
-  const cookieParts = [
-    `${SESSION_COOKIE_NAME}=`,
-    'Path=/',
-    'HttpOnly',
-    'SameSite=Lax',
-    'Max-Age=0',
-  ];
-  if (IS_PRODUCTION) cookieParts.push('Secure');
-  res.setHeader('Set-Cookie', cookieParts.join('; '));
+  res.clearCookie(SESSION_COOKIE_NAME, {
+    httpOnly: true,
+    secure: true,
+    sameSite: 'none',
+    signed: true,
+    path: '/',
+  });
 }
 
 async function loadAuthedUser(req) {
-  const cookies = parseCookies(req);
-  const token = cookies[SESSION_COOKIE_NAME];
+  const token =
+    (req.signedCookies && req.signedCookies[SESSION_COOKIE_NAME]) ||
+    parseCookies(req)[SESSION_COOKIE_NAME];
   const payload = verifySessionToken(token);
   if (!payload || !payload.uid || !payload.email) return null;
   const user = await User.findOne({ id: Number(payload.uid), email: String(payload.email) }).lean();
@@ -2063,7 +2068,7 @@ function emitMeasurementReviewedToTailorRoom(io, out) {
   io.emit('measurement:reviewed', out);
 }
 
-app.post('/orders', requireAuth, async (req, res) => {
+async function createOrderHandler(req, res) {
   const b = req.body || {};
   const { customerId, customerName, garmentType, measurements, price, status, dueDate } = b;
   const tailorIdRaw = b.tailorId != null ? String(b.tailorId).trim() : '';
@@ -2166,7 +2171,10 @@ app.post('/orders', requireAuth, async (req, res) => {
     console.error('ORDER CREATE ERROR', error);
     return res.status(500).json({ message: 'Unable to create order right now.' });
   }
-});
+}
+
+app.post('/orders', requireAuth, createOrderHandler);
+app.post('/api/orders', requireAuth, createOrderHandler);
 
 /** Unified list: optional ?customerId= & ?tailorId= (same collection as customer/tailor routes). */
 app.get('/orders', requireAuth, async (req, res) => {
