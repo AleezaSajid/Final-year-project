@@ -14,7 +14,7 @@ export function getApiBaseUrl() {
     }
     return "http://localhost:5000";
   }
-  return "";
+  return "https://sewserve-backend.onrender.com";
 }
 
 function apiBaseUrl() {
