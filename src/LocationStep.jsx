@@ -6,6 +6,7 @@ import { LandingStylePageBackground } from "./components/LandingStylePageBackgro
 import DashboardNavbar from "./components/DashboardNavbar.jsx";
 import { useAuth } from "./context/AuthContext.jsx";
 import { getCustomerMeta, putCustomerMeta } from "./api/accountApi.js";
+import { getOrderById, patchOrderWizardFields } from "./api/ordersApi.js";
 import {
   getLinkedWizardOrderId,
   shouldRestoreWizardLinkedOrderId,
@@ -33,6 +34,52 @@ async function reverseGeocodeNominatim(lat, lng, signal) {
   return display || "";
 }
 
+function geolocationErrorMessage(geoErr) {
+  const code = geoErr && geoErr.code;
+  if (code === 1) {
+    return "Location permission denied. Allow location access in your browser settings, or enter your address manually below.";
+  }
+  if (code === 2) {
+    return "Location unavailable. Check that location services are on, or enter your address manually below.";
+  }
+  if (code === 3) {
+    return "Location request timed out after 15 seconds. Try again or enter your address manually below.";
+  }
+  return "Could not get your current location. Try again or enter your address manually below.";
+}
+
+async function saveLocationToOrder(orderId, { address, lat, lng, usedGps }) {
+  const order = await getOrderById(orderId);
+  const existing =
+    order?.orderPayload && typeof order.orderPayload === "object" && !Array.isArray(order.orderPayload)
+      ? order.orderPayload
+      : {};
+  const customerInfo =
+    existing.customerInfo && typeof existing.customerInfo === "object" && !Array.isArray(existing.customerInfo)
+      ? { ...existing.customerInfo }
+      : {};
+  if (address) customerInfo.address = address;
+  const hasGpsCoords =
+    usedGps && typeof lat === "number" && Number.isFinite(lat) && typeof lng === "number" && Number.isFinite(lng);
+  if (hasGpsCoords) {
+    customerInfo.lat = lat;
+    customerInfo.lng = lng;
+  } else {
+    delete customerInfo.lat;
+    delete customerInfo.lng;
+  }
+  const orderPayload = {
+    ...existing,
+    customerInfo,
+    customerLocation: hasGpsCoords ? { lat, lng, address } : { address },
+  };
+  await patchOrderWizardFields(
+    orderId,
+    { orderPayload },
+    { operation: "Save delivery location" }
+  );
+}
+
 export default function LocationStep() {
   const navigate = useNavigate();
   const location = useLocation();
@@ -41,75 +88,91 @@ export default function LocationStep() {
   const [lat, setLat] = useState(null);
   const [lng, setLng] = useState(null);
   const [address, setAddress] = useState("");
+  /** Set only after a successful "Use My Current Location" read — never from storage. */
+  const [usedGps, setUsedGps] = useState(false);
   const [locating, setLocating] = useState(false);
   const [geocoding, setGeocoding] = useState(false);
   const [error, setError] = useState("");
 
   const canContinue = useMemo(() => {
-    const hasCoords = typeof lat === "number" && typeof lng === "number";
+    const hasGpsCoords = usedGps && typeof lat === "number" && typeof lng === "number";
     const hasAddress = normalizeText(address).length > 0;
-    return hasCoords || hasAddress;
-  }, [lat, lng, address]);
+    return hasGpsCoords || hasAddress;
+  }, [usedGps, lat, lng, address]);
+
+  const handleAddressChange = useCallback((e) => {
+    setAddress(e.target.value);
+    setError("");
+    if (!usedGps) {
+      setLat(null);
+      setLng(null);
+    }
+  }, [usedGps]);
 
   const handleUseMyLocation = useCallback(() => {
     setError("");
     if (!navigator.geolocation) {
-      setError("Geolocation is not supported in this browser.");
+      setError("Geolocation is not supported in this browser. Please enter your address manually below.");
       return;
     }
     setLocating(true);
+    setGeocoding(false);
+    setUsedGps(false);
+    setLat(null);
+    setLng(null);
     navigator.geolocation.getCurrentPosition(
       async (pos) => {
         const nextLat = pos.coords.latitude;
         const nextLng = pos.coords.longitude;
+        if (!Number.isFinite(nextLat) || !Number.isFinite(nextLng)) {
+          setLocating(false);
+          setError("Received invalid coordinates from your device. Please enter your address manually below.");
+          return;
+        }
         setLat(nextLat);
         setLng(nextLng);
+        setUsedGps(true);
         setLocating(false);
 
-        // Reverse geocode to auto-fill address.
         const controller = new AbortController();
         setGeocoding(true);
         try {
           const display = await reverseGeocodeNominatim(nextLat, nextLng, controller.signal);
           if (display) setAddress(display);
         } catch (e) {
-          setError(e instanceof Error ? e.message : "Could not reverse geocode location.");
+          setError(
+            e instanceof Error
+              ? `${e.message} Coordinates were captured — you can edit the address below or try again.`
+              : "Could not look up your street address. Coordinates were captured — enter or edit the address below."
+          );
         } finally {
           setGeocoding(false);
         }
       },
       (geoErr) => {
         setLocating(false);
-        if (geoErr && geoErr.code === 1) {
-          setError("Location permission denied. Please enter your address manually.");
-          return;
-        }
-        setError("Could not get your location. Please try again or enter address manually.");
+        setUsedGps(false);
+        setLat(null);
+        setLng(null);
+        setError(geolocationErrorMessage(geoErr));
       },
-      { enableHighAccuracy: true, timeout: 12_000, maximumAge: 60_000 }
+      { enableHighAccuracy: true, timeout: 15_000, maximumAge: 0 }
     );
   }, []);
 
   const handleContinue = useCallback(async () => {
     setError("");
     const a = normalizeText(address);
-    const hasCoords = typeof lat === "number" && typeof lng === "number";
-    if (!hasCoords && !a) {
+    const hasGpsCoords = usedGps && typeof lat === "number" && typeof lng === "number";
+    if (!hasGpsCoords && !a) {
       setError("Please use your current location or enter an address to continue.");
       return;
     }
 
-    const payload = {
-      lat: hasCoords ? lat : null,
-      lng: hasCoords ? lng : null,
-      address: a,
-    };
-    if (user?.id && user.role === "customer") {
-      try {
-        await putCustomerMeta(user, { lastKnownLocation: payload });
-      } catch {
-        /* non-fatal */
-      }
+    const payload = { address: a };
+    if (hasGpsCoords) {
+      payload.lat = lat;
+      payload.lng = lng;
     }
 
     let pendingOrderId = normalizeText(
@@ -127,6 +190,28 @@ export default function LocationStep() {
       }
     }
 
+    if (pendingOrderId) {
+      try {
+        await saveLocationToOrder(pendingOrderId, {
+          address: a,
+          lat: hasGpsCoords ? lat : null,
+          lng: hasGpsCoords ? lng : null,
+          usedGps: hasGpsCoords,
+        });
+      } catch (e) {
+        setError(e instanceof Error ? e.message : "Could not save location to your order. Please try again.");
+        return;
+      }
+    }
+
+    if (user?.id && user.role === "customer") {
+      try {
+        await putCustomerMeta(user, { lastKnownLocation: payload });
+      } catch {
+        /* non-fatal */
+      }
+    }
+
     const mapState = {
       fromWizard: Boolean(location.state?.fromWizard),
       wizardOrderId: pendingOrderId,
@@ -138,7 +223,7 @@ export default function LocationStep() {
     } else {
       navigate("/map", { state: mapState });
     }
-  }, [address, lat, lng, navigate, location.state, user]);
+  }, [address, lat, lng, usedGps, navigate, location.state, user]);
 
   const wizardNotice = normalizeText(location.state?.wizardNotice);
 
@@ -207,7 +292,7 @@ export default function LocationStep() {
                 <textarea
                   id="manual-address"
                   value={address}
-                  onChange={(e) => setAddress(e.target.value)}
+                  onChange={handleAddressChange}
                   placeholder="Enter your full address"
                   rows={3}
                   className="w-full resize-y rounded-xl border border-slate-200/80 bg-white/80 py-2.5 pl-9 pr-3 text-sm text-slate-800 shadow-sm placeholder:text-slate-400 focus:border-emerald-500/40 focus:outline-none focus:ring-2 focus:ring-emerald-600/20"
