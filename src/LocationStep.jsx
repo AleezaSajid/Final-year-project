@@ -1,4 +1,4 @@
-import React, { useCallback, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import { LocateFixed, MapPin, Loader2 } from "lucide-react";
 
@@ -12,8 +12,140 @@ import {
   shouldRestoreWizardLinkedOrderId,
 } from "./utils/measurementWizardOrderSync.js";
 
+const LOCATION_STEP_MANUAL_ADDRESS_KEY = "sewserve_location_step_manual_address";
+
+/** Known stale Lahore / default coordinates — never prefill or restore. */
+const STALE_COORD_PAIRS = [
+  [31.5826, 74.3276],
+  [31.5204, 74.3587],
+];
+
+const LOCATION_STORAGE_KEYS = [
+  "userLocation",
+  "sewserve_map_last_request",
+  "measurement_wizard_state",
+  LOCATION_STEP_MANUAL_ADDRESS_KEY,
+];
+
 function normalizeText(v) {
   return String(v ?? "").trim();
+}
+
+function isStaleLatLng(lat, lng) {
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return false;
+  return STALE_COORD_PAIRS.some(
+    ([slat, slng]) => Math.abs(lat - slat) < 0.001 && Math.abs(lng - slng) < 0.001
+  );
+}
+
+function isStaleAddressText(address) {
+  const a = normalizeText(address).toLowerCase();
+  if (!a) return false;
+  if (a.includes("kattra neem wala")) return true;
+  if (a.includes("kattra") && a.includes("neem wala")) return true;
+  return false;
+}
+
+function isStaleLocationRecord(record) {
+  if (!record) return false;
+  if (typeof record === "string") {
+    return isStaleAddressText(record);
+  }
+  if (typeof record !== "object" || Array.isArray(record)) return false;
+  const lat = record.lat != null ? Number(record.lat) : NaN;
+  const lng = record.lng != null ? Number(record.lng) : NaN;
+  if (isStaleLatLng(lat, lng)) return true;
+  if (isStaleAddressText(record.address)) return true;
+  return false;
+}
+
+function tryParseStorageJson(raw) {
+  if (!raw) return null;
+  try {
+    return JSON.parse(raw);
+  } catch {
+    return raw;
+  }
+}
+
+function purgeStaleLocationStorage() {
+  if (typeof window === "undefined") return;
+  const stores = [localStorage, sessionStorage];
+  for (const store of stores) {
+    if (!store) continue;
+    try {
+      const keys = [];
+      for (let i = 0; i < store.length; i++) {
+        const k = store.key(i);
+        if (k) keys.push(k);
+      }
+      for (const key of keys) {
+        const lower = key.toLowerCase();
+        const isLocationKey =
+          LOCATION_STORAGE_KEYS.includes(key) ||
+          lower.includes("location") ||
+          lower.includes("userlocation") ||
+          lower.includes("lastknown");
+        if (!isLocationKey) continue;
+        const raw = store.getItem(key);
+        const parsed = tryParseStorageJson(raw);
+        if (parsed == null) continue;
+        if (isStaleLocationRecord(parsed)) {
+          store.removeItem(key);
+          continue;
+        }
+        if (typeof parsed === "object" && !Array.isArray(parsed)) {
+          if (parsed.lat != null || parsed.lng != null || parsed.address != null) {
+            if (isStaleLocationRecord(parsed)) store.removeItem(key);
+          }
+        }
+      }
+    } catch {
+      /* ignore */
+    }
+  }
+  for (const key of LOCATION_STORAGE_KEYS) {
+    try {
+      const raw =
+        localStorage.getItem(key) ??
+        (typeof sessionStorage !== "undefined" ? sessionStorage.getItem(key) : null);
+      if (raw != null && isStaleLocationRecord(tryParseStorageJson(raw))) {
+        localStorage.removeItem(key);
+        sessionStorage.removeItem(key);
+      }
+    } catch {
+      /* ignore */
+    }
+  }
+}
+
+function readLastManualAddress() {
+  if (typeof window === "undefined") return "";
+  try {
+    const raw = localStorage.getItem(LOCATION_STEP_MANUAL_ADDRESS_KEY);
+    const text = normalizeText(raw);
+    if (!text || isStaleAddressText(text)) {
+      localStorage.removeItem(LOCATION_STEP_MANUAL_ADDRESS_KEY);
+      return "";
+    }
+    return text;
+  } catch {
+    return "";
+  }
+}
+
+function writeLastManualAddress(address) {
+  if (typeof window === "undefined") return;
+  const text = normalizeText(address);
+  try {
+    if (!text || isStaleAddressText(text)) {
+      localStorage.removeItem(LOCATION_STEP_MANUAL_ADDRESS_KEY);
+      return;
+    }
+    localStorage.setItem(LOCATION_STEP_MANUAL_ADDRESS_KEY, text);
+  } catch {
+    /* ignore */
+  }
 }
 
 async function reverseGeocodeNominatim(lat, lng, signal) {
@@ -94,6 +226,34 @@ export default function LocationStep() {
   const [geocoding, setGeocoding] = useState(false);
   const [error, setError] = useState("");
 
+  useEffect(() => {
+    purgeStaleLocationStorage();
+    const manual = readLastManualAddress();
+    if (manual) {
+      setAddress(manual);
+    }
+    setLat(null);
+    setLng(null);
+    setUsedGps(false);
+
+    if (!user?.id || user.role !== "customer") return;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const meta = await getCustomerMeta(user);
+        if (cancelled) return;
+        if (isStaleLocationRecord(meta?.lastKnownLocation)) {
+          await putCustomerMeta(user, { lastKnownLocation: null });
+        }
+      } catch {
+        /* non-fatal */
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [user]);
+
   const canContinue = useMemo(() => {
     const hasGpsCoords = usedGps && typeof lat === "number" && typeof lng === "number";
     const hasAddress = normalizeText(address).length > 0;
@@ -118,6 +278,7 @@ export default function LocationStep() {
     setLocating(true);
     setGeocoding(false);
     setUsedGps(false);
+    setAddress("");
     setLat(null);
     setLng(null);
     navigator.geolocation.getCurrentPosition(
@@ -129,6 +290,13 @@ export default function LocationStep() {
           setError("Received invalid coordinates from your device. Please enter your address manually below.");
           return;
         }
+        if (isStaleLatLng(nextLat, nextLng)) {
+          setLocating(false);
+          setError(
+            "Received a default Lahore location instead of your GPS position. Please try again or enter your address manually below."
+          );
+          return;
+        }
         setLat(nextLat);
         setLng(nextLng);
         setUsedGps(true);
@@ -138,7 +306,7 @@ export default function LocationStep() {
         setGeocoding(true);
         try {
           const display = await reverseGeocodeNominatim(nextLat, nextLng, controller.signal);
-          if (display) setAddress(display);
+          if (display && !isStaleAddressText(display)) setAddress(display);
         } catch (e) {
           setError(
             e instanceof Error
@@ -204,9 +372,16 @@ export default function LocationStep() {
       }
     }
 
+    if (hasGpsCoords) {
+      writeLastManualAddress("");
+    } else if (a) {
+      writeLastManualAddress(a);
+    }
+
     if (user?.id && user.role === "customer") {
       try {
-        await putCustomerMeta(user, { lastKnownLocation: payload });
+        const metaPayload = isStaleLocationRecord(payload) ? null : payload;
+        await putCustomerMeta(user, { lastKnownLocation: metaPayload });
       } catch {
         /* non-fatal */
       }
@@ -299,16 +474,16 @@ export default function LocationStep() {
                 />
               </div>
 
-              <div className="mt-3 grid gap-2 text-xs text-slate-600 sm:grid-cols-2">
-                <div className="rounded-lg bg-white/70 px-3 py-2">
-                  <span className="font-semibold text-slate-700">Lat:</span>{" "}
-                  {typeof lat === "number" ? lat.toFixed(6) : "—"}
+              {usedGps && typeof lat === "number" && typeof lng === "number" ? (
+                <div className="mt-3 grid gap-2 text-xs text-slate-600 sm:grid-cols-2">
+                  <div className="rounded-lg bg-white/70 px-3 py-2">
+                    <span className="font-semibold text-slate-700">Lat:</span> {lat.toFixed(6)}
+                  </div>
+                  <div className="rounded-lg bg-white/70 px-3 py-2">
+                    <span className="font-semibold text-slate-700">Lng:</span> {lng.toFixed(6)}
+                  </div>
                 </div>
-                <div className="rounded-lg bg-white/70 px-3 py-2">
-                  <span className="font-semibold text-slate-700">Lng:</span>{" "}
-                  {typeof lng === "number" ? lng.toFixed(6) : "—"}
-                </div>
-              </div>
+              ) : null}
             </div>
           </div>
 
