@@ -284,7 +284,7 @@ export default function NearbyTailorsMap() {
   useEffect(() => {
     if (hasStateCoords) return;
     requestLocation();
-  }, [requestLocation]);
+  }, [requestLocation, hasStateCoords]);
 
   useEffect(() => {
     let cancelled = false;
