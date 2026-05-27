@@ -33,20 +33,22 @@ export const socket = io(url, {
 
 if (typeof window !== "undefined") {
   window.socket = socket;
-  if (process.env.NODE_ENV === "development") {
-    socket.on("connect", () => {
-      // eslint-disable-next-line no-console
-      console.info("[chat] socket connected", socket.id, url);
-    });
-    socket.on("connect_error", (e) => {
-      // eslint-disable-next-line no-console
-      console.error("[socket] connect_error", e?.message || e);
-    });
-    socket.on("disconnect", (reason) => {
-      // eslint-disable-next-line no-console
-      console.warn("[socket] disconnect", reason);
-    });
-  }
+  socket.on("connect", () => {
+    // eslint-disable-next-line no-console
+    console.info("[ChatSync] socket connected", { id: socket.id, url });
+  });
+  socket.on("connect_error", (e) => {
+    // eslint-disable-next-line no-console
+    console.error("[ChatSync] socket connect_error", e?.message || e);
+  });
+  socket.on("disconnect", (reason) => {
+    // eslint-disable-next-line no-console
+    console.warn("[ChatSync] socket disconnect", reason);
+  });
+  socket.io.on("reconnect", (attempt) => {
+    // eslint-disable-next-line no-console
+    console.info("[ChatSync] socket reconnect", { attempt, id: socket.id });
+  });
 }
 
 /**

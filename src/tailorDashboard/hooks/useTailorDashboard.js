@@ -631,14 +631,28 @@ export function useTailorDashboard() {
       if (isReconnect) {
         clearConversationJoinRegistry();
       }
-      if (isConversationRoomJoined(activeId)) return;
-      notifyConversationRoomJoined(activeId);
-      socket.emit("join_conversation", { conversationId: activeId });
+      if (!isReconnect && isConversationRoomJoined(activeId)) return;
+      ensureSocketThen(() => {
+        console.log("[ChatSync] tailor dashboard join_conversation", { conversationId: activeId });
+        socket.emit("join_conversation", { conversationId: activeId });
+      });
+    };
+    const onJoined = (payload) => {
+      const canonical = normalizeConversationId(payload?.conversationId);
+      const requested = normalizeConversationId(payload?.requestedId);
+      if (canonical === activeId || requested === activeId) {
+        notifyConversationRoomJoined(canonical || activeId);
+        console.log("[ChatSync] tailor dashboard conversation:joined", payload);
+      }
     };
     joinActive(false);
-    const onConnect = () => joinActive(true);
-    socket.on("connect", onConnect);
-    return () => socket.off("connect", onConnect);
+    socket.on("conversation:joined", onJoined);
+    const onReconnect = () => joinActive(true);
+    socket.io.on("reconnect", onReconnect);
+    return () => {
+      socket.off("conversation:joined", onJoined);
+      socket.io.off("reconnect", onReconnect);
+    };
   }, [activeTailorShopId, activeConversationId]);
 
   const activeOrder = useMemo(() => {

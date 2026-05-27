@@ -7,6 +7,7 @@ import {
 } from "lucide-react";
 import { socket } from "../../socket.js";
 import {
+  collectConversationAliasIds,
   displayChatActorName,
   isOrderAwaitingTailorAccept,
   isOrderChatEnabled,
@@ -184,6 +185,18 @@ export default function TailorWhatsAppWorkspace({
   const headerBadge = chatStatusBadge(activeRow, chatStub || activeOrder);
   const awaitingAccept = Boolean(chatStub && isOrderAwaitingTailorAccept(chatStub));
   const canSelect = Boolean(chatStub && peers?.customerId);
+
+  const conversationAliasIds = useMemo(
+    () =>
+      collectConversationAliasIds(
+        normalizedActive,
+        activeOrder?.id,
+        activeOrder?._id,
+        activeRow?.orderId,
+        activeRow?.conversationId
+      ),
+    [normalizedActive, activeOrder, activeRow]
+  );
 
   const selectConversation = useCallback(
     (conv) => {
@@ -393,6 +406,7 @@ export default function TailorWhatsAppWorkspace({
                 orderId={peers?.orderId}
                 peerDisplayName={peerCustomerName}
                 conversationId={normalizedActive}
+                conversationAliasIds={conversationAliasIds}
                 theme="whatsapp"
                 className="min-h-0 flex-1"
               />

@@ -3005,10 +3005,41 @@ function resolveExpectedReceiverId(senderId, customerId, tailorId) {
   return '';
 }
 
-function senderIsOrderParticipant(doc, senderId) {
+function senderIsOrderParticipant(doc, senderId, tailorIdentityKeys) {
   const s = String(senderId || '').trim();
   const { customerId, tailorId } = resolveParticipantsFromOrder(doc);
-  return Boolean(s && (authIdsMatch(s, customerId) || s === tailorId));
+  if (!s) return false;
+  if (authIdsMatch(s, customerId)) return true;
+  if (s === tailorId) return true;
+  if (tailorIdentityKeys instanceof Set && tailorIdentityKeys.size > 0) {
+    if (tailorIdentityKeys.has(s) && tailorOrderAssignedToIdentity(tailorId, tailorIdentityKeys)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+/** Same identity keys as REST `resolveTailorConversationAccess` for socket auth. */
+async function resolveSocketTailorIdentityKeys(authUser) {
+  const keys = new Set();
+  if (!authUser || authUser.role !== 'tailor') return keys;
+  const uid = normalizeAuthId(authUser.id);
+  if (uid) {
+    keys.add(uid);
+    keys.add(`T-U${uid}`);
+  }
+  if (authUser.tailorShopId != null) keys.add(normalizeAuthId(authUser.tailorShopId));
+  let shop = authUser.tailorShopId != null ? String(authUser.tailorShopId).trim() : '';
+  if (!shop && authUser.id != null) {
+    try {
+      const tp = await TailorProfile.findOne({ userId: authUser.id }).select('tailorShopId').lean();
+      if (tp && tp.tailorShopId) shop = String(tp.tailorShopId).trim();
+    } catch {
+      /* ignore */
+    }
+  }
+  if (shop) keys.add(normalizeAuthId(shop));
+  return keys;
 }
 
 async function verifySocketOrderChatAccess(socket, conversationIdRaw) {
@@ -3023,16 +3054,8 @@ async function verifySocketOrderChatAccess(socket, conversationIdRaw) {
   if (u.role === 'customer') {
     if (!authIdsMatch(cid, u.id)) return null;
   } else if (u.role === 'tailor') {
-    let shop = u.tailorShopId != null ? String(u.tailorShopId).trim() : '';
-    if (!shop) {
-      try {
-        const tp = await TailorProfile.findOne({ userId: u.id }).select('tailorShopId').lean();
-        if (tp && tp.tailorShopId) shop = String(tp.tailorShopId).trim();
-      } catch {
-        /* ignore */
-      }
-    }
-    if (!shop || tid !== shop) return null;
+    const keys = await resolveSocketTailorIdentityKeys(u);
+    if (!tailorOrderAssignedToIdentity(tid, keys)) return null;
   } else {
     return null;
   }
@@ -3268,6 +3291,12 @@ io.use(async (socket, next) => {
 });
 
 io.on('connection', (socket) => {
+  console.log('[ChatSync Socket] connected', {
+    socketId: socket.id,
+    role: socket.authUser?.role || 'anonymous',
+    userId: socket.authUser?.id != null ? String(socket.authUser.id) : '',
+  });
+
   socket.on('tailor:selected', (data = {}) => {
     try {
       const tailorId = data.tailorId != null ? String(data.tailorId).trim() : '';
@@ -3373,13 +3402,34 @@ io.on('connection', (socket) => {
 
   socket.on('join_conversation', async ({ conversationId } = {}) => {
     const raw = conversationId != null ? String(conversationId).trim() : '';
-    if (!raw) return;
+    if (!raw) {
+      console.warn('[ChatSync Socket] join_conversation missing conversationId');
+      return;
+    }
+    console.log('[ChatSync Socket] join_conversation request', {
+      conversationId: raw,
+      role: socket.authUser?.role,
+      userId: socket.authUser?.id != null ? String(socket.authUser.id) : '',
+    });
     const doc = await verifySocketOrderChatAccess(socket, raw);
-    if (!doc) return;
+    if (!doc) {
+      console.warn('[ChatSync Socket] join_conversation denied', {
+        conversationId: raw,
+        role: socket.authUser?.role,
+      });
+      socket.emit('conversation:join_failed', { conversationId: raw, reason: 'access_denied' });
+      return;
+    }
     const canonical = String(doc._id);
     const room = `conversation:${canonical}`;
-    console.log('[ChatSync Socket] joined room', room);
     socket.join(room);
+    console.log('[ChatSync Socket] join_conversation ok', { requestedId: raw, canonical, room });
+    socket.emit('conversation:joined', {
+      conversationId: canonical,
+      requestedId: raw,
+      room,
+      clientOrderId: doc.clientOrderId ? String(doc.clientOrderId).trim() : '',
+    });
   });
 
   socket.on('leave_conversation', ({ conversationId } = {}) => {
@@ -3532,6 +3582,12 @@ io.on('connection', (socket) => {
     const conversationId = String(payload?.conversationId ?? '').trim();
     const content = String(payload?.content ?? payload?.text ?? '').trim();
     const { timestamp, status } = payload;
+    console.log('[ChatSync Socket] send_message', {
+      conversationId,
+      senderId,
+      hasContent: Boolean(content),
+      role: socket.authUser?.role,
+    });
     if (!senderId || !conversationId || !content) {
       console.warn('SEND_MESSAGE rejected (missing field)', {
         hasSender: !!senderId,
@@ -3548,12 +3604,14 @@ io.on('connection', (socket) => {
         return;
       }
       const { customerId: orderCustomerId, tailorId: orderTailorId } = resolveParticipantsFromOrder(doc);
-      if (!senderIsOrderParticipant(doc, senderId)) {
+      const tailorKeys =
+        socket.authUser?.role === 'tailor' ? await resolveSocketTailorIdentityKeys(socket.authUser) : null;
+      if (!senderIsOrderParticipant(doc, senderId, tailorKeys)) {
         console.warn('[chat] participants mismatch — sender not on order', {
           senderId,
           orderCustomerId,
           orderTailorId,
-          conversationId: canonicalOrderIdFromOrderChatConversationId(conversationId),
+          conversationId: orderIdFromOrderChatConversationId(conversationId),
         });
         return;
       }
@@ -3564,7 +3622,7 @@ io.on('connection', (socket) => {
           senderId,
           orderCustomerId,
           orderTailorId,
-          conversationId: canonicalOrderIdFromOrderChatConversationId(conversationId),
+          conversationId: orderIdFromOrderChatConversationId(conversationId),
         });
         return;
       }
@@ -3573,7 +3631,7 @@ io.on('connection', (socket) => {
         console.log('[chat] corrected stale receiverId', {
           from: clientReceiverId,
           to: expected,
-          conversationId: canonicalOrderIdFromOrderChatConversationId(conversationId),
+          conversationId: orderIdFromOrderChatConversationId(conversationId),
         });
       }
 
@@ -3591,11 +3649,14 @@ io.on('connection', (socket) => {
         status: status || 'sent',
       });
 
+      const clientOrderId =
+        doc.clientOrderId != null ? String(doc.clientOrderId).trim() : '';
       const message = {
         id: savedMessage._id.toString(),
         senderId: String(savedMessage.senderId),
         receiverId: String(savedMessage.receiverId),
         conversationId: String(savedMessage.conversationId),
+        clientOrderId,
         content: String(savedMessage.content),
         timestamp: savedMessage.timestamp?.toISOString
           ? savedMessage.timestamp.toISOString()
@@ -3603,16 +3664,17 @@ io.on('connection', (socket) => {
         status: String(savedMessage.status || 'sent'),
       };
 
-      console.log('DB MESSAGE SAVED', message.id);
-      console.log('EMITTING MESSAGE', {
+      console.log('[ChatSync Socket] send_message saved', {
+        id: message.id,
         senderId: message.senderId,
         receiverId: message.receiverId,
         conversationId: message.conversationId,
+        clientOrderId: message.clientOrderId || '(none)',
       });
       const convRoom = `conversation:${canonical}`;
       const customerUserRoom = userRoomName(orderCustomerId);
       const tailorUserRoom = userRoomName(orderTailorId);
-      console.log('EMITTING TO CONVERSATION ROOM', convRoom);
+      console.log('[ChatSync Socket] emit message_received', { convRoom, customerUserRoom, tailorUserRoom });
       io.to(convRoom).emit('message_received', message);
       if (customerUserRoom) io.to(customerUserRoom).emit('message_received', message);
       if (tailorUserRoom) io.to(tailorUserRoom).emit('message_received', message);

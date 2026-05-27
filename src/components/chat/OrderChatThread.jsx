@@ -1,12 +1,17 @@
   import React, { useEffect, useRef, useState } from "react";
-  import {
-    buildOutgoingChatMessage,
-    messageBelongsToOrderChat,
-    normalizeChatId,
-    normalizeConversationId,
-  } from "../../chatUtils.js";
+import {
+  buildOutgoingChatMessage,
+  collectConversationAliasIds,
+  messageBelongsToOrderChat,
+  normalizeChatId,
+  normalizeConversationId,
+} from "../../chatUtils.js";
   import { ensureSocketThen, socket } from "../../socket.js";
-  import { notifyConversationRoomJoined, notifyConversationRoomLeft } from "../../conversationJoinRegistry.js";
+  import {
+  clearConversationJoinRegistry,
+  notifyConversationRoomJoined,
+  notifyConversationRoomLeft,
+} from "../../conversationJoinRegistry.js";
   import { Send } from "lucide-react";
   import "./chatThread.css";
 
@@ -36,8 +41,8 @@
     return d.toLocaleDateString([], { weekday: "long", month: "short", day: "numeric" });
   }
 
-  function belongsToConversation(message, conversationId) {
-    return messageBelongsToOrderChat(message, conversationId);
+  function belongsToConversation(message, conversationKeys) {
+    return messageBelongsToOrderChat(message, conversationKeys);
   }
 
   /**
@@ -53,6 +58,7 @@
     tailorId: orderTailorId,
     peerDisplayName = "",
     conversationId,
+    conversationAliasIds = [],
     /** 'whatsapp' | 'glass' â€” glass matches legacy modal look */
     theme = "whatsapp",
     className = "",
@@ -74,11 +80,24 @@
     const [inputValue, setInputValue] = useState("");
     const endOfMessagesRef = useRef(null);
     const activeConversationRef = useRef(conversationId);
+    const conversationAliasesRef = useRef([]);
     const lastJoinedConversationRef = useRef("");
 
+    const aliasList = collectConversationAliasIds(cId, ...conversationAliasIds);
+
     useEffect(() => {
-      activeConversationRef.current = cId;
-    }, [cId]);
+      conversationAliasesRef.current = aliasList;
+      if (aliasList.length > 0) {
+        activeConversationRef.current = aliasList[0];
+      } else {
+        activeConversationRef.current = cId;
+      }
+    }, [cId, aliasList.join("|")]);
+
+    const messageMatchesActive = (message) => {
+      const keys = conversationAliasesRef.current;
+      return messageBelongsToOrderChat(message, keys.length ? keys : activeConversationRef.current);
+    };
 
     useEffect(() => {
       const prevJoined = normalizeConversationId(lastJoinedConversationRef.current);
@@ -101,25 +120,40 @@
     useEffect(() => {
       const handleChatHistory = (payload) => {
         const history = Array.isArray(payload?.messages) ? payload.messages : [];
-        const activeConversationId = activeConversationRef.current;
-        if (!activeConversationId) {
+        const keys = conversationAliasesRef.current;
+        if (!keys.length && !activeConversationRef.current) {
           setMessages([]);
           return;
         }
-        setMessages(history.filter((message) => belongsToConversation(message, activeConversationId)));
+        setMessages(
+          history.filter((message) =>
+            messageMatchesActive(message)
+          )
+        );
+        console.log("[ChatSync] chat_history", {
+          count: history.length,
+          matched: history.filter((m) => messageMatchesActive(m)).length,
+          aliases: keys,
+        });
       };
 
       const handleMessageReceived = (message) => {
-        const activeConversationId = activeConversationRef.current;
-        if (!activeConversationId || !messageBelongsToOrderChat(message, activeConversationId)) {
+        if (!messageMatchesActive(message)) {
           return;
         }
+        console.log("[ChatSync] message_received", {
+          id: message?.id,
+          conversationId: message?.conversationId,
+          clientOrderId: message?.clientOrderId,
+          aliases: conversationAliasesRef.current,
+        });
 
         setMessages((prev) => {
+          const keys = conversationAliasesRef.current;
           const exists = prev.some(
             (m) =>
               (m.id && message.id && m.id === message.id) ||
-              (belongsToConversation(m, activeConversationId) &&
+              (belongsToConversation(m, keys.length ? keys : activeConversationRef.current) &&
                 m.timestamp === message.timestamp &&
                 m.content === message.content)
           );
@@ -127,29 +161,63 @@
         });
       };
 
+      const handleConversationJoined = (payload) => {
+        const canonical = normalizeConversationId(payload?.conversationId);
+        const requested = normalizeConversationId(payload?.requestedId);
+        const prev = normalizeConversationId(activeConversationRef.current);
+        const aliases = conversationAliasesRef.current;
+        const inThread =
+          (canonical && (aliases.includes(canonical) || prev === canonical)) ||
+          (requested && (aliases.includes(requested) || prev === requested));
+        if (!canonical || !inThread) return;
+        activeConversationRef.current = canonical;
+        const nextAliases = collectConversationAliasIds(
+          canonical,
+          payload?.clientOrderId,
+          requested,
+          ...aliases
+        );
+        conversationAliasesRef.current = nextAliases;
+        notifyConversationRoomJoined(canonical);
+        console.log("[ChatSync] conversation:joined", payload);
+      };
+
       socket.on("chat_history", handleChatHistory);
       socket.on("message_received", handleMessageReceived);
+      socket.on("conversation:joined", handleConversationJoined);
 
       return () => {
         socket.off("chat_history", handleChatHistory);
         socket.off("message_received", handleMessageReceived);
+        socket.off("conversation:joined", handleConversationJoined);
       };
     }, []);
 
     useEffect(() => {
       if (!isActive || !cId) return;
       if (mode === "customer" && (!sId || !rId)) return;
-      const runJoin = () => {
-        activeConversationRef.current = cId;
+      const runJoin = ({ clearMessages = true } = {}) => {
+        const joinId = cId;
         if (sId) {
           socket.emit("join_user", { userId: sId });
         }
-        notifyConversationRoomJoined(cId);
-        socket.emit("join_conversation", { conversationId: cId });
-        setMessages([]);
-        socket.emit("request_history", { conversationId: cId });
+        console.log("[ChatSync] join room", { conversationId: joinId, mode, connected: socket.connected });
+        socket.emit("join_conversation", { conversationId: joinId });
+        if (clearMessages) setMessages([]);
+        socket.emit("request_history", { conversationId: joinId });
       };
-      ensureSocketThen(runJoin);
+      ensureSocketThen(() => runJoin({ clearMessages: true }));
+
+      const onReconnect = () => {
+        if (!isActive || !cId) return;
+        clearConversationJoinRegistry();
+        console.log("[ChatSync] reconnect — re-join", { conversationId: cId });
+        ensureSocketThen(() => runJoin({ clearMessages: false }));
+      };
+      socket.io.on("reconnect", onReconnect);
+      return () => {
+        socket.io.off("reconnect", onReconnect);
+      };
     }, [cId, isActive, sId, rId, mode]);
 
     useEffect(() => {
@@ -175,6 +243,10 @@
       setMessages((prev) => [...prev, newMessage]);
       setInputValue("");
       ensureSocketThen(() => {
+        console.log("[ChatSync] emit send_message", {
+          conversationId: newMessage.conversationId,
+          senderId: newMessage.senderId,
+        });
         socket.emit("send_message", newMessage);
       });
     };

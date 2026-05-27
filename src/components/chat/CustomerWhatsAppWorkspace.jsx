@@ -7,6 +7,7 @@ import {
 } from "lucide-react";
 import { socket } from "../../socket.js";
 import {
+  collectConversationAliasIds,
   displayChatActorName,
   isOrderChatEnabled,
   isOrderEligibleForChat,
@@ -167,6 +168,18 @@ export default function CustomerWhatsAppWorkspace({
   const headerBadge = chatStatusBadge(activeRow, chatStub || activeOrder);
   const canSelect = Boolean(
     chatStub && peers?.tailorId && isOrderEligibleForChat(chatStub, { allowLegacyPlaceholderTailor: true })
+  );
+
+  const conversationAliasIds = useMemo(
+    () =>
+      collectConversationAliasIds(
+        normalizedActive,
+        activeOrder?.id,
+        activeOrder?._id,
+        activeRow?.orderId,
+        activeRow?.conversationId
+      ),
+    [normalizedActive, activeOrder, activeRow]
   );
 
   const selectConversation = useCallback(
@@ -360,6 +373,7 @@ export default function CustomerWhatsAppWorkspace({
                 orderId={peers?.orderId}
                 peerDisplayName={peerTailorName}
                 conversationId={normalizedActive}
+                conversationAliasIds={conversationAliasIds}
                 theme="whatsapp"
                 className="min-h-0 flex-1"
               />

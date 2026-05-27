@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useNavigate, useSearchParams } from "react-router-dom";
+import { useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import { MapContainer, Marker, Popup, TileLayer, useMap } from "react-leaflet";
 import "leaflet/dist/leaflet.css";
 import { patchOrderWizardFields } from "../../api/ordersApi.js";
@@ -144,11 +144,21 @@ function formatDeliveryDays(days) {
  * Unified map page: MapPage shell + Leaflet markers (GeoJSON + lat/lng).
  */
 export default function NearbyTailorsMap() {
+  const location = useLocation();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const isSelectMode = searchParams.get("mode") === "select";
   const wizardOrderId = (searchParams.get("orderId") || "").trim();
   const { user } = useAuth();
+
+  const stateLoc = location?.state?.customerLocation;
+  const stateLat = stateLoc && typeof stateLoc === "object" ? Number(stateLoc.lat) : NaN;
+  const stateLng = stateLoc && typeof stateLoc === "object" ? Number(stateLoc.lng) : NaN;
+  const hasStateCoords = isTrustworthyProfileCoords(stateLat, stateLng);
+  const stateAddress =
+    stateLoc && typeof stateLoc === "object" && typeof stateLoc.address === "string"
+      ? String(stateLoc.address).trim()
+      : "";
 
   const [userCenter, setUserCenter] = useState(FALLBACK_CENTER);
   const [geoStatus, setGeoStatus] = useState("pending");
@@ -177,6 +187,12 @@ export default function NearbyTailorsMap() {
   const markerRefs = useRef(new Map());
   const cardRefs = useRef(new Map());
 
+  useEffect(() => {
+    if (!hasStateCoords) return;
+    setUserCenter([stateLat, stateLng]);
+    setGeoStatus("ok");
+  }, [hasStateCoords, stateLat, stateLng]);
+
   /** New wizard flow: persist order id in URL so /map stays the hub (no track-orders redirect). */
   useEffect(() => {
     const q = (searchParams.get("orderId") || "").trim();
@@ -200,6 +216,16 @@ export default function NearbyTailorsMap() {
     if (!user?.id || user.role !== "customer") return;
     let cancelled = false;
     void (async () => {
+      if (hasStateCoords || stateAddress) {
+        ensureSocketThen(() => {
+          socket.emit("get_nearby_tailors", {
+            lat: hasStateCoords ? stateLat : null,
+            lng: hasStateCoords ? stateLng : null,
+            address: stateAddress,
+          });
+        });
+        return;
+      }
       const meta = await getCustomerMeta(user);
       if (cancelled) return;
       if (meta?.lastMapTailorRequest && typeof meta.lastMapTailorRequest === "object") {
@@ -235,7 +261,7 @@ export default function NearbyTailorsMap() {
     return () => {
       cancelled = true;
     };
-  }, [user]);
+  }, [user, hasStateCoords, stateLat, stateLng, stateAddress]);
 
   const requestLocation = useCallback(() => {
     if (!navigator.geolocation) {
@@ -256,6 +282,7 @@ export default function NearbyTailorsMap() {
   }, []);
 
   useEffect(() => {
+    if (hasStateCoords) return;
     requestLocation();
   }, [requestLocation]);
 

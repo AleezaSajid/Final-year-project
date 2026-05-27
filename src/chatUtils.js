@@ -43,13 +43,47 @@ export function normalizeConversationId(id) {
   return canonicalOrderIdFromChatConversationId(normalizeChatId(id));
 }
 
-/** True if a message belongs to this order’s chat (canonical id or legacy `order_${id}`). */
-export function messageBelongsToOrderChat(message, orderIdCanonical) {
+/** Collect every id variant that may refer to the same order chat (mongo id, clientOrderId, legacy prefix). */
+export function collectConversationAliasIds(...candidates) {
+  const out = new Set();
+  for (const c of candidates) {
+    const raw = c != null ? String(c).trim() : "";
+    if (!raw) continue;
+    const n = normalizeConversationId(raw);
+    if (n) out.add(n);
+    if (raw.startsWith("order_")) {
+      const stripped = normalizeConversationId(raw.slice("order_".length));
+      if (stripped) out.add(stripped);
+    }
+  }
+  return [...out];
+}
+
+/**
+ * True if a message belongs to this order’s chat.
+ * @param {object} message
+ * @param {string|string[]} orderKeyOrKeys — canonical id or alias list (mongo + clientOrderId)
+ */
+export function messageBelongsToOrderChat(message, orderKeyOrKeys) {
+  const keys = Array.isArray(orderKeyOrKeys)
+    ? orderKeyOrKeys
+    : orderKeyOrKeys != null && String(orderKeyOrKeys).trim() !== ""
+      ? [orderKeyOrKeys]
+      : [];
+  const want = new Set(collectConversationAliasIds(...keys));
+  if (!want.size) return false;
+
   const mid = normalizeConversationId(message?.conversationId);
-  const want = normalizeConversationId(orderIdCanonical);
-  if (!mid || !want) return false;
-  if (mid === want) return true;
-  if (normalizeChatId(message?.conversationId) === `order_${want}`) return true;
+  if (mid && want.has(mid)) return true;
+
+  const rawMid = normalizeChatId(message?.conversationId);
+  for (const w of want) {
+    if (rawMid === `order_${w}`) return true;
+  }
+
+  const clientMid = normalizeConversationId(message?.clientOrderId);
+  if (clientMid && want.has(clientMid)) return true;
+
   return false;
 }
 
