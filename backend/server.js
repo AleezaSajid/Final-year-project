@@ -311,15 +311,44 @@ function authIdsMatch(a, b) {
   return false;
 }
 
-/** True when the logged-in customer owns this order (numeric + body snapshot fallback). */
-function customerOwnsOrder(req, orderCustomerId, body = {}) {
+/** True when the logged-in customer owns this order (numeric + body snapshot + orderPayload fallback). */
+function customerOwnsOrder(req, orderCustomerId, body = {}, orderDoc = null) {
   if (!req.authUser || req.authUser.role !== 'customer') return false;
   const authId = normalizeAuthId(req.authUser.id);
   const orderCid = normalizeAuthId(orderCustomerId);
   const bodyCid = body && body.customerId != null ? normalizeAuthId(body.customerId) : '';
   if (authIdsMatch(orderCid, authId)) return true;
   if (bodyCid && authIdsMatch(bodyCid, authId)) return true;
+  if (orderDoc) {
+    const { customerId: derivedCid } = deriveOrderLinkagesForConversation(orderDoc);
+    if (derivedCid && authIdsMatch(derivedCid, authId)) return true;
+  }
   return false;
+}
+
+function customerMaySelectTailor(existingDoc, incomingTailorId) {
+  const existingTid = normalizeId(existingDoc?.tailorId);
+  const incomingTid = normalizeId(incomingTailorId);
+  if (!incomingTid || !isRealTailorId(incomingTid)) return { ok: false, reason: 'invalid_tailor' };
+  if (!existingTid || !isRealTailorId(existingTid) || existingTid === incomingTid) {
+    return { ok: true };
+  }
+  const plain =
+    existingDoc && typeof existingDoc.toObject === 'function'
+      ? existingDoc.toObject({ depopulate: true })
+      : existingDoc || {};
+  if (plain.isActive === true || plain.acceptedAt) {
+    return { ok: false, reason: 'already_assigned' };
+  }
+  const st = normalizeOrderStatus(plain.status);
+  const canSwitch =
+    st === 'draft' ||
+    st === 'pending' ||
+    st === 'order_placed' ||
+    st === 'awaiting_acceptance' ||
+    st === 'awaiting_tailor_selection';
+  if (canSwitch) return { ok: true, switched: true };
+  return { ok: false, reason: 'already_assigned' };
 }
 
 function tailorShopFromAuth(req) {
@@ -2435,7 +2464,7 @@ app.get('/orders/:orderId', requireAuth, async (req, res) => {
     // Only the owning customer or assigned tailor can read.
     const cid = order.customerId != null ? String(order.customerId).trim() : '';
     const tid = order.tailorId != null ? String(order.tailorId).trim() : '';
-    if (req.authUser.role === 'customer' && !customerOwnsOrder(req, cid, req.body)) {
+    if (req.authUser.role === 'customer' && !customerOwnsOrder(req, cid, req.body, order)) {
       log403PatchOrder(req, order, req.body, { phase: 'GET /orders/:orderId' });
       return res.status(403).json({ message: 'Forbidden.' });
     }
@@ -2531,19 +2560,27 @@ app.patch('/orders/:orderId', requireAuth, async (req, res) => {
 
     if (req.authUser.role === 'customer') {
       const authId = normalizeAuthId(req.authUser.id);
-      if (!authIdsMatch(existing.customerId, authId)) {
-        log403PatchOrder(req, existing, b);
+      if (!customerOwnsOrder(req, existing.customerId, b, existing)) {
+        log403PatchOrder(req, existing, b, {
+          phase: 'PATCH /orders select_tailor',
+          derivedCustomerId: normalizeAuthId(deriveOrderLinkagesForConversation(existing).customerId),
+        });
         return res.status(403).json({ message: 'Forbidden.' });
       }
       delete updatePayload.tailorId;
 
       if (patchAction === 'select_tailor') {
         const incomingTid = b.tailorId != null ? normalizeId(b.tailorId) : '';
-        const existingTid = normalizeId(existing.tailorId);
-        if (!incomingTid || !isRealTailorId(incomingTid)) {
-          return res.status(400).json({ message: 'A valid tailor shop id is required.' });
-        }
-        if (existingTid && isRealTailorId(existingTid) && existingTid !== incomingTid) {
+        const selectCheck = customerMaySelectTailor(existing, incomingTid);
+        if (!selectCheck.ok) {
+          if (selectCheck.reason === 'invalid_tailor') {
+            return res.status(400).json({ message: 'A valid tailor shop id is required.' });
+          }
+          console.warn('[PATCH /orders] select_tailor blocked — already assigned', {
+            orderId: paramId,
+            existingTailorId: normalizeId(existing.tailorId),
+            incomingTailorId: incomingTid,
+          });
           return res.status(403).json({ message: 'This order is already assigned to another tailor.' });
         }
         updatePayload.tailorId = incomingTid;
@@ -2905,7 +2942,7 @@ app.put('/orders/:orderId', requireAuth, async (req, res) => {
     if (!existingOrder) {
       return res.status(404).json({ message: 'Order not found.' });
     }
-    if (req.authUser.role === 'customer' && !customerOwnsOrder(req, existingOrder.customerId, req.body)) {
+    if (req.authUser.role === 'customer' && !customerOwnsOrder(req, existingOrder.customerId, req.body, existingOrder)) {
       log403PatchOrder(req, existingOrder, req.body, { phase: 'PUT /orders/:orderId' });
       return res.status(403).json({ message: 'Forbidden.' });
     }
