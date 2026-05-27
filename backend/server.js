@@ -40,6 +40,73 @@ function buildAllowedOrigins() {
 }
 
 const ALLOWED_ORIGINS = buildAllowedOrigins();
+// Temporary diagnostics: enable only when explicitly requested via env.
+const AUTH_DEBUG = process.env.AUTH_DEBUG === 'true';
+
+function authDebug(label, fields = {}) {
+  if (!AUTH_DEBUG) return;
+  console.info('[auth:debug]', label, fields);
+}
+
+function sessionCookieOptions() {
+  return {
+    httpOnly: true,
+    secure: IS_PRODUCTION,
+    sameSite: IS_PRODUCTION ? 'none' : 'lax',
+    maxAge: SESSION_TTL_MS,
+    path: '/',
+  };
+}
+
+function sessionCookieClearOptions() {
+  return sessionCookieOptions();
+}
+
+function cookieNamesPresent(req) {
+  const raw = req && req.headers ? req.headers.cookie : '';
+  const parsed = parseCookies(req);
+  const names = Object.keys(parsed);
+  return {
+    hasCookieHeader: Boolean(raw && String(raw).trim()),
+    cookieHeaderLength: raw ? String(raw).length : 0,
+    cookieNames: names,
+    hasSessionCookieName: names.includes(SESSION_COOKIE_NAME),
+    hasSignedSessionCookie:
+      Boolean(req.signedCookies && req.signedCookies[SESSION_COOKIE_NAME]) ||
+      Boolean(
+        parsed[SESSION_COOKIE_NAME] &&
+          String(parsed[SESSION_COOKIE_NAME]).trim().startsWith('s:')
+      ),
+  };
+}
+
+function extractSessionToken(req) {
+  const name = SESSION_COOKIE_NAME;
+  if (req.signedCookies && req.signedCookies[SESSION_COOKIE_NAME]) {
+    return { token: req.signedCookies[SESSION_COOKIE_NAME], source: 'signedCookies' };
+  }
+  const fromParser = req.cookies && req.cookies[name] ? String(req.cookies[name]).trim() : '';
+  if (fromParser) {
+    if (fromParser.startsWith('s:')) {
+      const unsigned = cookieParser.signedCookie(fromParser, SESSION_SECRET);
+      if (unsigned !== false) {
+        return { token: String(unsigned), source: 'unsignedFromParserCookie' };
+      }
+    }
+    return { token: fromParser, source: 'parserCookie' };
+  }
+  const fromHeader = parseCookies(req)[name] ? String(parseCookies(req)[name]).trim() : '';
+  if (fromHeader) {
+    if (fromHeader.startsWith('s:')) {
+      const unsigned = cookieParser.signedCookie(fromHeader, SESSION_SECRET);
+      if (unsigned !== false) {
+        return { token: String(unsigned), source: 'unsignedFromHeaderCookie' };
+      }
+    }
+    return { token: fromHeader, source: 'rawHeaderCookie' };
+  }
+  return { token: null, source: 'none' };
+}
 
 function corsOrigin(origin, callback) {
   if (!IS_PRODUCTION) {
@@ -56,8 +123,11 @@ function corsOrigin(origin, callback) {
     if (u.hostname === 'localhost' || u.hostname === '127.0.0.1') {
       return callback(null, origin);
     }
+    if (IS_PRODUCTION && u.hostname.endsWith('.vercel.app')) {
+      return callback(null, origin);
+    }
     if (process.env.ALLOW_VERCEL_PREVIEWS === 'true' && u.hostname.endsWith('.vercel.app')) {
-      return callback(null, true);
+      return callback(null, origin);
     }
   } catch {
     // ignore
@@ -244,38 +314,54 @@ function setSessionCookie(res, user) {
     iat: now,
   };
   const token = signSessionPayload(payload);
-  res.cookie(SESSION_COOKIE_NAME, token, {
-    httpOnly: true,
-    secure: true,
-    sameSite: 'none',
-    signed: true,
-    maxAge: 1000 * 60 * 60 * 24 * 7,
-    path: '/',
-  });
+  res.cookie(SESSION_COOKIE_NAME, token, sessionCookieOptions());
 }
 
 function clearSessionCookie(res) {
-  res.clearCookie(SESSION_COOKIE_NAME, {
-    httpOnly: true,
-    secure: true,
-    sameSite: 'none',
-    signed: true,
-    path: '/',
-  });
+  res.clearCookie(SESSION_COOKIE_NAME, sessionCookieClearOptions());
 }
 
 async function loadAuthedUser(req) {
-  const token =
-    (req.signedCookies && req.signedCookies[SESSION_COOKIE_NAME]) ||
-    parseCookies(req)[SESSION_COOKIE_NAME];
+  const cookieInfo = cookieNamesPresent(req);
+  const { token, source } = extractSessionToken(req);
   const payload = verifySessionToken(token);
-  if (!payload || !payload.uid || !payload.email) return null;
+  if (!payload || !payload.uid || !payload.email) {
+    authDebug('loadAuthedUser failed', {
+      path: req.path,
+      method: req.method,
+      origin: req.headers?.origin || '',
+      cookieSource: source,
+      ...cookieInfo,
+      jwtValid: Boolean(payload),
+      jwtHasUid: Boolean(payload && payload.uid),
+      jwtHasEmail: Boolean(payload && payload.email),
+    });
+    return null;
+  }
   const user = await User.findOne({ id: Number(payload.uid), email: String(payload.email) }).lean();
-  if (!user) return null;
-  if (user.isVerified !== true) return null;
+  if (!user) {
+    authDebug('loadAuthedUser user not found', {
+      path: req.path,
+      uid: payload.uid,
+      email: payload.email,
+    });
+    return null;
+  }
+  if (user.isVerified !== true) {
+    authDebug('loadAuthedUser not verified', { path: req.path, uid: user.id });
+    return null;
+  }
   const role = user.role || 'customer';
   // Role drift check (token role must match DB role if present)
-  if (payload.role && String(payload.role) !== String(role)) return null;
+  if (payload.role && String(payload.role) !== String(role)) {
+    authDebug('loadAuthedUser role drift', {
+      path: req.path,
+      tokenRole: payload.role,
+      dbRole: role,
+      uid: user.id,
+    });
+    return null;
+  }
   let tailorShopId = null;
   let tp = null;
   if (role === 'tailor') {
@@ -500,11 +586,24 @@ async function requireAuth(req, res, next) {
   try {
     const u = await loadAuthedUser(req);
     if (!u) {
+      authDebug('requireAuth denied', {
+        path: req.path,
+        method: req.method,
+        origin: req.headers?.origin || '',
+        ...cookieNamesPresent(req),
+      });
       clearSessionCookie(res);
       res.status(401).json({ message: 'Not authenticated.' });
       return;
     }
     req.authUser = u;
+    authDebug('requireAuth ok', {
+      path: req.path,
+      method: req.method,
+      userId: u.id,
+      role: u.role,
+      tailorShopId: u.tailorShopId || '',
+    });
     next();
   } catch (e) {
     console.error('[auth] requireAuth error', e);
@@ -518,6 +617,13 @@ function requireRole(roles) {
   return (req, res, next) => {
     const role = req.authUser && req.authUser.role ? String(req.authUser.role) : '';
     if (!role || (allowed.length && !allowed.includes(role))) {
+      authDebug('requireRole denied', {
+        path: req.path,
+        method: req.method,
+        role,
+        allowed,
+        userId: req.authUser?.id,
+      });
       return res.status(403).json({ message: 'Forbidden.' });
     }
     return next();
