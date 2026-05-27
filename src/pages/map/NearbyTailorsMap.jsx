@@ -160,6 +160,8 @@ export default function NearbyTailorsMap() {
       ? String(stateLoc.address).trim()
       : "";
 
+  const confirmedLocationRef = useRef(null);
+
   const [userCenter, setUserCenter] = useState(FALLBACK_CENTER);
   const [geoStatus, setGeoStatus] = useState("pending");
   const [selectedId, setSelectedId] = useState(null);
@@ -189,9 +191,14 @@ export default function NearbyTailorsMap() {
 
   useEffect(() => {
     if (!hasStateCoords) return;
+    // Confirmed location from LocationStep (pick-on-map / trusted coords).
+    // Must not be overwritten by automatic browser GPS.
+    // eslint-disable-next-line no-console
+    console.log("[map] using confirmed location", { lat: stateLat, lng: stateLng, address: stateAddress });
+    confirmedLocationRef.current = { lat: stateLat, lng: stateLng, address: stateAddress };
     setUserCenter([stateLat, stateLng]);
     setGeoStatus("ok");
-  }, [hasStateCoords, stateLat, stateLng]);
+  }, [hasStateCoords, stateLat, stateLng, stateAddress]);
 
   /** New wizard flow: persist order id in URL so /map stays the hub (no track-orders redirect). */
   useEffect(() => {
@@ -263,7 +270,17 @@ export default function NearbyTailorsMap() {
     };
   }, [user, hasStateCoords, stateLat, stateLng, stateAddress]);
 
-  const requestLocation = useCallback(() => {
+  const requestLocation = useCallback((options = {}) => {
+    const source = options && options.source ? String(options.source) : "auto";
+    if (source === "auto" && hasStateCoords) {
+      // eslint-disable-next-line no-console
+      console.log("[map] skipping auto GPS because confirmed location exists");
+      return;
+    }
+    if (source === "manual") {
+      // eslint-disable-next-line no-console
+      console.log("[map] manual refresh location clicked");
+    }
     if (!navigator.geolocation) {
       setGeoStatus("unsupported");
       return;
@@ -271,19 +288,34 @@ export default function NearbyTailorsMap() {
     setGeoStatus("pending");
     navigator.geolocation.getCurrentPosition(
       (pos) => {
-        setUserCenter([pos.coords.latitude, pos.coords.longitude]);
-        setGeoStatus("ok");
+        const nextLat = pos?.coords?.latitude;
+        const nextLng = pos?.coords?.longitude;
+        const nextAcc = Number(pos?.coords?.accuracy);
+        const hasConfirmed = Boolean(confirmedLocationRef.current && confirmedLocationRef.current.lat != null);
+        // If browser GPS is very approximate, do not overwrite confirmed location.
+        if (hasConfirmed && Number.isFinite(nextAcc) && nextAcc > 1000) {
+          // eslint-disable-next-line no-console
+          console.log("[map] GPS accuracy poor — keeping confirmed location", { accuracyM: nextAcc });
+          setGeoStatus("ok");
+          return;
+        }
+        if (Number.isFinite(nextLat) && Number.isFinite(nextLng)) {
+          setUserCenter([nextLat, nextLng]);
+          setGeoStatus("ok");
+        } else {
+          setGeoStatus("denied");
+        }
       },
       () => {
         setGeoStatus("denied");
       },
       { enableHighAccuracy: true, timeout: 12_000, maximumAge: 60_000 }
     );
-  }, []);
+  }, [hasStateCoords]);
 
   useEffect(() => {
     if (hasStateCoords) return;
-    requestLocation();
+    requestLocation({ source: "auto" });
   }, [requestLocation, hasStateCoords]);
 
   useEffect(() => {
@@ -841,7 +873,7 @@ export default function NearbyTailorsMap() {
                 <div className="mt-4">
                   <button
                     type="button"
-                    onClick={requestLocation}
+                    onClick={() => requestLocation({ source: "manual" })}
                     className="hero-cta inline-flex items-center justify-center gap-2 rounded-xl px-5 py-2.5 text-sm font-semibold text-white transition-all duration-200 ease-out hover:-translate-y-0.5 hover:brightness-[1.04] focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-600/45 focus-visible:ring-offset-2 bg-gradient-to-b from-[#4a7c59] to-[#355542]"
                   >
                     <span className="relative z-10">Refresh location</span>
@@ -849,7 +881,7 @@ export default function NearbyTailorsMap() {
                 </div>
               </section>
             ) : (
-              <MapHeroSection geoStatus={geoStatus} onDetectLocation={requestLocation} />
+              <MapHeroSection geoStatus={geoStatus} onDetectLocation={() => requestLocation({ source: "manual" })} />
             )}
 
             {isSelectMode && assignSuccess ? (
