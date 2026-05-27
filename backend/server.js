@@ -48,6 +48,16 @@ function authDebug(label, fields = {}) {
   console.info('[auth:debug]', label, fields);
 }
 
+function auth401(res, reason, fields = {}) {
+  authDebug('401', { reason, ...fields });
+  res.status(401).json({ message: 'Not authenticated.' });
+}
+
+function auth403(res, reason, fields = {}) {
+  authDebug('403', { reason, ...fields });
+  res.status(403).json({ message: 'Forbidden.' });
+}
+
 function sessionCookieOptions() {
   return {
     httpOnly: true,
@@ -83,55 +93,62 @@ function cookieNamesPresent(req) {
 function extractSessionToken(req) {
   const name = SESSION_COOKIE_NAME;
   if (req.signedCookies && req.signedCookies[SESSION_COOKIE_NAME]) {
-    return { token: req.signedCookies[SESSION_COOKIE_NAME], source: 'signedCookies' };
+    return { token: req.signedCookies[SESSION_COOKIE_NAME], source: 'signedCookies', unsigned: true };
   }
   const fromParser = req.cookies && req.cookies[name] ? String(req.cookies[name]).trim() : '';
   if (fromParser) {
     if (fromParser.startsWith('s:')) {
       const unsigned = cookieParser.signedCookie(fromParser, SESSION_SECRET);
       if (unsigned !== false) {
-        return { token: String(unsigned), source: 'unsignedFromParserCookie' };
+        return { token: String(unsigned), source: 'unsignedFromParserCookie', unsigned: true };
       }
     }
-    return { token: fromParser, source: 'parserCookie' };
+    return { token: fromParser, source: 'parserCookie', unsigned: !fromParser.startsWith('s:') };
   }
   const fromHeader = parseCookies(req)[name] ? String(parseCookies(req)[name]).trim() : '';
   if (fromHeader) {
     if (fromHeader.startsWith('s:')) {
       const unsigned = cookieParser.signedCookie(fromHeader, SESSION_SECRET);
       if (unsigned !== false) {
-        return { token: String(unsigned), source: 'unsignedFromHeaderCookie' };
+        return { token: String(unsigned), source: 'unsignedFromHeaderCookie', unsigned: true };
       }
     }
-    return { token: fromHeader, source: 'rawHeaderCookie' };
+    return { token: fromHeader, source: 'rawHeaderCookie', unsigned: !fromHeader.startsWith('s:') };
   }
-  return { token: null, source: 'none' };
+  return { token: null, source: 'none', unsigned: false };
 }
 
 function corsOrigin(origin, callback) {
   if (!IS_PRODUCTION) {
+    if (AUTH_DEBUG) authDebug('cors allow (dev)', { origin: origin || '' });
     return callback(null, true);
   }
   if (!origin) {
+    if (AUTH_DEBUG) authDebug('cors allow (no origin)', { origin: '' });
     return callback(null, true);
   }
   if (ALLOWED_ORIGINS.includes(origin)) {
+    if (AUTH_DEBUG) authDebug('cors allow (explicit)', { origin });
     return callback(null, true);
   }
   try {
     const u = new URL(origin);
     if (u.hostname === 'localhost' || u.hostname === '127.0.0.1') {
+      if (AUTH_DEBUG) authDebug('cors allow (localhost)', { origin });
       return callback(null, origin);
     }
     if (IS_PRODUCTION && u.hostname.endsWith('.vercel.app')) {
+      if (AUTH_DEBUG) authDebug('cors allow (vercel)', { origin });
       return callback(null, origin);
     }
     if (process.env.ALLOW_VERCEL_PREVIEWS === 'true' && u.hostname.endsWith('.vercel.app')) {
+      if (AUTH_DEBUG) authDebug('cors allow (preview)', { origin });
       return callback(null, origin);
     }
   } catch {
     // ignore
   }
+  if (AUTH_DEBUG) authDebug('cors reject', { origin });
   return callback(new Error('Not allowed by CORS'));
 }
 
@@ -323,7 +340,7 @@ function clearSessionCookie(res) {
 
 async function loadAuthedUser(req) {
   const cookieInfo = cookieNamesPresent(req);
-  const { token, source } = extractSessionToken(req);
+  const { token, source, unsigned } = extractSessionToken(req);
   const payload = verifySessionToken(token);
   if (!payload || !payload.uid || !payload.email) {
     authDebug('loadAuthedUser failed', {
@@ -331,6 +348,7 @@ async function loadAuthedUser(req) {
       method: req.method,
       origin: req.headers?.origin || '',
       cookieSource: source,
+      cookieUnsigned: Boolean(unsigned),
       ...cookieInfo,
       jwtValid: Boolean(payload),
       jwtHasUid: Boolean(payload && payload.uid),
@@ -593,7 +611,7 @@ async function requireAuth(req, res, next) {
         ...cookieNamesPresent(req),
       });
       clearSessionCookie(res);
-      res.status(401).json({ message: 'Not authenticated.' });
+      auth401(res, 'missing_or_invalid_session', { path: req.path, method: req.method });
       return;
     }
     req.authUser = u;
@@ -608,7 +626,7 @@ async function requireAuth(req, res, next) {
   } catch (e) {
     console.error('[auth] requireAuth error', e);
     clearSessionCookie(res);
-    res.status(401).json({ message: 'Not authenticated.' });
+    auth401(res, 'exception', { path: req.path, method: req.method });
   }
 }
 
@@ -624,7 +642,7 @@ function requireRole(roles) {
         allowed,
         userId: req.authUser?.id,
       });
-      return res.status(403).json({ message: 'Forbidden.' });
+      return auth403(res, 'role_not_allowed', { path: req.path, method: req.method, role, allowed });
     }
     return next();
   };
@@ -2596,6 +2614,17 @@ app.get('/orders/:orderId', requireAuth, async (req, res) => {
 app.patch('/orders/:orderId', requireAuth, async (req, res) => {
   const paramId = req.params.orderId != null ? String(req.params.orderId).trim() : '';
   const b = req.body && typeof req.body === 'object' ? req.body : {};
+  if (AUTH_DEBUG) {
+    authDebug('PATCH /orders start', {
+      path: req.path,
+      method: req.method,
+      userId: req.authUser?.id,
+      role: req.authUser?.role,
+      action: b.action,
+      hasCustomerIdBody: b.customerId != null && String(b.customerId).trim() !== '',
+      hasTailorIdBody: b.tailorId != null && String(b.tailorId).trim() !== '',
+    });
+  }
   const updatePayload = {};
   if (b.customerName != null) updatePayload.customerName = String(b.customerName);
   if (b.customerPhone != null) updatePayload.customerPhone = String(b.customerPhone);
@@ -2671,6 +2700,15 @@ app.patch('/orders/:orderId', requireAuth, async (req, res) => {
           phase: 'PATCH /orders select_tailor',
           derivedCustomerId: normalizeAuthId(deriveOrderLinkagesForConversation(existing).customerId),
         });
+        if (AUTH_DEBUG) {
+          authDebug('PATCH /orders ownership denied', {
+            userId: authId,
+            orderCustomerId: normalizeAuthId(existing.customerId),
+            derivedCustomerId: normalizeAuthId(deriveOrderLinkagesForConversation(existing).customerId),
+            bodyCustomerId: b.customerId != null ? normalizeAuthId(b.customerId) : '',
+            authIdsMatchDirect: authIdsMatch(existing.customerId, authId),
+          });
+        }
         return res.status(403).json({ message: 'Forbidden.' });
       }
       delete updatePayload.tailorId;
