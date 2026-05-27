@@ -1,4 +1,4 @@
-  import React, { useEffect, useRef, useState } from "react";
+  import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
   buildOutgoingChatMessage,
   collectConversationAliasIds,
@@ -83,7 +83,10 @@ import {
     const conversationAliasesRef = useRef([]);
     const lastJoinedConversationRef = useRef("");
 
-    const aliasList = collectConversationAliasIds(cId, ...conversationAliasIds);
+    const aliasList = useMemo(
+      () => collectConversationAliasIds(cId, ...(Array.isArray(conversationAliasIds) ? conversationAliasIds : [])),
+      [cId, conversationAliasIds]
+    );
 
     useEffect(() => {
       conversationAliasesRef.current = aliasList;
@@ -92,7 +95,7 @@ import {
       } else {
         activeConversationRef.current = cId;
       }
-    }, [cId, aliasList.join("|")]);
+    }, [cId, aliasList]);
 
     const messageMatchesActive = (message) => {
       const keys = conversationAliasesRef.current;

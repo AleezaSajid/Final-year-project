@@ -136,8 +136,6 @@ export default function LocationStep() {
   const [lng, setLng] = useState(null);
   const [accuracyM, setAccuracyM] = useState(null);
   const [address, setAddress] = useState("");
-  /** Set only after a successful "Use My Current Location" read — never from storage. */
-  const [usedGps, setUsedGps] = useState(false);
   const [gpsTrusted, setGpsTrusted] = useState(false);
   const [showMapPicker, setShowMapPicker] = useState(false);
   const [locating, setLocating] = useState(false);
@@ -152,7 +150,6 @@ export default function LocationStep() {
     }
     setLat(null);
     setLng(null);
-    setUsedGps(false);
     setGpsTrusted(false);
     setAccuracyM(null);
     setShowMapPicker(false);
@@ -199,7 +196,6 @@ export default function LocationStep() {
     }
     setLocating(true);
     setGeocoding(false);
-    setUsedGps(false);
     setGpsTrusted(false);
     setAddress("");
     setLat(null);
@@ -226,7 +222,6 @@ export default function LocationStep() {
         setLat(nextLat);
         setLng(nextLng);
         setAccuracyM(Number.isFinite(nextAcc) ? nextAcc : null);
-        setUsedGps(true);
         setLocating(false);
         if (Number.isFinite(nextAcc) && nextAcc > 1000) {
           setGpsTrusted(false);
@@ -252,7 +247,6 @@ export default function LocationStep() {
       },
       (geoErr) => {
         setLocating(false);
-        setUsedGps(false);
         setGpsTrusted(false);
         setLat(null);
         setLng(null);
@@ -266,7 +260,6 @@ export default function LocationStep() {
   const handlePickOnMap = useCallback(() => {
     setError("");
     setShowMapPicker((v) => !v);
-    setUsedGps(false);
     setGpsTrusted(false);
     setAccuracyM(null);
   }, []);
@@ -461,7 +454,6 @@ export default function LocationStep() {
                     setLat(pickLat);
                     setLng(pickLng);
                     setAccuracyM(null);
-                    setUsedGps(true);
                     setGpsTrusted(true);
                     setLocating(false);
                     setGeocoding(true);
