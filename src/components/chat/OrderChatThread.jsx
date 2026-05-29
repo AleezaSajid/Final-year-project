@@ -79,6 +79,11 @@ import {
     const activeConversationRef = useRef(conversationId);
     const conversationAliasesRef = useRef([]);
     const lastJoinedConversationRef = useRef("");
+    const senderIdRef = useRef(sId);
+
+    useEffect(() => {
+      senderIdRef.current = sId;
+    }, [sId]);
 
     const aliasList = useMemo(
       () => collectConversationAliasIds(cId, ...(Array.isArray(conversationAliasIds) ? conversationAliasIds : [])),
@@ -146,10 +151,10 @@ import {
           conversationId: message?.conversationId,
           clientOrderId: message?.clientOrderId,
           roomId: conversationAliasesRef.current[0] || activeConversationRef.current,
-          selectedConversationId: cId,
+          selectedConversationId: activeConversationRef.current,
         });
 
-        setMessages((prev) => mergeChatThreadMessage(prev, message, sId));
+        setMessages((prev) => mergeChatThreadMessage(prev, message, senderIdRef.current));
       };
 
       const handleConversationJoined = (payload) => {
