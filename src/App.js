@@ -27,6 +27,7 @@ import ForgotPasswordPage from "./pages/ForgotPasswordPage.jsx";
 import ProtectedRoute from "./components/ProtectedRoute.jsx";
 import { RoleProvider } from "./context/RoleContext";
 import { CustomerChatProvider } from "./context/CustomerChatContext.jsx";
+import { TailorChatProvider } from "./context/TailorChatContext.jsx";
 import { PageBackground } from "./components/PageBackground.jsx";
 import PageTransition from "./components/PageTransition.jsx";
 import { ToastProvider } from "./components/ToastProvider.jsx";
@@ -187,7 +188,9 @@ function App() {
       <Router>
       <ToastProvider>
         <CustomerChatProvider>
+        <TailorChatProvider>
         <AnimatedRoutes />
+        </TailorChatProvider>
         </CustomerChatProvider>
       </ToastProvider>
       </Router>

@@ -27,11 +27,13 @@ export default function RecentChatsPreviewCard({
   orders = [],
   messagesPath,
   glassCardClass = "",
+  isLoading = false,
 }) {
   const navigate = useNavigate();
   const isTailor = mode === "tailor";
 
   const previewRows = useMemo(() => sortConversationsDesc(conversations).slice(0, 2), [conversations]);
+  const showSkeleton = isLoading && previewRows.length === 0;
 
   const resolveName = (conv) => {
     const oid = normalizeConversationId(conv?.orderId ?? conv?.conversationId ?? "");
@@ -95,7 +97,29 @@ export default function RecentChatsPreviewCard({
             : "mt-3.5 min-h-0 flex-1 space-y-1.5 overflow-y-auto overscroll-contain"
         }
       >
-        {previewRows.length === 0 ? (
+        {showSkeleton ? (
+          <>
+            {[0, 1].map((i) => (
+              <li
+                key={`chat-skeleton-${i}`}
+                className={
+                  isTailor
+                    ? "flex animate-pulse items-center gap-3 rounded-2xl border border-[rgba(140,170,160,0.16)] bg-[rgba(255,255,255,0.55)] px-3 py-2.5"
+                    : "flex animate-pulse items-center gap-3 rounded-xl border border-white/50 bg-white/40 px-3 py-2.5"
+                }
+                aria-hidden
+              >
+                <div
+                  className={`h-10 w-10 shrink-0 rounded-full ${isTailor ? "bg-[rgba(140,170,160,0.2)]" : "bg-slate-200/80"}`}
+                />
+                <div className="min-w-0 flex-1 space-y-2">
+                  <div className={`h-3.5 w-2/5 rounded ${isTailor ? "bg-[rgba(140,170,160,0.22)]" : "bg-slate-200/80"}`} />
+                  <div className={`h-3 w-4/5 rounded ${isTailor ? "bg-[rgba(140,170,160,0.16)]" : "bg-slate-100"}`} />
+                </div>
+              </li>
+            ))}
+          </>
+        ) : previewRows.length === 0 ? (
           <li
             className={
               isTailor

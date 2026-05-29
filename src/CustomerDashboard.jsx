@@ -777,7 +777,7 @@ function HelpSupportCard({ orders, onTrackOrder }) {
 export default function CustomerDashboard() {
   const navigate = useNavigate();
   const { user } = useAuth();
-  const { customerChatConversations } = useCustomerChat();
+  const { customerChatConversations, customerConversationsLoading } = useCustomerChat();
   const [orders, setOrders] = useState([]);
   /** Selected order for details (workflow/profile); empty string = default to latest in list. */
   const [activeOrderId, setActiveOrderId] = useState("");
@@ -1169,6 +1169,7 @@ export default function CustomerDashboard() {
                   orders={orders}
                   messagesPath="/customer/messages"
                   glassCardClass={GLASS_CARD}
+                  isLoading={customerConversationsLoading}
                 />
               </div>
             </div>

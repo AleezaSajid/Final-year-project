@@ -70,7 +70,7 @@ function SewServeFooter() {
           <a
             href="#home"
             className="inline-flex items-center focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-[#BAC095]"
-            aria-label="SewServe â€” home"
+            aria-label="SewServe home"
           >
             <SewServeBrandImg
               decorative
@@ -122,7 +122,7 @@ function SewServeFooter() {
             </a>
           </div>
         </div>
-        <p className="text-sm text-[#4B5563]">Â© 2026 SewServe. All rights reserved.</p>
+        <p className="text-sm text-[#4B5563]">Copyright 2026 SewServe. All rights reserved.</p>
       </div>
     </footer>
   );

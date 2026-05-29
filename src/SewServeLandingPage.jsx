@@ -404,7 +404,7 @@ export default function SewServeLandingPage() {
                 <a
                   href="#home"
                   className="inline-flex w-fit shrink-0 items-center focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-emerald-600/30"
-                  aria-label="SewServe â€” home"
+                  aria-label="SewServe home"
                 >
                   <img
                     src={logoDisplaySrc}
@@ -454,7 +454,7 @@ export default function SewServeLandingPage() {
                   </a>
                 </div>
                 <div className="border-t border-slate-200/50 pt-5">
-                  <p className="text-xs text-slate-600">Â© 2026 SewServe. All rights reserved.</p>
+                  <p className="text-xs text-slate-600">Copyright 2026 SewServe. All rights reserved.</p>
                   <div className="mt-3 flex flex-col gap-2 text-xs text-slate-600">
                     <button
                       type="button"
@@ -485,7 +485,7 @@ export default function SewServeLandingPage() {
                   ].map((item) => (
                     <li key={item.label} className="flex gap-2">
                       <span className="text-slate-400" aria-hidden>
-                        â€¢
+                        -
                       </span>
                       <a
                         href={item.href}
@@ -505,7 +505,7 @@ export default function SewServeLandingPage() {
                   {["Custom Tailoring", "Alterations", "Wedding Attire", "Bespoke Suits"].map((label) => (
                     <li key={label} className="flex gap-2">
                       <span className="text-slate-400" aria-hidden>
-                        â€¢
+                        -
                       </span>
                       <span>{label}</span>
                     </li>

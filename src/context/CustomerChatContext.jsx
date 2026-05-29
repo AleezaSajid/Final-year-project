@@ -23,6 +23,10 @@ import {
   wizardOrderAcceptMatches,
 } from "../utils/measurementWizardOrderSync.js";
 import { useAuth } from "./AuthContext.jsx";
+import {
+  getCachedConversations,
+  setCachedConversations,
+} from "../utils/recentConversationsCache.js";
 
 const PREVIEW_SESSION_KEY = "sewserve_customer_chat_last_preview";
 
@@ -104,8 +108,12 @@ export function CustomerChatProvider({ children }) {
   const [lastChatPreview, setLastChatPreview] = useState(() => readStoredChatPreview());
   const [, setOrderRoomCustomerId] = useState(() => readChatRoomCustomerIdFromStorage());
   const [customerChatConversations, setCustomerChatConversations] = useState([]);
+  const [customerConversationsLoading, setCustomerConversationsLoading] = useState(true);
   const [modalChatRow, setModalChatRow] = useState(null);
   const customerReconcileRefetchAtRef = useRef(0);
+  const customerConversationsFetchedForRef = useRef("");
+  const fetchCustomerConversationsRef = useRef(async () => {});
+  const scheduleCustomerConversationsReconcileRef = useRef(() => {});
 
   /** Legacy hook for review pages â€” sets modal thread from order row only (no global tailor). */
   const syncCustomerOrderChatFromOrder = useCallback(
@@ -222,9 +230,16 @@ export function CustomerChatProvider({ children }) {
     return () => socket.off("orderAccepted", onOrderAccepted);
   }, [user, user?.role, navigate, location.pathname, authCustomerIdForApi]);
 
-  const fetchCustomerConversations = useCallback(async () => {
+  const fetchCustomerConversations = useCallback(async (options = {}) => {
+    const { force = false } = options;
     const cid = authCustomerIdForApi;
     if (!cid) return;
+    const cached = getCachedConversations("customer", cid);
+    if (!force && cached?.length) {
+      setCustomerConversationsLoading(false);
+      return;
+    }
+    if (!cached?.length) setCustomerConversationsLoading(true);
     try {
       const base = getApiBaseUrl();
       if (!base) return;
@@ -237,9 +252,13 @@ export function CustomerChatProvider({ children }) {
       }
       const list = Array.isArray(data?.conversations) ? data.conversations : [];
       logConversationRowsValidation(list, "customer fetch");
-      setCustomerChatConversations(sortCustomerConversationsDesc(list));
+      const sorted = sortCustomerConversationsDesc(list);
+      setCustomerChatConversations(sorted);
+      setCachedConversations("customer", cid, sorted);
     } catch (e) {
       console.error("[ChatSync customer] fetch conversations failed", e);
+    } finally {
+      setCustomerConversationsLoading(false);
     }
   }, [authCustomerIdForApi]);
 
@@ -248,16 +267,33 @@ export function CustomerChatProvider({ children }) {
       const now = Date.now();
       if (now - customerReconcileRefetchAtRef.current < 1600) return;
       customerReconcileRefetchAtRef.current = now;
-      void fetchCustomerConversations();
+      void fetchCustomerConversationsRef.current({ force: true });
     },
-    [fetchCustomerConversations]
+    []
   );
 
+  fetchCustomerConversationsRef.current = fetchCustomerConversations;
+  scheduleCustomerConversationsReconcileRef.current = scheduleCustomerConversationsReconcile;
+
   useEffect(() => {
-    if (!isCustomerChatPath(location.pathname) || user?.role !== "customer") return undefined;
-    void fetchCustomerConversations();
+    if (user?.role !== "customer" || !authCustomerIdForApi) return undefined;
+    if (customerConversationsFetchedForRef.current === authCustomerIdForApi) return undefined;
+    customerConversationsFetchedForRef.current = authCustomerIdForApi;
+
+    const cached = getCachedConversations("customer", authCustomerIdForApi);
+    if (cached?.length) {
+      setCustomerChatConversations((prev) => (prev.length > 0 ? prev : cached));
+      setCustomerConversationsLoading(false);
+      return undefined;
+    }
+    void fetchCustomerConversations({ force: true });
     return undefined;
-  }, [fetchCustomerConversations, location.pathname, user?.role]);
+  }, [authCustomerIdForApi, fetchCustomerConversations, user?.role]);
+
+  useEffect(() => {
+    if (!authCustomerIdForApi || customerChatConversations.length === 0) return;
+    setCachedConversations("customer", authCustomerIdForApi, customerChatConversations);
+  }, [authCustomerIdForApi, customerChatConversations]);
 
   const customerSidebarUnread = useMemo(
     () =>
@@ -343,7 +379,7 @@ export function CustomerChatProvider({ children }) {
             status: "active",
           };
           list.unshift(stub);
-          scheduleCustomerConversationsReconcile("message_received_missing_row");
+          scheduleCustomerConversationsReconcileRef.current("message_received_missing_row");
           return sortCustomerConversationsDesc(list);
         }
         const row = { ...list[i] };
@@ -364,9 +400,7 @@ export function CustomerChatProvider({ children }) {
     };
   }, [
     authCustomerIdForApi,
-    fetchCustomerConversations,
     location.pathname,
-    scheduleCustomerConversationsReconcile,
     user?.role,
   ]);
 
@@ -404,7 +438,7 @@ export function CustomerChatProvider({ children }) {
               unreadTailor: 0,
               status: "active",
             });
-            scheduleCustomerConversationsReconcile("new_notification_missing_row");
+            scheduleCustomerConversationsReconcileRef.current("new_notification_missing_row");
             return sortCustomerConversationsDesc(list);
           }
           const row = { ...list[i] };
@@ -415,7 +449,7 @@ export function CustomerChatProvider({ children }) {
           return sortCustomerConversationsDesc(list);
         });
       }
-      scheduleCustomerConversationsReconcile("new_notification");
+      scheduleCustomerConversationsReconcileRef.current("new_notification");
     };
 
     socket.on("connect", joinRoom);
@@ -433,9 +467,7 @@ export function CustomerChatProvider({ children }) {
   }, [
     authCustomerIdForApi,
     customerId,
-    fetchCustomerConversations,
     location.pathname,
-    scheduleCustomerConversationsReconcile,
   ]);
 
   useEffect(() => {
@@ -498,6 +530,7 @@ export function CustomerChatProvider({ children }) {
       unreadChatCount,
       lastChatPreview,
       customerChatConversations,
+      customerConversationsLoading,
       fetchCustomerConversations,
     }),
     [
@@ -511,6 +544,7 @@ export function CustomerChatProvider({ children }) {
       unreadChatCount,
       lastChatPreview,
       customerChatConversations,
+      customerConversationsLoading,
       fetchCustomerConversations,
     ]
   );
@@ -548,6 +582,7 @@ export function useCustomerChat() {
     unreadChatCount: 0,
     lastChatPreview: null,
     customerChatConversations: [],
+    customerConversationsLoading: false,
     fetchCustomerConversations: async () => {},
   };
 }

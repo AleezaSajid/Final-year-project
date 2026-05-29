@@ -140,6 +140,7 @@ export default function TdDashboardOverview({
   acceptOrderIntoCurrentTasks,
   rejectOrderFromPending,
   tailorChatConversations = [],
+  tailorConversationsLoading = false,
 }) {
   const [expandedTaskId, setExpandedTaskId] = useState(null);
   const [rejectTarget, setRejectTarget] = useState(null);
@@ -673,6 +674,7 @@ export default function TdDashboardOverview({
             orders={orders}
             messagesPath="/tailor/messages"
             glassCardClass={TD_CHATS_SURFACE}
+            isLoading={tailorConversationsLoading}
           />
 
           <motion.section

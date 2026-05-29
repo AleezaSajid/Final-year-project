@@ -267,7 +267,10 @@ export function dedupeConversationsByOrderId(rows) {
 }
 
 /** Payload the server and clients both understand (string ids only). */
-export function buildOutgoingChatMessage({ senderId, receiverId, conversationId, content, status }) {
+export function buildOutgoingChatMessage({ senderId, receiverId, conversationId, content, status, clientTempId }) {
+  const tempId =
+    clientTempId ||
+    `ct-${Date.now()}-${Math.random().toString(36).slice(2, 11)}`;
   return {
     senderId: normalizeChatId(senderId),
     receiverId: normalizeChatId(receiverId),
@@ -275,5 +278,45 @@ export function buildOutgoingChatMessage({ senderId, receiverId, conversationId,
     content: String(content || "").trim(),
     timestamp: new Date().toISOString(),
     status: status || "sent",
+    clientTempId: tempId,
   };
+}
+
+/**
+ * Merge a socket/history message into the thread without dropping distinct rows that share content.
+ * Replaces the sender's optimistic pending row when the server ack arrives.
+ */
+export function mergeChatThreadMessage(prev, message, localSenderId) {
+  const list = Array.isArray(prev) ? prev : [];
+  const localSender = normalizeChatId(localSenderId);
+  const incomingSender = normalizeChatId(message?.senderId);
+
+  if (message?.id && list.some((m) => m.id && m.id === message.id)) {
+    return list;
+  }
+
+  if (message?.clientTempId) {
+    const ackIdx = list.findIndex((m) => m.clientTempId === message.clientTempId);
+    if (ackIdx >= 0) {
+      const next = [...list];
+      next[ackIdx] = { ...message, _pending: false };
+      return next;
+    }
+  }
+
+  if (incomingSender && incomingSender === localSender) {
+    const pendingIdx = list.findIndex(
+      (m) =>
+        m._pending &&
+        normalizeChatId(m.senderId) === localSender &&
+        m.content === message.content
+    );
+    if (pendingIdx >= 0) {
+      const next = [...list];
+      next[pendingIdx] = { ...message, _pending: false };
+      return next;
+    }
+  }
+
+  return [...list, message];
 }

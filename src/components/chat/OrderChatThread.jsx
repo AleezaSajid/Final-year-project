@@ -2,6 +2,7 @@
 import {
   buildOutgoingChatMessage,
   collectConversationAliasIds,
+  mergeChatThreadMessage,
   messageBelongsToOrderChat,
   normalizeChatId,
   normalizeConversationId,
@@ -39,10 +40,6 @@ import {
     if (key === todayKey) return "Today";
     if (key === dayKey(yesterday)) return "Yesterday";
     return d.toLocaleDateString([], { weekday: "long", month: "short", day: "numeric" });
-  }
-
-  function belongsToConversation(message, conversationKeys) {
-    return messageBelongsToOrderChat(message, conversationKeys);
   }
 
   /**
@@ -144,24 +141,15 @@ import {
         if (!messageMatchesActive(message)) {
           return;
         }
-        console.log("[ChatSync] message_received", {
+        console.log("[chat-sync] message_received", {
           id: message?.id,
           conversationId: message?.conversationId,
           clientOrderId: message?.clientOrderId,
-          aliases: conversationAliasesRef.current,
+          roomId: conversationAliasesRef.current[0] || activeConversationRef.current,
+          selectedConversationId: cId,
         });
 
-        setMessages((prev) => {
-          const keys = conversationAliasesRef.current;
-          const exists = prev.some(
-            (m) =>
-              (m.id && message.id && m.id === message.id) ||
-              (belongsToConversation(m, keys.length ? keys : activeConversationRef.current) &&
-                m.timestamp === message.timestamp &&
-                m.content === message.content)
-          );
-          return exists ? prev : [...prev, message];
-        });
+        setMessages((prev) => mergeChatThreadMessage(prev, message, sId));
       };
 
       const handleConversationJoined = (payload) => {
@@ -204,7 +192,13 @@ import {
         if (sId) {
           socket.emit("join_user", { userId: sId });
         }
-        console.log("[ChatSync] join room", { conversationId: joinId, mode, connected: socket.connected });
+        console.log("[chat-sync] joining room", {
+          conversationId: joinId,
+          mode,
+          roomId: joinId,
+          selectedConversationId: cId,
+          connected: socket.connected,
+        });
         socket.emit("join_conversation", { conversationId: joinId });
         if (clearMessages) setMessages([]);
         socket.emit("request_history", { conversationId: joinId });
@@ -236,19 +230,21 @@ import {
       if (!content) return;
       if (!cId || !sId || !rId) return;
 
-      const newMessage = buildOutgoingChatMessage({
+      const newMessage = { ...buildOutgoingChatMessage({
         senderId: sId,
         receiverId: rId,
         conversationId: cId,
         content,
         status: "sent",
-      });
+      }), _pending: true };
       setMessages((prev) => [...prev, newMessage]);
       setInputValue("");
       ensureSocketThen(() => {
-        console.log("[ChatSync] emit send_message", {
+        console.log("[chat-sync] message sent", {
           conversationId: newMessage.conversationId,
-          senderId: newMessage.senderId,
+          clientTempId: newMessage.clientTempId,
+          roomId: cId,
+          selectedConversationId: cId,
         });
         socket.emit("send_message", newMessage);
       });
