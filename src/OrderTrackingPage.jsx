@@ -103,7 +103,7 @@ function SewServeFooter() {
               <SiFacebook className="h-4 w-4 shrink-0" aria-hidden />
             </a>
             <a
-              href="https://instagram.com"
+              href="https://www.instagram.com/sewserve14"
               target="_blank"
               rel="noreferrer"
               aria-label="Instagram"

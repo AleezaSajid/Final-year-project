@@ -6,7 +6,6 @@ import {
   MapPinned,
   ShieldCheck,
   Mail,
-  Phone,
   MapPin,
   Scissors,
   UsersRound,
@@ -426,7 +425,7 @@ export default function SewServeLandingPage() {
                     <SiFacebook className="h-5 w-5" />
                   </a>
                   <a
-                    href="https://instagram.com"
+                    href="https://www.instagram.com/sewserve14"
                     target="_blank"
                     rel="noreferrer"
                     aria-label="Instagram"
@@ -520,19 +519,26 @@ export default function SewServeLandingPage() {
                   <li className="flex gap-2.5">
                     <Mail className="mt-0.5 h-4 w-4 shrink-0 text-slate-500" aria-hidden />
                     <a
-                      href="mailto:info@sewserve.com"
+                      href="mailto:sewserve14@gmail.com"
                       className="transition hover:text-slate-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-600/30"
                     >
-                      info@sewserve.com
+                      sewserve14@gmail.com
                     </a>
                   </li>
                   <li className="flex gap-2.5">
-                    <Phone className="mt-0.5 h-4 w-4 shrink-0 text-slate-500" aria-hidden />
-                    <span>Call Us: +1 234 567 8900</span>
+                    <SiInstagram className="mt-0.5 h-4 w-4 shrink-0 text-slate-500" aria-hidden />
+                    <a
+                      href="https://www.instagram.com/sewserve14"
+                      target="_blank"
+                      rel="noreferrer"
+                      className="transition hover:text-slate-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-600/30"
+                    >
+                      @sewserve14
+                    </a>
                   </li>
                   <li className="flex gap-2.5">
                     <MapPin className="mt-0.5 h-4 w-4 shrink-0 text-slate-500" aria-hidden />
-                    <span>Visit Us: 123 Tailor St, Suite 100, New York, NY 10001</span>
+                    <span>Lahore, Pakistan</span>
                   </li>
                 </ul>
                 <div className="mt-8 border-t border-slate-200/50 pt-6">
