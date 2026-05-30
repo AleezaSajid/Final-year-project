@@ -29,6 +29,8 @@ export default function LandingNavbar({
   onDashboardNavigate,
   /** When true, "Track Orders" sits in the center nav after Dashboard (customer dashboard mock). */
   trackOrdersInNavCenter = false,
+  /** Public marketing pages hide order tracking nav; route remains available after login. */
+  showTrackOrdersLink = false,
   /**
    * `landingGlass` (default) — fixed glassmorphism bar, airy blur + slight tint; tightens on scroll; layout spacer included.
    * `glass` — legacy static frosted bar (sticky), no scroll-driven change.
@@ -529,7 +531,7 @@ export default function LandingNavbar({
               </div>
             </div>
           )}
-          {trackOrdersInNavCenter && (
+          {showTrackOrdersLink && trackOrdersInNavCenter && (
             <button
               ref={setItemRef("track")}
               type="button"
@@ -556,7 +558,7 @@ export default function LandingNavbar({
           >
             For Women
           </button>
-          {!trackOrdersInNavCenter && (
+          {showTrackOrdersLink && !trackOrdersInNavCenter && (
             <button
               ref={setItemRef("track")}
               type="button"
@@ -698,20 +700,22 @@ export default function LandingNavbar({
             >
               For Women
             </button>
-            <button
-              type="button"
-              onClick={() => {
-                navigate("/track-orders");
-                handleCloseMobileMenu();
-              }}
-              aria-label="Track orders from mobile menu"
-              className={`rounded-lg px-3 py-2 text-left text-sm font-medium transition duration-200 ease-out hover:-translate-y-0.5 hover:bg-white/15 hover:text-[#4a7c59] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-600/25 focus-visible:ring-offset-2 ${
-                trackOrdersInNavCenter && isTrackOrdersActive ? "bg-white/20 font-semibold text-emerald-900" : "text-slate-600"
-              }`}
-              aria-current={isTrackOrdersActive ? "page" : undefined}
-            >
-              Track Orders
-            </button>
+            {showTrackOrdersLink ? (
+              <button
+                type="button"
+                onClick={() => {
+                  navigate("/track-orders");
+                  handleCloseMobileMenu();
+                }}
+                aria-label="Track orders from mobile menu"
+                className={`rounded-lg px-3 py-2 text-left text-sm font-medium transition duration-200 ease-out hover:-translate-y-0.5 hover:bg-white/15 hover:text-[#4a7c59] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-600/25 focus-visible:ring-offset-2 ${
+                  trackOrdersInNavCenter && isTrackOrdersActive ? "bg-white/20 font-semibold text-emerald-900" : "text-slate-600"
+                }`}
+                aria-current={isTrackOrdersActive ? "page" : undefined}
+              >
+                Track Orders
+              </button>
+            ) : null}
             <button
               type="button"
               onClick={() => {
