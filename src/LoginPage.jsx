@@ -587,6 +587,13 @@ export default function SignInPage() {
     document.title = "SewServe | Customer sign in";
   }, []);
 
+  useEffect(() => {
+    const msg = location.state?.message;
+    if (typeof msg === "string" && msg.trim()) {
+      setError(msg.trim());
+    }
+  }, [location.state]);
+
   const emailOk = isValidEmail(email);
   const passwordOk = String(password || "").length >= 6;
   const emailError = touched.email && !emailOk ? "Enter a valid email address." : "";

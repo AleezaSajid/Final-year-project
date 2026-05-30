@@ -23,6 +23,15 @@ import HowItWorksSplitSection from "./components/HowItWorksSplitSection.jsx";
 import { useSewServeLogoProcessedSrc } from "./hooks/useSewServeLogoProcessedSrc";
 import { fetchTestimonials } from "./api/testimonialsApi.js";
 import { openFreshMeasurementWizard } from "./utils/wizardNavigation.js";
+import { getUserRole } from "./utils/userRole.js";
+
+function readAuthToken() {
+  try {
+    return localStorage.getItem("sewserve_auth_token") || sessionStorage.getItem("sewserve_auth_token");
+  } catch {
+    return null;
+  }
+}
 const navLinks = [
   { label: "Home", sectionId: "home" },
   { label: "About", sectionId: "about" },
@@ -74,7 +83,7 @@ const features = [
     bannerLabel: "Order Tracking",
     description: "Stay updated from tailoring in progress to final delivery with live status updates.",
     icon: MapPinned,
-    route: "/track-orders#order-tracking",
+    action: "orderTracking",
   },
   {
     title: "Trusted Local Tailors",
@@ -121,6 +130,40 @@ export default function SewServeLandingPage() {
 
   const goToMeasurementWizard = () => {
     void openFreshMeasurementWizard(navigate);
+  };
+
+  const handleFeatureClick = (feature) => {
+    if (feature.action === "orderTracking") {
+      const token = readAuthToken();
+      if (!token) {
+        navigate("/login", {
+          state: {
+            message: "Please sign in to track your orders.",
+            from: "/customer/dashboard",
+          },
+        });
+        return;
+      }
+      const role = getUserRole();
+      if (role === "tailor") {
+        navigate("/tailor/orders");
+        return;
+      }
+      if (role === "customer") {
+        navigate("/customer/dashboard");
+        return;
+      }
+      navigate("/login", {
+        state: {
+          message: "Please sign in to track your orders.",
+          from: "/customer/dashboard",
+        },
+      });
+      return;
+    }
+    if (feature.route) {
+      navigate(feature.route);
+    }
   };
 
   useEffect(() => {
@@ -323,7 +366,7 @@ export default function SewServeLandingPage() {
                   <article
                     key={feature.title}
                     className="ss-glass-card group flex h-full cursor-pointer flex-col rounded-apple-card p-5 shadow-lg shadow-slate-900/5 transition-all duration-200 ease-out hover:-translate-y-0.5 hover:shadow-xl hover:shadow-slate-900/[0.08] sm:p-6"
-                    onClick={() => navigate(feature.route)}
+                    onClick={() => handleFeatureClick(feature)}
                   >
                     <div className={`flex w-full min-w-0 items-center gap-2.5 p-3 ${bannerClassName}`}>
                       <Icon
