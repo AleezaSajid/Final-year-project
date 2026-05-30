@@ -23,14 +23,15 @@ import HowItWorksSplitSection from "./components/HowItWorksSplitSection.jsx";
 import { useSewServeLogoProcessedSrc } from "./hooks/useSewServeLogoProcessedSrc";
 import { fetchTestimonials } from "./api/testimonialsApi.js";
 import { openFreshMeasurementWizard } from "./utils/wizardNavigation.js";
+import { useAuth } from "./context/AuthContext.jsx";
 import { getUserRole } from "./utils/userRole.js";
 
-function readAuthToken() {
-  try {
-    return localStorage.getItem("sewserve_auth_token") || sessionStorage.getItem("sewserve_auth_token");
-  } catch {
-    return null;
-  }
+function resolveSessionRole(authUser) {
+  const fromUser = authUser?.role ? String(authUser.role).trim().toLowerCase() : "";
+  if (fromUser === "customer" || fromUser === "tailor") return fromUser;
+  const stored = getUserRole();
+  if (stored === "customer" || stored === "tailor") return stored;
+  return "";
 }
 const navLinks = [
   { label: "Home", sectionId: "home" },
@@ -124,6 +125,7 @@ const sectionReveal = {
 export default function SewServeLandingPage() {
   const navigate = useNavigate();
   const location = useLocation();
+  const { user } = useAuth();
   const logoDisplaySrc = useSewServeLogoProcessedSrc(LOGO_SRC);
   const [newsletterEmail, setNewsletterEmail] = useState("");
   const [storedTestimonials, setStoredTestimonials] = useState([]);
@@ -134,17 +136,7 @@ export default function SewServeLandingPage() {
 
   const handleFeatureClick = (feature) => {
     if (feature.action === "orderTracking") {
-      const token = readAuthToken();
-      if (!token) {
-        navigate("/login", {
-          state: {
-            message: "Please sign in to track your orders.",
-            from: "/customer/dashboard",
-          },
-        });
-        return;
-      }
-      const role = getUserRole();
+      const role = resolveSessionRole(user);
       if (role === "tailor") {
         navigate("/tailor/orders");
         return;
